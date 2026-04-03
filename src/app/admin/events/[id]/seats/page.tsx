@@ -1,0 +1,698 @@
+'use client'
+
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useParams } from 'next/navigation'
+import { Card, CardContent } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Separator } from '@/components/ui/separator'
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+} from '@/components/ui/select'
+import { cn } from '@/lib/utils'
+import {
+  Loader2, Save, Check, X, Lock, Crown, DoorOpen, RotateCcw, Trash2, RefreshCw
+} from 'lucide-react'
+
+// =====================
+// Layout Data Types & Parser (shared with seat-map.tsx)
+// =====================
+interface ParsedLayout {
+  gridSize: { rows: number; cols: number }
+  rowLabels: string[]
+  sections: Array<{ name: string; fromRow: number; toRow: number; colorCode: string }>
+  aisleColumns: number[]
+  embeddedRows: Record<string, number> // source row index → target row index
+  displayRows: number[] // row indices to actually render (excludes embedded source rows)
+  rowSeatMap: Map<number, Array<{ c: number; seatNum: number }>>
+}
+
+const CATEGORY_CONFIG: Record<string, { icon: typeof Crown; label: string; defaultColor: string }> = {
+  VIP: { icon: Crown, label: 'VIP', defaultColor: '#C8A951' },
+  Regular: { icon: Lock, label: 'Regular', defaultColor: '#8B8680' },
+  Student: { icon: Crown, label: 'Student', defaultColor: '#7BA7A5' },
+}
+
+const SEAT_W = 28
+const SEAT_GAP = 3
+
+function parseLayoutData(layoutData: any): ParsedLayout | null {
+  if (!layoutData) return null
+  const data = typeof layoutData === 'string' ? JSON.parse(layoutData) : layoutData
+  if (!data || data.type !== 'NUMBERED' || !data.gridSize) return null
+
+  const rawSeats: any[] = data.seats || []
+  const rowLabels: string[] = data.rowLabels || []
+  const sections = data.sections || []
+  const aisleColumns: number[] = Array.isArray(data.aisleColumns) ? data.aisleColumns : []
+  const { rows, cols } = data.gridSize
+
+  // Group by row and assign seat numbers
+  const rowGroups: Record<number, any[]> = {}
+  for (const s of rawSeats) {
+    const r = s.r ?? s.row ?? 0
+    if (!rowGroups[r]) rowGroups[r] = []
+    rowGroups[r].push(s)
+  }
+
+  const rowSeatMap = new Map<number, Array<{ c: number; seatNum: number }>>()
+  for (const [rStr, rowSeats] of Object.entries(rowGroups)) {
+    const r = parseInt(rStr)
+    const sorted = [...rowSeats].sort((a: any, b: any) => (a.c ?? a.col ?? 0) - (b.c ?? b.col ?? 0))
+    rowSeatMap.set(r, sorted.map((s: any, idx: number) => ({
+      c: s.c ?? s.col ?? 0,
+      seatNum: idx + 1,
+    })))
+  }
+
+  // Use provided embeddedRows, or leave empty
+  let embeddedRows: Record<string, number> = data.embeddedRows || {}
+
+  // Determine which rows to display: skip source rows that are embedded elsewhere
+  const embeddedSourceRows = new Set(Object.keys(embeddedRows).map(Number))
+  const displayRows: number[] = []
+  for (let r = 0; r < rows; r++) {
+    if (!embeddedSourceRows.has(r)) {
+      displayRows.push(r)
+    }
+  }
+
+  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows }
+}
+
+interface SeatData {
+  id: string
+  seatCode: string
+  status: string
+  row: string
+  col: number
+  priceCategoryId: string | null
+  priceCategory: { id: string; name: string; price: number; colorCode: string } | null
+}
+
+interface PriceCategoryData {
+  id: string
+  name: string
+  price: number
+  colorCode: string
+}
+
+interface EventInfo {
+  id: string
+  title: string
+  seatMapId: string | null
+  seatType?: string
+}
+
+export default function SeatEditorPage() {
+  const params = useParams()
+  const eventId = params.id as string
+
+  const [seats, setSeats] = useState<SeatData[]>([])
+  const [priceCategories, setPriceCategories] = useState<PriceCategoryData[]>([])
+  const [eventInfo, setEventInfo] = useState<EventInfo | null>(null)
+  const [layoutData, setLayoutData] = useState<any>(null)
+  const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDeletingSeats, setIsDeletingSeats] = useState(false)
+
+  const isDraggingRef = useRef(false)
+  const dragModeRef = useRef<'select' | 'deselect'>('select')
+
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [seatsRes, eventRes] = await Promise.all([
+          fetch(`/api/events/${eventId}/seats`),
+          fetch(`/api/admin/events/${eventId}`),
+        ])
+
+        if (seatsRes.ok) {
+          const data = await seatsRes.json()
+          setSeats(data.seats || [])
+          setPriceCategories(data.priceCategories || [])
+        }
+
+        if (eventRes.ok) {
+          const data = await eventRes.json()
+          const ev = data.event || null
+          setEventInfo(ev)
+          // Fetch layoutData from the seat map
+          if (ev?.seatMapId) {
+            try {
+              const mapRes = await fetch(`/api/admin/seat-maps/${ev.seatMapId}`)
+              if (mapRes.ok) {
+                const mapData = await mapRes.json()
+                if (mapData.seatMap?.layoutData) {
+                  setLayoutData(mapData.seatMap.layoutData)
+                }
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch seats:', err)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    if (eventId) fetchData()
+  }, [eventId])
+
+  // ─── Parse layoutData for flat grid rendering (1:1 with seat map editor) ──
+  const parsedLayout = useMemo(() => parseLayoutData(layoutData), [layoutData])
+
+  // Build seat lookup by seatCode
+  const seatLookup = useMemo(() => {
+    const map = new Map<string, SeatData>()
+    for (const seat of seats) {
+      map.set(seat.seatCode, seat)
+    }
+    return map
+  }, [seats])
+
+  // ─── Build dynamic row layout (fallback for GA / no layoutData) ──────
+  const rowLayout = useMemo(() => {
+    if (seats.length === 0) return []
+    if (parsedLayout) return [] // Use parsedLayout instead
+
+    const rowMap = new Map<string, SeatData[]>()
+    for (const seat of seats) {
+      if (!rowMap.has(seat.row)) rowMap.set(seat.row, [])
+      rowMap.get(seat.row)!.push(seat)
+    }
+
+    const rowEntries = [...rowMap.entries()].sort((a, b) => {
+      if (a[0].length === 1 && b[0].length === 1) return a[0].localeCompare(b[0])
+      return (a[1][0]?.col || 0) - (b[1][0]?.col || 0)
+    })
+
+    return rowEntries.map(([rowName, rowSeats]) => {
+      const sorted = [...rowSeats].sort((a, b) => a.col - b.col)
+      return { rowName, seats: sorted, totalSeats: sorted.length }
+    })
+  }, [seats, parsedLayout])
+
+  // ─── Check if GA (General Admission) type ───────────────────────────
+  const isGA = useMemo(() => {
+    if (parsedLayout) return false // layoutData means NUMBERED
+    if (seats.length === 0) return false
+    const uniqueRows = new Set(seats.map(s => s.row))
+    return uniqueRows.size <= 5 && seats.length / uniqueRows.size > 10
+  }, [seats, parsedLayout])
+
+  // ─── Mouse handlers ─────────────────────────────────────────────────
+  const handleMouseDown = useCallback((seat: SeatData) => {
+    if (selectedSeatCodes.has(seat.seatCode)) {
+      dragModeRef.current = 'deselect'
+      setSelectedSeatCodes((prev) => {
+        const next = new Set(prev)
+        next.delete(seat.seatCode)
+        return next
+      })
+    } else {
+      dragModeRef.current = 'select'
+      setSelectedSeatCodes((prev) => new Set(prev).add(seat.seatCode))
+    }
+    isDraggingRef.current = true
+  }, [selectedSeatCodes])
+
+  const handleMouseEnter = useCallback((seat: SeatData) => {
+    if (!isDraggingRef.current) return
+
+    if (dragModeRef.current === 'select') {
+      setSelectedSeatCodes((prev) => new Set(prev).add(seat.seatCode))
+    } else {
+      setSelectedSeatCodes((prev) => {
+        const next = new Set(prev)
+        next.delete(seat.seatCode)
+        return next
+      })
+    }
+  }, [])
+
+  const handleMouseUp = useCallback(() => {
+    isDraggingRef.current = false
+  }, [])
+
+  useEffect(() => {
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => window.removeEventListener('mouseup', handleMouseUp)
+  }, [handleMouseUp])
+
+  const clearSelection = () => setSelectedSeatCodes(new Set())
+
+  const selectAll = () => {
+    setSelectedSeatCodes(new Set(seats.map((s) => s.seatCode)))
+  }
+
+  // ─── Seat operations ────────────────────────────────────────────────
+  async function assignPriceCategory(priceCategoryId: string) {
+    if (selectedSeatCodes.size === 0) return
+
+    setIsSaving(true)
+    try {
+      const updatedSeats = seats.map((s) =>
+        selectedSeatCodes.has(s.seatCode)
+          ? { ...s, priceCategoryId, priceCategory: priceCategories.find((pc) => pc.id === priceCategoryId) || null }
+          : s
+      )
+
+      const res = await fetch(`/api/admin/events/${eventId}/seats`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seats: updatedSeats
+            .filter((s) => selectedSeatCodes.has(s.seatCode))
+            .map((s) => ({
+              seatCode: s.seatCode,
+              status: s.status,
+              priceCategoryId: s.priceCategoryId,
+            })),
+        }),
+      })
+
+      if (res.ok) {
+        setSeats(updatedSeats)
+        clearSelection()
+      }
+    } catch (err) {
+      console.error('Assign error:', err)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  async function setSeatStatus(status: string) {
+    if (selectedSeatCodes.size === 0) return
+
+    setIsSaving(true)
+    try {
+      const updatedSeats = seats.map((s) =>
+        selectedSeatCodes.has(s.seatCode) ? { ...s, status } : s
+      )
+
+      const res = await fetch(`/api/admin/events/${eventId}/seats`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seats: updatedSeats
+            .filter((s) => selectedSeatCodes.has(s.seatCode))
+            .map((s) => ({
+              seatCode: s.seatCode,
+              status: s.status,
+              priceCategoryId: s.priceCategoryId,
+            })),
+        }),
+      })
+
+      if (res.ok) {
+        setSeats(updatedSeats)
+        clearSelection()
+      }
+    } catch (err) {
+      console.error('Status update error:', err)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  // ─── Delete & Regenerate ────────────────────────────────────────────
+  async function handleDeleteAndRegenerate() {
+    const confirmed = confirm(
+      `Hapus semua ${seats.length} kursi?\n\nEvent akan kembali ke keadaan belum generate kursi. Kamu bisa generate ulang dari halaman Events.`
+    )
+    if (!confirmed) return
+
+    setIsDeletingSeats(true)
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/seats`, { method: 'DELETE' })
+      if (res.ok) {
+        setSeats([])
+        setSelectedSeatCodes(new Set())
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Gagal menghapus kursi')
+      }
+    } catch (err) {
+      console.error('Delete error:', err)
+    } finally {
+      setIsDeletingSeats(false)
+    }
+  }
+
+  // ─── Seat styling ───────────────────────────────────────────────────
+  const getSeatStyle = (seat: SeatData) => {
+    const isSelected = selectedSeatCodes.has(seat.seatCode)
+
+    switch (seat.status) {
+      case 'SOLD':
+        return 'bg-seat-sold text-white'
+      case 'LOCKED_TEMPORARY':
+        return 'bg-seat-locked text-white'
+      case 'INVITATION':
+        return 'bg-seat-invitation text-white'
+      case 'UNAVAILABLE':
+        return 'bg-gray-300 opacity-40'
+      default:
+        if (isSelected) return 'bg-gold text-charcoal ring-2 ring-gold ring-offset-1'
+        return 'bg-white border-2'
+    }
+  }
+
+  const getSeatBorderColor = (seat: SeatData) => {
+    if (seat.status !== 'AVAILABLE' || selectedSeatCodes.has(seat.seatCode)) return 'transparent'
+    return seat.priceCategory?.colorCode || '#C8A951'
+  }
+
+  // ─── Render seat button ─────────────────────────────────────────────
+  const renderSeatButton = (seat: SeatData | undefined, seatCode?: string, displayNum?: number) => {
+    if (!seat) {
+      // Empty placeholder — position in layoutData but no seat generated
+      return (
+        <div
+          key={seatCode || 'empty'}
+          style={{ width: SEAT_W, height: SEAT_W }}
+          className="shrink-0 rounded-md bg-gray-100/50 border border-dashed border-gray-200/60 flex items-center justify-center text-[8px] text-gray-300"
+        >
+          {displayNum}
+        </div>
+      )
+    }
+
+    const num = displayNum ?? seat.col
+    return (
+      <button
+        key={seat.id}
+        onMouseDown={(e) => { if (e.button === 0) handleMouseDown(seat) }}
+        onMouseEnter={() => handleMouseEnter(seat)}
+        className={cn(
+          'shrink-0 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-100 select-none cursor-pointer',
+          getSeatStyle(seat)
+        )}
+        style={{
+          width: SEAT_W,
+          height: SEAT_W,
+          ...(seat.status === 'AVAILABLE' && !selectedSeatCodes.has(seat.seatCode)
+            ? { borderColor: getSeatBorderColor(seat) }
+            : {}),
+        }}
+        title={`${seat.seatCode} | ${seat.priceCategory?.name || '-'} | ${seat.status}`}
+      >
+        {seat.status === 'SOLD' && <Check className="w-3 h-3" />}
+        {seat.status === 'LOCKED_TEMPORARY' && <Lock className="w-3 h-3" />}
+        {seat.status === 'UNAVAILABLE' && <X className="w-3 h-3" />}
+        {seat.status === 'INVITATION' && <Crown className="w-3 h-3" />}
+        {(seat.status === 'AVAILABLE' || selectedSeatCodes.has(seat.seatCode)) && num}
+      </button>
+    )
+  }
+
+  // ─── Loading & Empty states ─────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-6 h-6 text-gold animate-spin" />
+      </div>
+    )
+  }
+
+  if (seats.length === 0) {
+    return (
+      <div className="text-center py-20">
+        <p className="text-muted-foreground">Belum ada kursi untuk event ini.</p>
+        <p className="text-xs text-muted-foreground/50 mt-1">Generate kursi dari halaman Events terlebih dahulu.</p>
+        <a href="/admin/events" className="text-gold underline text-sm mt-4 inline-block">
+          ← Kembali ke Events
+        </a>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="font-serif text-2xl font-bold text-charcoal">Seat Map Editor</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            {eventInfo?.title && <span className="font-medium">{eventInfo.title}</span>}
+            {' — '}
+            {seats.length} kursi
+            {selectedSeatCodes.size > 0
+              ? ` — ${selectedSeatCodes.size} dipilih`
+              : ' — Klik dan drag untuk memilih'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={selectAll}>
+            <Check className="w-3 h-3 mr-1" />
+            Pilih Semua
+          </Button>
+          <Button variant="outline" size="sm" onClick={clearSelection} disabled={selectedSeatCodes.size === 0}>
+            <RotateCcw className="w-3 h-3 mr-1" />
+            Reset
+          </Button>
+        </div>
+      </div>
+
+      {/* Toolbar */}
+      {selectedSeatCodes.size > 0 && (
+        <Card className="border-gold/20 animate-fade-in">
+          <CardContent className="p-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium text-charcoal">
+                Assign ke:
+              </span>
+              <Select onValueChange={assignPriceCategory}>
+                <SelectTrigger className="w-40 h-8 text-sm">
+                  <SelectValue placeholder="Kategori Harga" />
+                </SelectTrigger>
+                <SelectContent>
+                  {priceCategories.map((pc) => (
+                    <SelectItem key={pc.id} value={pc.id}>
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: pc.colorCode }} />
+                        {pc.name} (Rp {pc.price.toLocaleString('id-ID')})
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Separator orientation="vertical" className="h-6" />
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSeatStatus('INVITATION')}
+                disabled={isSaving}
+                className="text-xs"
+              >
+                <Crown className="w-3 h-3 mr-1" />
+                Undangan
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSeatStatus('UNAVAILABLE')}
+                disabled={isSaving}
+                className="text-xs"
+              >
+                <X className="w-3 h-3 mr-1" />
+                Tidak Tersedia
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSeatStatus('AVAILABLE')}
+                disabled={isSaving}
+                className="text-xs"
+              >
+                Tersedia
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Seat Grid — Dynamic Layout from actual data */}
+      <div className="bg-white rounded-xl p-6 border border-border/50">
+        <div className="max-w-4xl mx-auto">
+          {/* Stage */}
+          <div className="mb-6">
+            <div className="bg-charcoal rounded-xl py-4 px-8 text-center stage-glow border border-gold/20">
+              <p className="font-serif text-gold text-lg tracking-[0.3em] font-semibold">
+                S T A G E
+              </p>
+              <p className="font-serif text-gold/60 text-xs tracking-[0.2em] mt-1">
+                T E A T E R &nbsp; R E N D R A
+              </p>
+            </div>
+          </div>
+
+          {/* Entrance */}
+          <div className="flex items-center justify-center gap-2 mb-4 text-muted-foreground">
+            <DoorOpen className="w-4 h-4" />
+            <span className="text-xs tracking-widest uppercase">Entrance</span>
+            <DoorOpen className="w-4 h-4" />
+          </div>
+
+          {/* Grid */}
+          <div className="overflow-x-auto pb-4">
+            <div className="min-w-[320px]">
+              {parsedLayout ? (
+                /* ─── Flat Grid: 1:1 with seat map editor ────────────── */
+                (() => {
+                  const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections } = parsedLayout
+                  const { cols } = gridSize
+                  const aisleColumns = parsedLayout.aisleColumns || []
+
+                  // Build reverse map: target row → source rows
+                  const embeddedInto: Record<number, number[]> = {}
+                  for (const [srcStr, tgt] of Object.entries(embeddedRows)) {
+                    const src = parseInt(srcStr)
+                    if (!embeddedInto[tgt]) embeddedInto[tgt] = []
+                    embeddedInto[tgt].push(src)
+                  }
+
+                  // Build grid lookup: displayRow → col → { seatCode, seatNum }
+                  const gridLookup = new Map<number, Map<number, { seatCode: string; seatNum: number }>>()
+                  for (const ri of displayRows) {
+                    const colMap = new Map<number, { seatCode: string; seatNum: number }>()
+                    const rowSeats = rowSeatMap.get(ri) || []
+                    for (const s of rowSeats) {
+                      const label = lLabels[ri] || String.fromCharCode(65 + ri)
+                      colMap.set(s.c, { seatCode: `${label}-${s.seatNum}`, seatNum: s.seatNum })
+                    }
+                    const srcRows = embeddedInto[ri] || []
+                    for (const srcRi of srcRows) {
+                      const srcSeats = rowSeatMap.get(srcRi) || []
+                      const srcLabel = lLabels[srcRi] || String.fromCharCode(65 + srcRi)
+                      for (const s of srcSeats) {
+                        colMap.set(s.c, { seatCode: `${srcLabel}-${s.seatNum}`, seatNum: s.seatNum })
+                      }
+                    }
+                    gridLookup.set(ri, colMap)
+                  }
+
+                  const CELL_TOTAL = SEAT_W + SEAT_GAP
+                  const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+
+                  const getRowColor = (rowIdx: number) => {
+                    const section = sections.find(s => rowIdx >= s.fromRow && rowIdx <= s.toRow)
+                    if (section) return CATEGORY_CONFIG[section.name]?.defaultColor || section.colorCode
+                    return '#8B8680'
+                  }
+
+                  return (
+                    <div className="mx-auto" style={{ minWidth: gridW }}>
+                      {displayRows.map((ri) => {
+                        const label = lLabels[ri] || String.fromCharCode(65 + ri)
+                        const colMap = gridLookup.get(ri) || new Map()
+                        const rowColor = getRowColor(ri)
+
+                        return (
+                          <div
+                            key={ri}
+                            className="flex items-center mb-[3px]"
+                            style={{ height: SEAT_W }}
+                          >
+                            <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                              {label}
+                            </div>
+                            <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
+                              {Array.from({ length: cols }, (_, c) => {
+                                if (aisleColumns.includes(c)) {
+                                  return (
+                                    <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5" style={{ width: 2, height: SEAT_W * 0.6 }} />
+                                  )
+                                }
+                                const seatInfo = colMap.get(c)
+                                if (seatInfo) {
+                                  const seatData = seatLookup.get(seatInfo.seatCode)
+                                  return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum)
+                                }
+                                return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+                              })}
+                            </div>
+                            <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                              {label}
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()
+              ) : isGA ? (
+                /* ─── GA Layout: zones as rows ─────────────────────────── */
+                <div className="space-y-4">
+                  {rowLayout.map((row) => (
+                    <div key={row.rowName}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-6 text-center text-xs font-semibold font-serif text-muted-foreground">
+                          {row.rowName}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          ({row.totalSeats} kursi)
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1 ml-8">
+                        {(row as any).seats.map((seat: SeatData) => renderSeatButton(seat, undefined, undefined))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                /* ─── Fallback: simple row list ────────────────────────── */
+                <>
+                  {rowLayout.map((row) => (
+                    <div key={row.rowName} className="flex items-center gap-1 mb-1">
+                      <div className="w-6 text-center text-xs font-semibold font-serif text-muted-foreground shrink-0">
+                        {row.rowName}
+                      </div>
+                      <div className="flex gap-1">
+                        {(row as any).seats.map((seat: SeatData, i: number) => renderSeatButton(seat, undefined, i + 1))}
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Danger Zone */}
+      <Card className="border-danger/20">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-danger">Hapus Semua Kursi</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Hapus semua kursi event ini untuk regenerate ulang dari seat map.
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDeleteAndRegenerate}
+              disabled={isDeletingSeats}
+              className="text-danger border-danger/30 hover:bg-danger/10"
+            >
+              {isDeletingSeats ? (
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+              ) : (
+                <Trash2 className="w-3 h-3 mr-1" />
+              )}
+              Hapus Kursi
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
