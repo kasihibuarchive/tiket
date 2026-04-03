@@ -4,8 +4,8 @@ import { generateTicketPdf } from '@/lib/generate-ticket-pdf'
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.MAIL_USER,
-    pass: process.env.MAIL_PASS,
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 })
 
@@ -116,7 +116,7 @@ export async function sendETicketEmail(data: EmailTicketData) {
   `
 
   await transporter.sendMail({
-    from: `"Teater Rendra" <${process.env.MAIL_USER}>`,
+    from: `"Teater Rendra" <${process.env.EMAIL_USER}>`,
     to: data.customerEmail,
     subject: 'E-TIKET TEATER RENDRA',
     html,

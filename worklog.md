@@ -65,3 +65,21 @@ Stage Summary:
 - Gateway root cause: standalone Next.js doesn't auto-load .env - must explicitly pass env vars to daemon process
 - Server running on port 3000 with Midtrans env vars properly loaded
 - Key files modified: checkout-form.tsx, canvas-editor.tsx, admin/events/[id]/seats/page.tsx
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix login credentials & email tidak terkirim
+
+Work Log:
+- Investigated auth system: credentials validated against Supabase PostgreSQL DB (not local SQLite)
+- Found root cause login: admin/admin123 existed but usher1 was never created. Seed API hardcoded role as 'admin'.
+- Found root cause email: `.env` uses `EMAIL_USER`/`EMAIL_PASS` but code reads `MAIL_USER`/`MAIL_PASS`
+- Fixed `src/lib/email.ts`: Changed `MAIL_USER`→`EMAIL_USER` and `MAIL_PASS`→`EMAIL_PASS`
+- Fixed `src/app/api/admin/auth/seed/route.ts`: Added `role` parameter support so usher users can be created
+- Re-seeded admin/admin123 and created usher1/usher123 with role 'usher' via seed API
+- Built, restarted server, verified both logins work
+
+Stage Summary:
+- Login fix: ✅ admin/admin123 and usher1/usher123 both login successfully
+- Email fix: ✅ env var mismatch corrected (EMAIL_USER/EMAIL_PASS now matches code)
+- Seed API: ✅ Now supports role parameter for creating usher accounts

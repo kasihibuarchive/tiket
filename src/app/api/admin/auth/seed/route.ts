@@ -6,7 +6,7 @@ import { db } from '@/lib/db'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { username, password, name } = body
+    const { username, password, name, role } = body
 
     if (!username || !password) {
       return NextResponse.json(
@@ -33,11 +33,11 @@ export async function POST(request: NextRequest) {
       // Reset password for existing account
       await db.admin.update({
         where: { id: existing.id },
-        data: { password: hashedPassword, name: name || username },
+        data: { password: hashedPassword, name: name || username, role: role || 'admin' },
       })
       return NextResponse.json({
         message: 'Password berhasil direset',
-        admin: { id: existing.id, username, name: name || username },
+        admin: { id: existing.id, username, name: name || username, role: role || 'admin' },
       })
     }
 
@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
         username,
         password: hashedPassword,
         name: name || username,
-        role: 'admin',
+        role: role || 'admin',
       },
     })
 
