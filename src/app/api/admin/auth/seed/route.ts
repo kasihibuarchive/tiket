@@ -27,14 +27,19 @@ export async function POST(request: NextRequest) {
       select: { id: true },
     })
 
-    if (existing) {
-      return NextResponse.json(
-        { error: 'Username sudah digunakan' },
-        { status: 409 }
-      )
-    }
-
     const hashedPassword = hashPassword(password)
+
+    if (existing) {
+      // Reset password for existing account
+      await db.admin.update({
+        where: { id: existing.id },
+        data: { password: hashedPassword, name: name || username },
+      })
+      return NextResponse.json({
+        message: 'Password berhasil direset',
+        admin: { id: existing.id, username, name: name || username },
+      })
+    }
 
     const admin = await db.admin.create({
       data: {
