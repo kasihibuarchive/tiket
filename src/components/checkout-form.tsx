@@ -247,12 +247,21 @@ export function CheckoutForm({ eventId, selectedSeats, totalPrice, onBack, admin
   }
 
   const openSnapPopup = (token: string, transactionId: string) => {
+    // Helper: unlock seats on error so user can retry
+    const releaseOnFailure = () => {
+      fetch('/api/seats/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatCodes, sessionId }),
+      }).catch(() => {})
+    }
+
     if (typeof window !== 'undefined' && window.snap) {
       window.snap.pay(token, {
         onSuccess: () => router.push('/verify/' + transactionId),
         onPending: () => router.push('/verify/' + transactionId),
-        onError: () => { setError('Pembayaran gagal. Coba lagi.'); setIsLoading(false) },
-        onClose: () => setIsLoading(false),
+        onError: () => { setError('Pembayaran gagal. Coba lagi.'); setIsLoading(false); releaseOnFailure() },
+        onClose: () => { setIsLoading(false); releaseOnFailure() },
       })
     } else {
       let attempts = 0
@@ -263,13 +272,14 @@ export function CheckoutForm({ eventId, selectedSeats, totalPrice, onBack, admin
           window.snap.pay(token, {
             onSuccess: () => router.push('/verify/' + transactionId),
             onPending: () => router.push('/verify/' + transactionId),
-            onError: () => { setError('Pembayaran gagal'); setIsLoading(false) },
-            onClose: () => setIsLoading(false),
+            onError: () => { setError('Pembayaran gagal'); setIsLoading(false); releaseOnFailure() },
+            onClose: () => { setIsLoading(false); releaseOnFailure() },
           })
         } else if (attempts > 50) {
           clearInterval(waitForSnap)
           setError('Payment gateway tidak tersedia. Refresh halaman.')
           setIsLoading(false)
+          releaseOnFailure()
         }
       }, 200)
     }

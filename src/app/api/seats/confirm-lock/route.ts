@@ -47,7 +47,21 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // 3. ATOMIC LOCK — whoever executes this updateMany FIRST wins the seats.
+    // 3. Idempotency check: if ALL seats are already locked by THIS checkout session, allow retry
+    const alreadyOurs = seats.filter(
+      (s) => s.status === 'LOCKED_TEMPORARY' && s.lockedBy === checkoutId
+    )
+    if (alreadyOurs.length === seatCodes.length) {
+      // Extend lock time and return success (idempotent retry)
+      const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+      await db.seat.updateMany({
+        where: { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId },
+        data: { lockedUntil },
+      })
+      return NextResponse.json({ ok: true, confirmedSeats: seatCodes })
+    }
+
+    // 4. ATOMIC LOCK — whoever executes this updateMany FIRST wins the seats.
     // 
     // Lock seats that are:
     //   - NOT SOLD (already checked above)

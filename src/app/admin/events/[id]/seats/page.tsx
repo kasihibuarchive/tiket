@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import {
-  Loader2, Save, Check, X, Lock, Crown, DoorOpen, RotateCcw, Trash2, RefreshCw
+  Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw
 } from 'lucide-react'
 
 // =====================
@@ -531,13 +531,6 @@ export default function SeatEditorPage() {
                 T E A T E R &nbsp; R E N D R A
               </p>
             </div>
-          </div>
-
-          {/* Entrance */}
-          <div className="flex items-center justify-center gap-2 mb-4 text-muted-foreground">
-            <DoorOpen className="w-4 h-4" />
-            <span className="text-xs tracking-widest uppercase">Entrance</span>
-            <DoorOpen className="w-4 h-4" />
           </div>
 
           {/* Grid */}

@@ -1106,14 +1106,6 @@ export function CanvasEditor({
     </div>
   )
 
-  const renderEntrance = () => (
-    <div className="flex items-center justify-center gap-2 mb-3 text-muted-foreground">
-      <DoorOpen className="w-3.5 h-3.5" />
-      <span className="text-[10px] tracking-widest uppercase">Entrance</span>
-      <DoorOpen className="w-3.5 h-3.5" />
-    </div>
-  )
-
   // ─── NUMBERED Grid Render ──────────────
   const renderNumberedGrid = () => {
     try {
@@ -1923,7 +1915,6 @@ export function CanvasEditor({
             >
               <div className="p-4 sm:p-6">
                 {renderStageBar()}
-                {renderEntrance()}
 
                 {/* Grid container */}
                 <div

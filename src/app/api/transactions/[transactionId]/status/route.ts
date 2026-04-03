@@ -80,7 +80,7 @@ export async function GET(
         seatCodes.map((code) =>
           db.seat.updateMany({
             where: { eventId: transaction.eventId, seatCode: code },
-            data: { status: 'SOLD', lockedUntil: null },
+            data: { status: 'SOLD', lockedUntil: null, lockedBy: null },
           })
         )
       )
@@ -144,7 +144,7 @@ export async function GET(
         seatCodes.map((code) =>
           db.seat.updateMany({
             where: { eventId: transaction.eventId, seatCode: code },
-            data: { status: 'AVAILABLE', lockedUntil: null },
+            data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
           })
         )
       )

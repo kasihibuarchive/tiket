@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  DoorOpen, Check, X, Crown, User, GraduationCap, Loader2,
+  Check, X, Crown, User, GraduationCap, Loader2,
   ArrowLeft, Mail, Phone, Hash, Clock, CreditCard, Users, ChevronRight
 } from 'lucide-react'
 
@@ -311,13 +311,6 @@ export default function UsherSeatMapPage() {
                       T E A T E R &nbsp; R E N D R A
                     </p>
                   </div>
-                </div>
-
-                {/* Entrance */}
-                <div className="flex items-center justify-center gap-2 mb-4 text-muted-foreground">
-                  <DoorOpen className="w-4 h-4" />
-                  <span className="text-xs tracking-widest uppercase">Entrance</span>
-                  <DoorOpen className="w-4 h-4" />
                 </div>
 
                 {/* Seat Grid */}

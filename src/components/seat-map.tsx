@@ -391,9 +391,15 @@ export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutD
         if (!Array.isArray(data)) return
         setSeats((prev) =>
           prev.map((s) => {
+            if (selectedSeatCodes.has(s.seatCode)) return s
             const fresh = data.find((f: any) => f.id === s.id)
             if (!fresh) return s
-            if (selectedSeatCodes.has(s.seatCode)) return s
+            // Don't downgrade LOCKED_TEMPORARY to AVAILABLE from a stale poll.
+            // The WebSocket reports locks instantly; the DB may lag behind.
+            // Only override LOCKED_TEMPORARY if the DB says it's SOLD or UNAVAILABLE.
+            if (s.status === 'LOCKED_TEMPORARY' && fresh.status === 'AVAILABLE') {
+              return s // keep the WebSocket lock, ignore stale DB
+            }
             if (fresh.status !== s.status || fresh.lockedUntil !== s.lockedUntil) {
               return { ...s, status: fresh.status, lockedUntil: fresh.lockedUntil }
             }
@@ -693,13 +699,6 @@ export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutD
           </div>
         </div>
 
-        {/* Entrance */}
-        <div className="flex items-center justify-center gap-2 mb-4 text-muted-foreground">
-          <DoorOpen className="w-4 h-4" />
-          <span className="text-xs tracking-widest uppercase">Entrance</span>
-          <DoorOpen className="w-4 h-4" />
-        </div>
-
         {/* Lock rejection notice */}
         {lockRejectionMsg && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
@@ -903,13 +902,6 @@ export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutD
             T E A T E R &nbsp; R E N D R A
           </p>
         </div>
-      </div>
-
-      {/* Entrance */}
-      <div className="flex items-center justify-center gap-2 mb-4 text-muted-foreground">
-        <DoorOpen className="w-4 h-4" />
-        <span className="text-xs tracking-widest uppercase">Entrance</span>
-        <DoorOpen className="w-4 h-4" />
       </div>
 
       {/* Lock rejection notice */}

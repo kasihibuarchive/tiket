@@ -19,21 +19,24 @@ export async function PUT(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    // Process each seat — group by status for bulk updates to avoid for-await loops
-    const seatCodes = seats.map((s: { seatCode: string }) => s.seatCode)
-    
-    // Simple approach: update all in one batch (they all get same status from admin)
-    // For mixed statuses, group them
-    const statusGroups: Record<string, string[]> = {}
+    // Process each seat — group by (status + priceCategoryId) for bulk updates
+    const key = (s: Record<string, unknown>) =>
+      `${s.status}|${s.priceCategoryId ?? 'null'}`
+    const groups: Record<string, typeof seats> = {}
     for (const seat of seats) {
-      const status = seat.status
-      if (!statusGroups[status]) statusGroups[status] = []
-      statusGroups[status].push(seat.seatCode)
+      const k = key(seat)
+      if (!groups[k]) groups[k] = []
+      groups[k].push(seat)
     }
 
-    for (const [status, codes] of Object.entries(statusGroups)) {
-      const data: Record<string, unknown> = { status }
-      if (status !== 'LOCKED_TEMPORARY') data.lockedUntil = null
+    for (const group of Object.values(groups)) {
+      const codes = group.map((s: { seatCode: string }) => s.seatCode)
+      const sample = group[0] as Record<string, unknown>
+      const data: Record<string, unknown> = { status: sample.status }
+      if (sample.status !== 'LOCKED_TEMPORARY') data.lockedUntil = null
+      if (sample.priceCategoryId !== undefined && sample.priceCategoryId !== null) {
+        data.priceCategoryId = sample.priceCategoryId
+      }
       await db.seat.updateMany({
         where: { eventId: id, seatCode: { in: codes } },
         data,
