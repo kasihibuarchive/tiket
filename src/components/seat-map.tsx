@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { cleanupExpiredLocks } from '@/lib/seat-cleanup'
 import { getSessionId } from '@/lib/session-id'
 import { useSeatSocket } from '@/lib/socket'
+import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
 
 // =====================
 // Types
@@ -53,167 +54,7 @@ const LOCK_DURATION = 10 * 60 * 1000 // 10 minutes
 const SEAT_W = 28 // px per seat
 const SEAT_GAP = 3 // px gap between seats in a block
 
-// =====================
-// Layout Data Parser
-// =====================
-interface ParsedLayout {
-  gridSize: { rows: number; cols: number }
-  rowLabels: string[]
-  sections: Array<{ name: string; fromRow: number; toRow: number; colorCode: string }>
-  aisleColumns: number[]
-  rowSeatMap: Map<number, Array<{ c: number; seatNum: number; block?: string }>>
-  embeddedRows: Record<string, number> // source row index → target row index
-  displayRows: number[] // row indices to actually render (excludes embedded source rows)
-}
 
-/**
- * Infer blocks for a row based on column position patterns.
- * Detects center rows (small cluster in middle) vs left+right rows (gap in middle).
- */
-function inferBlocksForRow(
-  rowSeats: Array<{ c: number }>
-): Array<string> {
-  if (rowSeats.length === 0) return []
-
-  const sorted = [...rowSeats].sort((a, b) => a.c - b.c)
-  const n = sorted.length
-
-  // Find the largest gap between consecutive seats
-  let maxGap = 0
-  let maxGapIdx = -1
-  for (let i = 1; i < n; i++) {
-    const gap = sorted[i].c - sorted[i - 1].c - 1
-    if (gap > maxGap) {
-      maxGap = gap
-      maxGapIdx = i
-    }
-  }
-
-  // Small row (<=4 seats) with no big gap → check if centered in grid
-  if (n <= 4 && maxGap <= 2) {
-    return sorted.map(() => 'center')
-  }
-
-  // Large gap (>=4 empty columns) → split into left/right at that gap
-  if (maxGap >= 4) {
-    return sorted.map((_, i) => (i < maxGapIdx ? 'left' : 'right'))
-  }
-
-  // Medium gap (2-3 empty columns) between groups → split there
-  if (maxGap >= 2 && maxGapIdx > 0 && maxGapIdx < n) {
-    return sorted.map((_, i) => (i < maxGapIdx ? 'left' : 'right'))
-  }
-
-  // No significant gap but wide span → split at midpoint by column
-  const minC = sorted[0].c
-  const maxC = sorted[n - 1].c
-  const midCol = (minC + maxC) / 2
-  return sorted.map((s) => (s.c <= midCol ? 'left' : 'right'))
-}
-
-function inferEmbeddedRows(
-  rowSeatMap: Map<number, Array<{ c: number; seatNum: number; block?: string }>>,
-  totalRows: number,
-  cols: number
-): Record<string, number> {
-  // Detect rows that should be embedded into the next row below.
-  // Strategy: find consecutive center-only rows at the top, then assign
-  // each one to the next available left+right row in order.
-  const embedded: Record<string, number> = {}
-  const maxEmbedSearch = Math.min(6, totalRows)
-
-  // Step 1: collect all candidate "embeddable" rows (small center-only rows at top)
-  const candidates: number[] = []
-  for (let r = 0; r < maxEmbedSearch; r++) {
-    const rowSeats = rowSeatMap.get(r)
-    if (!rowSeats || rowSeats.length === 0) continue
-    const blocks = inferBlocksForRow(rowSeats)
-    const allCenter = blocks.every((b) => b === 'center')
-    if (allCenter && rowSeats.length <= 4) {
-      candidates.push(r)
-    } else {
-      break // stop at first non-center row
-    }
-  }
-
-  if (candidates.length === 0) return embedded
-
-  // Step 2: find target rows (left+right rows) starting after the last candidate
-  const lastCandidate = candidates[candidates.length - 1]
-  const targets: number[] = []
-  for (let tr = lastCandidate + 1; tr < totalRows; tr++) {
-    const targetSeats = rowSeatMap.get(tr)
-    if (!targetSeats || targetSeats.length === 0) continue
-    const targetBlocks = inferBlocksForRow(targetSeats)
-    if (targetBlocks.includes('left') && targetBlocks.includes('right')) {
-      targets.push(tr)
-    }
-    if (targets.length >= candidates.length) break
-  }
-
-  // Step 3: pair candidates with targets (1:1, in order)
-  for (let i = 0; i < Math.min(candidates.length, targets.length); i++) {
-    embedded[String(candidates[i])] = targets[i]
-  }
-
-  return embedded
-}
-
-function parseLayoutData(layoutData: any): ParsedLayout | null {
-  if (!layoutData) return null
-  const data = typeof layoutData === 'string' ? JSON.parse(layoutData) : layoutData
-  if (!data || data.type !== 'NUMBERED' || !data.gridSize) return null
-
-  const rawSeats: any[] = data.seats || []
-  const rowLabels: string[] = data.rowLabels || []
-  const sections = data.sections || []
-  const aisleColumns: number[] = Array.isArray(data.aisleColumns) ? data.aisleColumns : []
-  const { rows, cols } = data.gridSize
-
-  // Group by row and assign seat numbers
-  const rowGroups: Record<number, any[]> = {}
-  for (const s of rawSeats) {
-    const r = s.r ?? s.row ?? 0
-    if (!rowGroups[r]) rowGroups[r] = []
-    rowGroups[r].push(s)
-  }
-
-  const rowSeatMap = new Map<number, Array<{ c: number; seatNum: number; block?: string }>>()
-  for (const [rStr, rowSeats] of Object.entries(rowGroups)) {
-    const r = parseInt(rStr)
-    const sorted = [...rowSeats].sort((a: any, b: any) => (a.c ?? a.col ?? 0) - (b.c ?? b.col ?? 0))
-
-    // If all seats in this row have explicit block, use them. Otherwise infer.
-    const allHaveBlock = sorted.every((s: any) => s.block)
-    let inferredBlocks: string[] | null = null
-    if (!allHaveBlock) {
-      inferredBlocks = inferBlocksForRow(sorted.map((s: any) => ({ c: s.c ?? s.col ?? 0 })))
-    }
-
-    rowSeatMap.set(r, sorted.map((s: any, idx: number) => ({
-      c: s.c ?? s.col ?? 0,
-      seatNum: idx + 1,
-      block: s.block || (inferredBlocks ? inferredBlocks[idx] : undefined),
-    })))
-  }
-
-  // Use provided embeddedRows, or infer if missing/empty
-  let embeddedRows: Record<string, number> = data.embeddedRows || {}
-  if (Object.keys(embeddedRows).length === 0) {
-    embeddedRows = inferEmbeddedRows(rowSeatMap, rows, cols)
-  }
-
-  // Determine which rows to display: skip source rows that are embedded elsewhere
-  const embeddedSourceRows = new Set(Object.keys(embeddedRows).map(Number))
-  const displayRows: number[] = []
-  for (let r = 0; r < rows; r++) {
-    if (!embeddedSourceRows.has(r)) {
-      displayRows.push(r)
-    }
-  }
-
-  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows }
-}
 
 // =====================
 // Seat Map Component
@@ -237,7 +78,7 @@ export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutD
   }, [onSelectionChange])
 
   // Parse layoutData
-  const parsedLayout = useMemo(() => parseLayoutData(layoutData), [layoutData])
+  const parsedLayout = useMemo(() => parseLayoutData(layoutData), [layoutData]) as ParsedLayout | null
 
   // Build seat lookup by seatCode (state-derived, not ref, to avoid render-time ref access)
   const seatLookup = useMemo(() => {

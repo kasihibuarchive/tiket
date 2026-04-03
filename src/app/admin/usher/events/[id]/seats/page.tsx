@@ -1,14 +1,15 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
 import {
   Check, X, Crown, User, GraduationCap, Loader2,
-  ArrowLeft, Mail, Phone, Hash, Clock, CreditCard, Users, ChevronRight, Send
+  ArrowLeft, Mail, Phone, Hash, Clock, CreditCard, Users, Send
 } from 'lucide-react'
 
 // =====================
@@ -53,21 +54,8 @@ interface EventData {
   category: string
   showDate: string
   location: string
+  seatMapLayout?: any
 }
-
-// Seat layout configuration (same as public seat map)
-const ROW_CONFIG = [
-  { row: 'A', count: 8, category: 'VIP' },
-  { row: 'B', count: 8, category: 'VIP' },
-  { row: 'C', count: 10, category: 'VIP' },
-  { row: 'D', count: 10, category: 'Regular' },
-  { row: 'E', count: 10, category: 'Regular' },
-  { row: 'F', count: 10, category: 'Regular' },
-  { row: 'G', count: 10, category: 'Student' },
-  { row: 'H', count: 10, category: 'Student' },
-  { row: 'I', count: 12, category: 'Student' },
-  { row: 'J', count: 12, category: 'Student' },
-]
 
 // Category display config
 const CATEGORY_CONFIG: Record<string, { icon: typeof Crown; label: string; defaultColor: string }> = {
@@ -76,6 +64,12 @@ const CATEGORY_CONFIG: Record<string, { icon: typeof Crown; label: string; defau
   Student: { icon: GraduationCap, label: 'Student', defaultColor: '#7BA7A5' },
 }
 
+const SEAT_W = 28
+const SEAT_GAP = 3
+
+// =====================
+// Component
+// =====================
 export default function UsherSeatMapPage() {
   const params = useParams()
   const router = useRouter()
@@ -91,6 +85,18 @@ export default function UsherSeatMapPage() {
   const [error, setError] = useState<string | null>(null)
   const [isResending, setIsResending] = useState(false)
   const [resendResult, setResendResult] = useState<{ success: boolean; message: string } | null>(null)
+
+  // Parse layout data from event's seat map
+  const parsedLayout = useMemo(() => parseLayoutData(event?.seatMapLayout), [event?.seatMapLayout]) as ParsedLayout | null
+
+  // Seat lookup by seatCode
+  const seatLookup = useMemo(() => {
+    const map = new Map<string, SeatData>()
+    for (const seat of seats) {
+      map.set(seat.seatCode, seat)
+    }
+    return map
+  }, [seats])
 
   // Fetch seats, event, and price categories
   useEffect(() => {
@@ -117,9 +123,9 @@ export default function UsherSeatMapPage() {
           category: eventData.category,
           showDate: eventData.showDate,
           location: eventData.location,
+          seatMapLayout: eventData.seatMapLayout || null,
         })
 
-        // Parse usher seats info
         if (infoRes.ok) {
           const infoData = await infoRes.json()
           setSeatOwnerMap(infoData.seats || {})
@@ -133,7 +139,7 @@ export default function UsherSeatMapPage() {
 
     fetchData()
 
-    // Auto-refresh seats every 5 seconds
+    // Auto-refresh every 5 seconds
     const interval = setInterval(async () => {
       try {
         const [seatsRes, infoRes] = await Promise.all([
@@ -150,13 +156,12 @@ export default function UsherSeatMapPage() {
           const infoData = await infoRes.json()
           setSeatOwnerMap(infoData.seats || {})
 
-          // Refresh selected seat info if it's still selected
           if (selectedSeatCode && infoData.seats?.[selectedSeatCode]) {
             setSelectedSeat(infoData.seats[selectedSeatCode])
           }
         }
       } catch {
-        // Silently ignore refresh errors
+        // silent
       }
     }, 5000)
 
@@ -179,10 +184,9 @@ export default function UsherSeatMapPage() {
     }
   }, [seatOwnerMap])
 
-  // Handle resend email
+  // Resend email
   async function handleResendEmail() {
     if (!selectedSeat?.transactionId) return
-
     setIsResending(true)
     setResendResult(null)
 
@@ -190,13 +194,10 @@ export default function UsherSeatMapPage() {
       const res = await fetch('/api/usher/resend-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transactionId: selectedSeat.transactionId,
-        }),
+        body: JSON.stringify({ transactionId: selectedSeat.transactionId }),
       })
 
       const data = await res.json()
-
       if (res.ok) {
         setResendResult({ success: true, message: 'E-tiket berhasil dikirim ulang!' })
       } else {
@@ -220,9 +221,7 @@ export default function UsherSeatMapPage() {
   const getSeatColor = (seat: SeatData) => {
     if (seat.status === 'SOLD') {
       const ownerInfo = seatOwnerMap[seat.seatCode]
-      if (ownerInfo?.checkInTime) {
-        return 'bg-success'
-      }
+      if (ownerInfo?.checkInTime) return 'bg-success'
       return 'bg-seat-sold'
     }
     if (seat.status === 'LOCKED_TEMPORARY') return 'bg-seat-locked'
@@ -232,16 +231,71 @@ export default function UsherSeatMapPage() {
   }
 
   const getSeatBorderColor = (seat: SeatData) => {
-    if (seat.status === 'AVAILABLE') {
-      return seat.priceCategory?.colorCode || '#C8A951'
-    }
+    if (seat.status === 'AVAILABLE') return seat.priceCategory?.colorCode || '#C8A951'
     return 'transparent'
   }
 
-  const getRowColor = (row: string) => {
-    const config = ROW_CONFIG.find((r) => r.row === row)
-    if (!config) return '#8B8680'
-    return CATEGORY_CONFIG[config.category]?.defaultColor || '#8B8680'
+  const getRowColorFromSections = (rowIdx: number) => {
+    if (!parsedLayout) return '#8B8680'
+    const section = parsedLayout.sections.find((s: any) => rowIdx >= s.fromRow && rowIdx <= s.toRow)
+    if (section) return CATEGORY_CONFIG[section.name]?.defaultColor || section.colorCode
+    return '#8B8680'
+  }
+
+  // ── Render seat button (shared by both modes) ──
+  const renderSeatButton = (seatData: SeatData | undefined, seatCode: string, displayNum: number, key: string) => {
+    if (!seatData) {
+      return <div key={key} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+    }
+
+    const isSold = seatData.status === 'SOLD'
+    const isLocked = seatData.status === 'LOCKED_TEMPORARY'
+    const isUnavailable = seatData.status === 'UNAVAILABLE'
+    const isInvitation = seatData.status === 'INVITATION'
+    const isClickable = isSold || isInvitation
+    const isSelected = selectedSeatCode === seatCode
+
+    return (
+      <button
+        key={key}
+        onClick={() => isClickable && handleSeatClick(seatData)}
+        className={cn(
+          'shrink-0 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200',
+          getSeatColor(seatData),
+          isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
+          !isClickable && 'cursor-default',
+          isUnavailable && 'opacity-20',
+          (isSold || isInvitation) && 'text-white',
+          isLocked && 'text-white',
+          isSelected && 'ring-2 ring-gold ring-offset-1'
+        )}
+        style={{
+          width: SEAT_W,
+          height: SEAT_W,
+          ...(seatData.status === 'AVAILABLE' ? { borderColor: getSeatBorderColor(seatData) } : {}),
+        }}
+        title={
+          (isSold || isInvitation)
+            ? `${seatCode} — Klik untuk detail`
+            : isLocked
+            ? `${seatCode} — Dikunci`
+            : seatData.status === 'AVAILABLE'
+            ? `${seatCode} — Tersedia`
+            : `${seatCode}`
+        }
+      >
+        {isSold && <Check className="w-3 h-3" />}
+        {isLocked && <span className="text-[8px]">⏳</span>}
+        {isUnavailable && <X className="w-3 h-3" />}
+        {isInvitation && <span className="text-[8px]">🎉</span>}
+        {!isSold && !isLocked && !isUnavailable && !isInvitation && (
+          <span className="sm:hidden">{displayNum}</span>
+        )}
+        {!isSold && !isLocked && !isUnavailable && !isInvitation && (
+          <span className="hidden sm:inline">{displayNum}</span>
+        )}
+      </button>
+    )
   }
 
   // Loading state
@@ -260,12 +314,7 @@ export default function UsherSeatMapPage() {
     return (
       <div className="text-center py-20">
         <p className="text-danger text-sm">{error || 'Event tidak ditemukan'}</p>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.back()}
-          className="mt-3"
-        >
+        <Button variant="ghost" size="sm" onClick={() => router.back()} className="mt-3">
           <ArrowLeft className="w-4 h-4 mr-1" />
           Kembali
         </Button>
@@ -273,6 +322,132 @@ export default function UsherSeatMapPage() {
     )
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // RENDER: LayoutData Mode — Flat Grid (1:1 with editor)
+  // ═══════════════════════════════════════════════════════════
+  let seatGridContent: React.ReactNode
+
+  if (parsedLayout) {
+    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows } = parsedLayout
+    const { cols } = gridSize
+    const aisleColumns: number[] = parsedLayout.aisleColumns || []
+
+    // Build reverse map: target row → source rows
+    const embeddedInto: Record<number, number[]> = {}
+    for (const [srcStr, tgt] of Object.entries(embeddedRows)) {
+      const src = parseInt(srcStr)
+      if (!embeddedInto[tgt]) embeddedInto[tgt] = []
+      embeddedInto[tgt].push(src)
+    }
+
+    // Build grid lookup: displayRow → col → { seatCode, seatNum }
+    const gridLookup = new Map<number, Map<number, { seatCode: string; seatNum: number }>>()
+    for (const ri of displayRows) {
+      const colMap = new Map<number, { seatCode: string; seatNum: number }>()
+
+      const rowSeats = rowSeatMap.get(ri) || []
+      for (const s of rowSeats) {
+        const label = lLabels[ri] || String.fromCharCode(65 + ri)
+        colMap.set(s.c, { seatCode: `${label}-${s.seatNum}`, seatNum: s.seatNum })
+      }
+
+      const srcRows = embeddedInto[ri] || []
+      for (const srcRi of srcRows) {
+        const srcSeats = rowSeatMap.get(srcRi) || []
+        const srcLabel = lLabels[srcRi] || String.fromCharCode(65 + srcRi)
+        for (const s of srcSeats) {
+          colMap.set(s.c, { seatCode: `${srcLabel}-${s.seatNum}`, seatNum: s.seatNum })
+        }
+      }
+
+      gridLookup.set(ri, colMap)
+    }
+
+    const CELL_TOTAL = SEAT_W + SEAT_GAP
+    const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+
+    seatGridContent = (
+      <div className="mx-auto" style={{ minWidth: gridW }}>
+        {displayRows.map((ri) => {
+          const label = lLabels[ri] || String.fromCharCode(65 + ri)
+          const colMap = gridLookup.get(ri) || new Map()
+          const rowColor = getRowColorFromSections(ri)
+
+          return (
+            <div key={ri} className="flex items-center mb-[3px]" style={{ height: SEAT_W }}>
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                {label}
+              </div>
+              <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
+                {Array.from({ length: cols }, (_, c) => {
+                  if (aisleColumns.includes(c)) {
+                    return (
+                      <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5"
+                        style={{ width: 2, height: SEAT_W * 0.6 }} />
+                    )
+                  }
+
+                  const seatInfo = colMap.get(c)
+                  if (seatInfo) {
+                    const seatData = seatLookup.get(seatInfo.seatCode)
+                    return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum, `${ri}-${c}`)
+                  }
+
+                  return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+                })}
+              </div>
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                {label}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  } else {
+    // ═══════════════════════════════════════════════════════════
+    // RENDER: Fallback — Dynamic from DB seats (no seat map editor)
+    // ═══════════════════════════════════════════════════════════
+    const groups: Record<string, SeatData[]> = {}
+    for (const seat of seats) {
+      if (!groups[seat.row]) groups[seat.row] = []
+      groups[seat.row].push(seat)
+    }
+    for (const row of Object.keys(groups)) {
+      groups[row].sort((a, b) => a.col - b.col)
+    }
+    const sortedRowKeys = Object.keys(groups).sort()
+
+    seatGridContent = (
+      <div className="min-w-[320px]">
+        {sortedRowKeys.map((row) => {
+          const rowSeats = groups[row]
+          const catName = rowSeats[0]?.priceCategory?.name
+          const rowColor = catName ? (CATEGORY_CONFIG[catName]?.defaultColor || '#8B8680') : '#8B8680'
+
+          return (
+            <div key={row} className="flex items-center gap-1 mb-1">
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                {row}
+              </div>
+              <div className="flex gap-1 justify-center flex-1 flex-wrap">
+                {rowSeats.map((seat) => {
+                  return renderSeatButton(seat, seat.seatCode, seat.col, seat.seatCode)
+                })}
+              </div>
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                {row}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // FULL RENDER
+  // ═══════════════════════════════════════════════════════════
   return (
     <div className="space-y-6">
       {/* Page Header */}
@@ -340,7 +515,7 @@ export default function UsherSeatMapPage() {
         <div className="lg:col-span-2">
           <Card className="border-border/50">
             <CardContent className="p-4 sm:p-6">
-              <div className="w-full max-w-3xl mx-auto">
+              <div className="w-full max-w-5xl mx-auto">
                 {/* Stage */}
                 <div className="relative mb-6">
                   <div className="bg-charcoal rounded-xl py-5 px-8 text-center stage-glow border border-gold/20">
@@ -355,146 +530,8 @@ export default function UsherSeatMapPage() {
 
                 {/* Seat Grid */}
                 <div className="overflow-x-auto pb-4">
-                  <div className="min-w-[320px]">
-                    {ROW_CONFIG.map((rowConfig) => (
-                      <div key={rowConfig.row} className="flex items-center gap-1 mb-1">
-                        {/* Row Label */}
-                        <div
-                          className="w-6 text-center text-xs font-semibold font-serif shrink-0"
-                          style={{ color: getRowColor(rowConfig.row) }}
-                        >
-                          {rowConfig.row}
-                        </div>
-
-                        {/* Left Section */}
-                        <div className="flex gap-1 justify-center flex-1">
-                          {Array.from({ length: Math.ceil(rowConfig.count / 2) }, (_, i) => {
-                            const seatCode = `${rowConfig.row}-${i + 1}`
-                            const seat = seats.find((s) => s.seatCode === seatCode)
-                            if (!seat) return <div key={seatCode} className="w-7 h-7 sm:w-8 sm:h-8" />
-
-                            const isSold = seat.status === 'SOLD'
-                            const isLocked = seat.status === 'LOCKED_TEMPORARY'
-                            const isUnavailable = seat.status === 'UNAVAILABLE'
-                            const isInvitation = seat.status === 'INVITATION'
-                            const isClickable = isSold || isInvitation
-                            const isSelected = selectedSeatCode === seatCode
-
-                            return (
-                              <button
-                                key={seatCode}
-                                onClick={() => handleSeatClick(seat)}
-                                className={cn(
-                                  'w-7 h-7 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200',
-                                  getSeatColor(seat),
-                                  isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
-                                  !isClickable && 'cursor-default',
-                                  isUnavailable && 'opacity-20',
-                                  (isSold || isInvitation) && 'text-white',
-                                  isLocked && 'text-white',
-                                  isSelected && 'ring-2 ring-gold ring-offset-1'
-                                )}
-                                style={
-                                  seat.status === 'AVAILABLE'
-                                    ? { borderColor: getSeatBorderColor(seat) }
-                                    : undefined
-                                }
-                                title={
-                                  isSold || isInvitation
-                                    ? `${seatCode} — Klik untuk detail`
-                                    : isLocked
-                                    ? `${seatCode} — Dikunci`
-                                    : seat.status === 'AVAILABLE'
-                                    ? `${seatCode} — Tersedia`
-                                    : `${seatCode}`
-                                }
-                              >
-                                {isSold && <Check className="w-3 h-3" />}
-                                {isLocked && <span className="text-[8px]">⏳</span>}
-                                {isUnavailable && <X className="w-3 h-3" />}
-                                {isInvitation && <span className="text-[8px]">🎉</span>}
-                                {!isSold && !isLocked && !isUnavailable && !isInvitation && (
-                                  <span className="sm:hidden">{i + 1}</span>
-                                )}
-                                {!isSold && !isLocked && !isUnavailable && !isInvitation && (
-                                  <span className="hidden sm:inline">{i + 1}</span>
-                                )}
-                              </button>
-                            )
-                          })}
-                        </div>
-
-                        {/* Aisle */}
-                        <div className="w-6 sm:w-8 shrink-0" />
-
-                        {/* Right Section */}
-                        <div className="flex gap-1 justify-center flex-1">
-                          {Array.from({ length: Math.floor(rowConfig.count / 2) }, (_, i) => {
-                            const seatNum = Math.ceil(rowConfig.count / 2) + i + 1
-                            const seatCode = `${rowConfig.row}-${seatNum}`
-                            const seat = seats.find((s) => s.seatCode === seatCode)
-                            if (!seat) return <div key={seatCode} className="w-7 h-7 sm:w-8 sm:h-8" />
-
-                            const isSold = seat.status === 'SOLD'
-                            const isLocked = seat.status === 'LOCKED_TEMPORARY'
-                            const isUnavailable = seat.status === 'UNAVAILABLE'
-                            const isInvitation = seat.status === 'INVITATION'
-                            const isClickable = isSold || isInvitation
-                            const isSelected = selectedSeatCode === seatCode
-
-                            return (
-                              <button
-                                key={seatCode}
-                                onClick={() => handleSeatClick(seat)}
-                                className={cn(
-                                  'w-7 h-7 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200',
-                                  getSeatColor(seat),
-                                  isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
-                                  !isClickable && 'cursor-default',
-                                  isUnavailable && 'opacity-20',
-                                  (isSold || isInvitation) && 'text-white',
-                                  isLocked && 'text-white',
-                                  isSelected && 'ring-2 ring-gold ring-offset-1'
-                                )}
-                                style={
-                                  seat.status === 'AVAILABLE'
-                                    ? { borderColor: getSeatBorderColor(seat) }
-                                    : undefined
-                                }
-                                title={
-                                  isSold || isInvitation
-                                    ? `${seatCode} — Klik untuk detail`
-                                    : isLocked
-                                    ? `${seatCode} — Dikunci`
-                                    : seat.status === 'AVAILABLE'
-                                    ? `${seatCode} — Tersedia`
-                                    : `${seatCode}`
-                                }
-                              >
-                                {isSold && <Check className="w-3 h-3" />}
-                                {isLocked && <span className="text-[8px]">⏳</span>}
-                                {isUnavailable && <X className="w-3 h-3" />}
-                                {isInvitation && <span className="text-[8px]">🎉</span>}
-                                {!isSold && !isLocked && !isUnavailable && !isInvitation && (
-                                  <span className="sm:hidden">{seatNum}</span>
-                                )}
-                                {!isSold && !isLocked && !isUnavailable && !isInvitation && (
-                                  <span className="hidden sm:inline">{seatNum}</span>
-                                )}
-                              </button>
-                            )
-                          })}
-                        </div>
-
-                        {/* Row Label Right */}
-                        <div
-                          className="w-6 text-center text-xs font-semibold font-serif shrink-0"
-                          style={{ color: getRowColor(rowConfig.row) }}
-                        >
-                          {rowConfig.row}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="min-w-[320px] px-2">
+                    {seatGridContent}
                   </div>
                 </div>
 
@@ -588,7 +625,6 @@ export default function UsherSeatMapPage() {
                   </div>
                 </div>
 
-                {/* Divider */}
                 <div className="zen-divider" />
 
                 {/* Transaction Details */}
@@ -635,11 +671,8 @@ export default function UsherSeatMapPage() {
                         </Badge>
                         <p className="text-[10px] text-muted-foreground">
                           {new Date(selectedSeat.checkInTime).toLocaleString('id-ID', {
-                            day: 'numeric',
-                            month: 'short',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
+                            day: 'numeric', month: 'short', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit',
                           })}
                         </p>
                       </div>
@@ -655,18 +688,15 @@ export default function UsherSeatMapPage() {
                       <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Waktu Bayar</p>
                       <p className="text-xs text-muted-foreground">
                         {new Date(selectedSeat.paidAt).toLocaleString('id-ID', {
-                          day: 'numeric',
-                          month: 'short',
-                          year: 'numeric',
-                          hour: '2-digit',
-                          minute: '2-digit',
+                          day: 'numeric', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
                         })}
                       </p>
                     </div>
                   )}
                 </div>
 
-                {/* Resend Email Button */}
+                {/* Resend Email */}
                 <div className="pt-2 space-y-3">
                   <Button
                     onClick={handleResendEmail}
@@ -675,18 +705,11 @@ export default function UsherSeatMapPage() {
                     size="sm"
                   >
                     {isResending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Mengirim...
-                      </>
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengirim...</>
                     ) : (
-                      <>
-                        <Send className="w-4 h-4 mr-2" />
-                        Kirim Ulang E-Tiket
-                      </>
+                      <><Send className="w-4 h-4 mr-2" />Kirim Ulang E-Tiket</>
                     )}
                   </Button>
-
                   {resendResult && (
                     <p className={cn(
                       'text-xs text-center py-1.5 px-3 rounded-md',
@@ -708,9 +731,7 @@ export default function UsherSeatMapPage() {
                     <Users className="w-6 h-6 text-muted-foreground/40" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-muted-foreground">
-                      Detail Penonton
-                    </p>
+                    <p className="text-sm font-medium text-muted-foreground">Detail Penonton</p>
                     <p className="text-xs text-muted-foreground/60 mt-1">
                       Klik kursi yang <span className="font-semibold">terjual</span> atau <span className="font-semibold">undangan</span> untuk melihat informasi
                     </p>
