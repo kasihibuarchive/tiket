@@ -1341,9 +1341,18 @@ export function CanvasEditor({
               <div className="w-6 shrink-0" />
             </div>
           )}
-          {/* Non-clickable objects overlay — inside grid wrapper so it scrolls with columns */}
+          {/* Non-clickable objects overlay — inside scroll container so it scrolls with columns on mobile */}
           {objects.length > 0 && (
-            <ObjectsOverlay objects={objects} cellSize={CELL_SIZE + 2} offsetX={26} />
+            <div
+              className="relative pointer-events-none"
+              style={{
+                height: 0,
+                marginLeft: 24, // w-6 = 24px, align with cells column
+                minWidth: cols * (CELL_SIZE + 2),
+              }}
+            >
+              <ObjectsOverlay objects={objects} cellSize={CELL_SIZE + 2} />
+            </div>
           )}
         </div>
       </div>

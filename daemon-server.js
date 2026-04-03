@@ -92,6 +92,41 @@ try {
   }
 } catch {}
 
+// Step 3.5: Ensure static files and public dir are available in standalone
+const standaloneDir = path.join(__dirname, '.next', 'standalone');
+const staticSrc = path.join(__dirname, '.next', 'static');
+const staticDst = path.join(standaloneDir, '.next', 'static');
+const publicSrc = path.join(__dirname, 'public');
+const publicDst = path.join(standaloneDir, 'public');
+
+try {
+  if (!fs.existsSync(staticDst) || fs.statSync(staticSrc).mtimeMs > fs.statSync(staticDst).mtimeMs) {
+    execSync(`cp -r ${staticSrc} ${staticDst}`, { timeout: 10000 });
+    log(`Copied .next/static to standalone dir`);
+  }
+} catch (e) {
+  try {
+    execSync(`cp -r ${staticSrc} ${staticDst}`, { timeout: 10000 });
+    log(`Copied .next/static to standalone dir (fallback)`);
+  } catch (e2) {
+    log(`WARNING: Failed to copy static files: ${e2.message}`);
+  }
+}
+
+try {
+  if (!fs.existsSync(publicDst) || fs.statSync(publicSrc).mtimeMs > fs.statSync(publicDst).mtimeMs) {
+    execSync(`cp -r ${publicSrc} ${publicDst}`, { timeout: 10000 });
+    log(`Copied public to standalone dir`);
+  }
+} catch (e) {
+  try {
+    execSync(`cp -r ${publicSrc} ${publicDst}`, { timeout: 10000 });
+    log(`Copied public to standalone dir (fallback)`);
+  } catch (e2) {
+    log(`WARNING: Failed to copy public dir: ${e2.message}`);
+  }
+}
+
 // Step 4: Start the standalone server
 const logFd = fs.openSync(LOG_FILE, 'a');
 

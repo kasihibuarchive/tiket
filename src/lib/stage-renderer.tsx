@@ -261,19 +261,15 @@ export function ObjectsOverlay({
   objects,
   cellSize = 28,
   className,
-  offsetX = 0,
-  offsetY = 0,
 }: {
   objects?: Array<{ id: string; type: string; label: string; r: number; c: number; w: number; h: number; color: string }>
   cellSize?: number
   className?: string
-  offsetX?: number
-  offsetY?: number
 }) {
   if (!objects || objects.length === 0) return null
 
   return (
-    <div className={cn('absolute inset-0 pointer-events-none', className)} style={{ left: offsetX, top: offsetY }}>
+    <div className={cn('absolute pointer-events-none', className)} style={{ top: 0, left: 0 }}>
       {objects.map((obj) => (
         <div
           key={obj.id}
