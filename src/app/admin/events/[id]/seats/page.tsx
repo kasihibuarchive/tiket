@@ -116,6 +116,7 @@ export default function SeatEditorPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeletingSeats, setIsDeletingSeats] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   const isDraggingRef = useRef(false)
   const dragModeRef = useRef<'select' | 'deselect'>('select')
@@ -248,72 +249,54 @@ export default function SeatEditorPage() {
     setSelectedSeatCodes(new Set(seats.map((s) => s.seatCode)))
   }
 
-  // ─── Seat operations ────────────────────────────────────────────────
-  async function assignPriceCategory(priceCategoryId: string) {
+  // ─── Seat operations (local state only — use Simpan button to persist) ─
+  function assignPriceCategory(priceCategoryId: string) {
     if (selectedSeatCodes.size === 0) return
-
-    setIsSaving(true)
-    try {
-      const updatedSeats = seats.map((s) =>
+    setSeats((prev) =>
+      prev.map((s) =>
         selectedSeatCodes.has(s.seatCode)
           ? { ...s, priceCategoryId, priceCategory: priceCategories.find((pc) => pc.id === priceCategoryId) || null }
           : s
       )
-
-      const res = await fetch(`/api/admin/events/${eventId}/seats`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          seats: updatedSeats
-            .filter((s) => selectedSeatCodes.has(s.seatCode))
-            .map((s) => ({
-              seatCode: s.seatCode,
-              status: s.status,
-              priceCategoryId: s.priceCategoryId,
-            })),
-        }),
-      })
-
-      if (res.ok) {
-        setSeats(updatedSeats)
-        clearSelection()
-      }
-    } catch (err) {
-      console.error('Assign error:', err)
-    } finally {
-      setIsSaving(false)
-    }
+    )
+    setHasUnsavedChanges(true)
+    clearSelection()
   }
 
-  async function setSeatStatus(status: string) {
+  function setSeatStatus(status: string) {
     if (selectedSeatCodes.size === 0) return
-
-    setIsSaving(true)
-    try {
-      const updatedSeats = seats.map((s) =>
+    setSeats((prev) =>
+      prev.map((s) =>
         selectedSeatCodes.has(s.seatCode) ? { ...s, status } : s
       )
+    )
+    setHasUnsavedChanges(true)
+    clearSelection()
+  }
 
+  // ─── Save all changes to server ───────────────────────────────────
+  async function saveAllChanges() {
+    setIsSaving(true)
+    try {
       const res = await fetch(`/api/admin/events/${eventId}/seats`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          seats: updatedSeats
-            .filter((s) => selectedSeatCodes.has(s.seatCode))
-            .map((s) => ({
-              seatCode: s.seatCode,
-              status: s.status,
-              priceCategoryId: s.priceCategoryId,
-            })),
+          seats: seats.map((s) => ({
+            seatCode: s.seatCode,
+            status: s.status,
+            priceCategoryId: s.priceCategoryId,
+          })),
         }),
       })
-
       if (res.ok) {
-        setSeats(updatedSeats)
-        clearSelection()
+        setHasUnsavedChanges(false)
+      } else {
+        alert('Gagal menyimpan. Coba lagi.')
       }
     } catch (err) {
-      console.error('Status update error:', err)
+      console.error('Save error:', err)
+      alert('Gagal menyimpan. Coba lagi.')
     } finally {
       setIsSaving(false)
     }
@@ -447,6 +430,27 @@ export default function SeatEditorPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {hasUnsavedChanges && (
+            <span className="text-xs text-amber-600 font-medium hidden sm:inline">● Ada perubahan belum disimpan</span>
+          )}
+          <Button
+            size="sm"
+            onClick={saveAllChanges}
+            disabled={isSaving || !hasUnsavedChanges}
+            className={cn(
+              "text-sm",
+              hasUnsavedChanges
+                ? "bg-gold hover:bg-gold/90 text-charcoal font-semibold"
+                : "bg-muted text-muted-foreground"
+            )}
+          >
+            {isSaving ? (
+              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+            ) : (
+              <Save className="w-3.5 h-3.5 mr-1.5" />
+            )}
+            Simpan
+          </Button>
           <Button variant="outline" size="sm" onClick={selectAll}>
             <Check className="w-3 h-3 mr-1" />
             Pilih Semua
@@ -488,7 +492,6 @@ export default function SeatEditorPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => setSeatStatus('INVITATION')}
-                disabled={isSaving}
                 className="text-xs"
               >
                 <Crown className="w-3 h-3 mr-1" />
@@ -498,7 +501,6 @@ export default function SeatEditorPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => setSeatStatus('UNAVAILABLE')}
-                disabled={isSaving}
                 className="text-xs"
               >
                 <X className="w-3 h-3 mr-1" />
@@ -508,7 +510,6 @@ export default function SeatEditorPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => setSeatStatus('AVAILABLE')}
-                disabled={isSaving}
                 className="text-xs"
               >
                 Tersedia

@@ -251,6 +251,13 @@ export async function POST(request: NextRequest) {
     // DO NOT send item_details when discount is applied to avoid mismatch
     // Midtrans validates sum(item_details) === gross_amount; if mismatch, it may override
     const serverKey = process.env.MIDTRANS_SERVER_KEY || ''
+    if (!serverKey) {
+      console.error('[checkout] MIDTRANS_SERVER_KEY is not configured in .env')
+      return NextResponse.json(
+        { error: 'Payment gateway belum dikonfigurasi. Hubungi admin untuk mengatur API key Midtrans.' },
+        { status: 503 }
+      )
+    }
     const auth = Buffer.from(serverKey + ':').toString('base64')
     const snapUrl = 'https://app.sandbox.midtrans.com/snap/v1/transactions'
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
