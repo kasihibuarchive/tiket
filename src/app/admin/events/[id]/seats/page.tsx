@@ -13,6 +13,7 @@ import { cn } from '@/lib/utils'
 import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw
 } from 'lucide-react'
+import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 
 // =====================
 // Layout Data Types & Parser (shared with seat-map.tsx)
@@ -523,16 +524,20 @@ export default function SeatEditorPage() {
       <div className="bg-white rounded-xl p-6 border border-border/50">
         <div className="max-w-4xl mx-auto">
           {/* Stage */}
-          <div className="mb-6">
-            <div className="bg-charcoal rounded-xl py-4 px-8 text-center stage-glow border border-gold/20">
-              <p className="font-serif text-gold text-lg tracking-[0.3em] font-semibold">
-                S T A G E
-              </p>
-              <p className="font-serif text-gold/60 text-xs tracking-[0.2em] mt-1">
-                T E A T E R &nbsp; R E N D R A
-              </p>
-            </div>
-          </div>
+          <StageRenderer stageType={(parsedLayout as any)?.stageType || (layoutData as any)?.stageType} size="md" />
+
+          {/* Objects */}
+          {(() => {
+            const objs = (parsedLayout as any)?.objects || (layoutData as any)?.objects
+            if (objs && objs.length > 0) {
+              return (
+                <div className="relative mb-4">
+                  <ObjectsOverlay objects={objs} cellSize={SEAT_W + SEAT_GAP} />
+                </div>
+              )
+            }
+            return null
+          })()}
 
           {/* Grid */}
           <div className="overflow-x-auto pb-4">

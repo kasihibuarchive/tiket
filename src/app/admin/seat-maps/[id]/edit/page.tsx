@@ -27,6 +27,7 @@ export default function SeatMapEditPage() {
   const [mapName, setMapName] = useState('')
   const [creatorName, setCreatorName] = useState('')
   const [seatType, setSeatType] = useState<SeatType>('NUMBERED')
+  const [currentStageType, setCurrentStageType] = useState<string>('PROSCENIUM')
 
   // Editor state
   const [layoutData, setLayoutData] = useState<any>(null)
@@ -98,6 +99,7 @@ export default function SeatMapEditPage() {
           setMapName(sm.name || '')
           setCreatorName(sm.creatorName || '')
           setSeatType(sm.seatType || 'NUMBERED')
+          setCurrentStageType(sm.stageType || 'PROSCENIUM')
           setLayoutData(sanitized)
           setStep('editor')
         } else {
@@ -277,8 +279,9 @@ export default function SeatMapEditPage() {
   }
 
   // Save & Exit handler
-  async function handleSaveAndExit(finalLayoutData: any) {
+  async function handleSaveAndExit(finalLayoutData: any, newStageType?: string) {
     setLayoutData(finalLayoutData)
+    if (newStageType) setCurrentStageType(newStageType)
     const targetId = realSeatMapId || seatMapId
     if (!targetId || targetId === 'new') {
       alert('Seat map ID tidak valid')
@@ -298,6 +301,7 @@ export default function SeatMapEditPage() {
         body: JSON.stringify({
           name: mapName,
           layoutData: savedData,
+          ...(newStageType && { stageType: newStageType }),
         }),
       })
 
@@ -483,6 +487,7 @@ export default function SeatMapEditPage() {
         seatMapId={realSeatMapId}
         seatType={seatType}
         initialLayoutData={layoutData}
+        initialStageType={currentStageType}
         adminId={adminId}
         adminName={adminName}
         onSaveAndExit={handleSaveAndExit}

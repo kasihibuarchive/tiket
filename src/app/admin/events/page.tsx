@@ -35,6 +35,11 @@ interface EventData {
   priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
   seatSummary?: { total: number; available: number; sold: number }
   seatMapId: string | null
+  showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
+  posterUrl?: string | null
+  synopsis?: string
+  teaserVideoUrl?: string | null
+  adminFee?: number
 }
 
 interface SeatMapOption {
@@ -55,6 +60,7 @@ interface EventFormData {
   isPublished: boolean
   adminFee: number
   priceCategories: Array<{ name: string; price: number; colorCode: string }>
+  showDates: Array<{ date: string; openGate: string; label: string }>
 }
 
 const emptyForm: EventFormData = {
@@ -73,6 +79,7 @@ const emptyForm: EventFormData = {
     { name: 'Regular', price: 75000, colorCode: '#8B8680' },
     { name: 'Student', price: 35000, colorCode: '#7BA7A5' },
   ],
+  showDates: [{ date: '', openGate: '', label: '' }],
 }
 
 export default function AdminEventsPage() {
@@ -122,18 +129,25 @@ export default function AdminEventsPage() {
       title: event.title,
       category: event.category,
       showDate: new Date(event.showDate).toISOString().slice(0, 16),
-      openGate: '',
+      openGate: event.showDates?.[0]?.openGate ? new Date(event.showDates[0].openGate).toISOString().slice(0, 16) : '',
       location: event.location,
-      posterUrl: '',
-      teaserVideoUrl: (event as any).teaserVideoUrl || '',
-      synopsis: '',
+      posterUrl: event.posterUrl || '',
+      teaserVideoUrl: event.teaserVideoUrl || '',
+      synopsis: event.synopsis || '',
       isPublished: event.isPublished,
-      adminFee: (event as any).adminFee || 0,
+      adminFee: event.adminFee || 0,
       priceCategories: event.priceCategories.map((pc) => ({
         name: pc.name,
         price: pc.price,
         colorCode: pc.colorCode,
       })),
+      showDates: (event.showDates && event.showDates.length > 0)
+        ? event.showDates.map((sd) => ({
+            date: new Date(sd.date).toISOString().slice(0, 16),
+            openGate: sd.openGate ? new Date(sd.openGate).toISOString().slice(0, 16) : '',
+            label: sd.label || '',
+          }))
+        : [{ date: new Date(event.showDate).toISOString().slice(0, 16), openGate: '', label: '' }],
     })
     setIsDialogOpen(true)
   }
@@ -160,6 +174,28 @@ export default function AdminEventsPage() {
     }))
   }
 
+    function addShowDate() {
+      setFormData((prev) => ({
+        ...prev,
+        showDates: [...prev.showDates, { date: '', openGate: '', label: `Hari ${prev.showDates.length + 1}` }],
+      }))
+    }
+
+    function removeShowDate(index: number) {
+      setFormData((prev) => ({
+        ...prev,
+        showDates: prev.showDates.filter((_, i) => i !== index),
+      }))
+    }
+
+    function updateShowDate(index: number, field: string, value: string) {
+      setFormData((prev) => {
+        const updated = [...prev.showDates]
+        updated[index] = { ...updated[index], [field]: value }
+        return { ...prev, showDates: updated }
+      })
+    }
+
   async function handleSave() {
     setIsSaving(true)
     try {
@@ -170,6 +206,7 @@ export default function AdminEventsPage() {
         ...formData,
         showDate: new Date(formData.showDate).toISOString(),
         openGate: formData.openGate ? new Date(formData.openGate).toISOString() : null,
+        showDates: formData.showDates.filter((sd) => sd.date),
       }
 
       const res = await fetch(url, {
@@ -354,7 +391,14 @@ export default function AdminEventsPage() {
                       )}
                     </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {formatShortDate(event.showDate)}
+                      {event.showDates && event.showDates.length > 1 ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span>{formatShortDate(event.showDate)}</span>
+                          <Badge variant="secondary" className="text-[9px] bg-gold/10 text-gold-dark w-fit">Multi-hari</Badge>
+                        </div>
+                      ) : (
+                        formatShortDate(event.showDate)
+                      )}
                     </TableCell>
                     <TableCell>
                       {event.seatSummary && event.seatSummary.total > 0 && (
@@ -480,23 +524,57 @@ export default function AdminEventsPage() {
             </div>
 
             {/* Dates */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Tanggal & Waktu Tayang *</Label>
-                <Input
-                  type="datetime-local"
-                  value={formData.showDate}
-                  onChange={(e) => setFormData({ ...formData, showDate: e.target.value })}
-                />
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Jadwal Pertunjukan *</Label>
+                <Button variant="outline" size="sm" onClick={addShowDate} className="text-xs h-7">
+                  <Plus className="w-3 h-3 mr-1" />
+                  Tambah Hari
+                </Button>
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Buka Pintu</Label>
-                <Input
-                  type="datetime-local"
-                  value={formData.openGate}
-                  onChange={(e) => setFormData({ ...formData, openGate: e.target.value })}
-                />
-              </div>
+              {formData.showDates.map((sd, idx) => (
+                <div key={idx} className="relative rounded-lg border border-border/60 p-3 space-y-2 bg-muted/20">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">
+                      {formData.showDates.length > 1 ? `Hari ${idx + 1}` : 'Tanggal & Waktu'}
+                    </span>
+                    {idx > 0 && (
+                      <Button variant="ghost" size="sm" onClick={() => removeShowDate(idx)} className="h-6 w-6 p-0 text-danger hover:text-danger hover:bg-danger/10">
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Label</Label>
+                      <Input
+                        value={sd.label}
+                        onChange={(e) => updateShowDate(idx, 'label', e.target.value)}
+                        placeholder="contoh: Premiere, Gala..."
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Buka Pintu</Label>
+                      <Input
+                        type="datetime-local"
+                        value={sd.openGate}
+                        onChange={(e) => updateShowDate(idx, 'openGate', e.target.value)}
+                        className="h-8 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Tanggal & Waktu Tayang *</Label>
+                    <Input
+                      type="datetime-local"
+                      value={sd.date}
+                      onChange={(e) => updateShowDate(idx, 'date', e.target.value)}
+                      className="h-8 text-sm"
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* Poster URL */}
@@ -610,7 +688,7 @@ export default function AdminEventsPage() {
             </DialogClose>
             <Button
               onClick={handleSave}
-              disabled={isSaving || !formData.title || !formData.location || !formData.showDate}
+              disabled={isSaving || !formData.title || !formData.location || !formData.showDate || formData.showDates.every((sd) => !sd.date)}
               className="bg-charcoal hover:bg-charcoal/90 text-gold text-sm"
             >
               {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}

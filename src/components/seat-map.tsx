@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { DoorOpen, Lock, Check, X, Crown, User, GraduationCap, Loader2, AlertTriangle } from 'lucide-react'
+import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { Button } from '@/components/ui/button'
 import { cleanupExpiredLocks } from '@/lib/seat-cleanup'
 import { getSessionId } from '@/lib/session-id'
@@ -529,16 +530,14 @@ export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutD
     return (
       <div className="w-full max-w-5xl mx-auto">
         {/* Stage */}
-        <div className="relative mb-6">
-          <div className="bg-charcoal rounded-xl py-5 px-8 text-center stage-glow border border-gold/20">
-            <p className="font-serif text-gold text-lg sm:text-xl tracking-[0.3em] font-semibold">
-              S T A G E
-            </p>
-            <p className="font-serif text-gold/60 text-xs sm:text-sm tracking-[0.2em] mt-1">
-              T E A T E R &nbsp; R E N D R A
-            </p>
+        <StageRenderer stageType={parsedLayout?.stageType} size="lg" />
+
+        {/* Objects overlay */}
+        {parsedLayout?.objects && parsedLayout.objects.length > 0 && (
+          <div className="relative mb-4">
+            <ObjectsOverlay objects={parsedLayout.objects} cellSize={SEAT_W + SEAT_GAP} />
           </div>
-        </div>
+        )}
 
         {/* Lock rejection notice */}
         {lockRejectionMsg && (
@@ -734,16 +733,7 @@ export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutD
   return (
     <div className="w-full max-w-3xl mx-auto">
       {/* Stage */}
-      <div className="relative mb-6">
-        <div className="bg-charcoal rounded-xl py-5 px-8 text-center stage-glow border border-gold/20">
-          <p className="font-serif text-gold text-lg sm:text-xl tracking-[0.3em] font-semibold">
-            S T A G E
-          </p>
-          <p className="font-serif text-gold/60 text-xs sm:text-sm tracking-[0.2em] mt-1">
-            T E A T E R &nbsp; R E N D R A
-          </p>
-        </div>
-      </div>
+      <StageRenderer stageType="PROSCENIUM" size="lg" />
 
       {/* Lock rejection notice */}
       {lockRejectionMsg && (

@@ -22,6 +22,13 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   Lock,
   Save,
   Undo2,
@@ -48,19 +55,33 @@ import {
   AlertTriangle,
   Sparkles,
   Copy,
+  Shapes,
 } from 'lucide-react'
+import { StageRenderer, ObjectsOverlay, type StageType } from '@/lib/stage-renderer'
 
 // ═══════════════════════════════════════════
 // Types
 // ═══════════════════════════════════════════
 
+interface LayoutObject {
+  id: string
+  type: 'FOH' | 'ENTRANCE' | 'CUSTOM_SHAPE'
+  label: string
+  r: number
+  c: number
+  w: number
+  h: number
+  color: string
+}
+
 interface CanvasEditorProps {
   seatMapId: string
   seatType: 'NUMBERED' | 'GENERAL_ADMISSION'
   initialLayoutData: any
+  initialStageType?: string
   adminId: string
   adminName: string
-  onSaveAndExit: (layoutData: any) => void
+  onSaveAndExit: (layoutData: any, stageType: string) => void
 }
 
 interface SeatPosition {
@@ -99,12 +120,14 @@ interface NumberedLayout {
   seats: SeatPosition[]
   sections: Section[]
   embeddedRows?: Record<string, number>
+  objects?: LayoutObject[]
 }
 
 interface GALayout {
   type: 'GENERAL_ADMISSION'
   gridSize: GridSize
   zones: Zone[]
+  objects?: LayoutObject[]
 }
 
 type LayoutData = NumberedLayout | GALayout
@@ -252,6 +275,7 @@ export function CanvasEditor({
   seatMapId,
   seatType,
   initialLayoutData,
+  initialStageType,
   adminId,
   adminName,
   onSaveAndExit,
@@ -259,8 +283,10 @@ export function CanvasEditor({
   // Debug: log what we receive
   console.log('[CanvasEditor] initialLayoutData:', initialLayoutData ? JSON.stringify(initialLayoutData).slice(0, 200) : 'null')
   console.log('[CanvasEditor] seatType:', seatType)
+  console.log('[CanvasEditor] initialStageType:', initialStageType)
 
   // ─── State ─────────────────────────────
+  const [stageType, setStageType] = useState<StageType>((initialStageType as StageType) || 'PROSCENIUM')
   const [layoutData, setLayoutData] = useState<LayoutData>(() => {
     try {
       if (initialLayoutData && typeof initialLayoutData === 'object') {
@@ -282,6 +308,17 @@ export function CanvasEditor({
   // every prop change causes double-rendering which triggers the .length crash.
   // Instead, we use a key={seatMapId} on the parent to force fresh mount.
 
+  // Objects state
+  const [objects, setObjects] = useState<LayoutObject[]>(() => {
+    try {
+      if (initialLayoutData?.objects && Array.isArray(initialLayoutData.objects)) {
+        return initialLayoutData.objects as LayoutObject[]
+      }
+    } catch { /* ignore */ }
+    return []
+  })
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
+
   const [isPreview, setIsPreview] = useState(false)
   const [aisleMode, setAisleMode] = useState(false)
   const [autoSaveTime, setAutoSaveTime] = useState<Date | null>(null)
@@ -291,6 +328,11 @@ export function CanvasEditor({
   const [sectionDialogOpen, setSectionDialogOpen] = useState(false)
   const [editingSection, setEditingSection] = useState<Section | null>(null)
   const [sectionForm, setSectionForm] = useState({ name: '', fromRow: 0, toRow: 0, colorCode: '#C8A951' })
+
+  // Object editing state
+  const [objectDialogOpen, setObjectDialogOpen] = useState(false)
+  const [editingObject, setEditingObject] = useState<LayoutObject | null>(null)
+  const [objectForm, setObjectForm] = useState({ label: '', type: 'CUSTOM_SHAPE' as LayoutObject['type'], r: 0, c: 0, w: 2, h: 1, color: '#6B7280' })
 
   // Zone editing state (GA)
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
@@ -389,6 +431,61 @@ export function CanvasEditor({
     const zones = Array.isArray(safeLayoutData.zones) ? safeLayoutData.zones : []
     return zones.find((z) => z.id === selectedZoneId) || null
   }, [safeLayoutData, selectedZoneId])
+
+  // ─── Object CRUD ─────────────────────
+  const addObject = useCallback((type: LayoutObject['type']) => {
+    const defaults: Partial<LayoutObject> = {
+      FOH: { label: 'FOH', color: '#E5C07B', w: 4, h: 1 },
+      ENTRANCE: { label: 'Pintu Masuk', color: '#61AFEF', w: 1, h: 2 },
+      CUSTOM_SHAPE: { label: 'Objek Baru', color: '#6B7280', w: 2, h: 2 },
+    }[type]
+
+    const newObject: LayoutObject = {
+      id: generateId(),
+      type,
+      label: defaults?.label || 'Objek',
+      r: 0,
+      c: 0,
+      w: defaults?.w || 2,
+      h: defaults?.h || 1,
+      color: defaults?.color || '#6B7280',
+    }
+    setObjects((prev) => [...prev, newObject])
+    setSelectedObjectId(newObject.id)
+  }, [])
+
+  const updateObject = useCallback((id: string, updates: Partial<LayoutObject>) => {
+    setObjects((prev) => prev.map((o) => (o.id === id ? { ...o, ...updates } : o)))
+  }, [])
+
+  const deleteObject = useCallback((id: string) => {
+    setObjects((prev) => prev.filter((o) => o.id !== id))
+    if (selectedObjectId === id) setSelectedObjectId(null)
+  }, [selectedObjectId])
+
+  const openEditObjectDialog = useCallback((obj: LayoutObject) => {
+    setEditingObject(obj)
+    setObjectForm({ label: obj.label, type: obj.type, r: obj.r, c: obj.c, w: obj.w, h: obj.h, color: obj.color })
+    setObjectDialogOpen(true)
+  }, [])
+
+  const handleSaveObject = useCallback(() => {
+    if (!editingObject) return
+    updateObject(editingObject.id, {
+      label: objectForm.label,
+      type: objectForm.type,
+      r: objectForm.r,
+      c: objectForm.c,
+      w: objectForm.w,
+      h: objectForm.h,
+      color: objectForm.color,
+    })
+    setObjectDialogOpen(false)
+  }, [editingObject, objectForm, updateObject])
+
+  const selectedObject = useMemo(() => {
+    return objects.find((o) => o.id === selectedObjectId) || null
+  }, [objects, selectedObjectId])
 
   // ─── History (Undo/Redo) ───────────────
   const pushHistory = useCallback((newData: LayoutData) => {
@@ -546,7 +643,7 @@ export function CanvasEditor({
         }
       })
     },
-    [isPreview, aisleMode, layoutData.type, layoutData.aisleColumns, updateLayout]
+    [isPreview, aisleMode, layoutData.type, layoutData.type === 'NUMBERED' ? (layoutData as NumberedLayout).aisleColumns : [], updateLayout]
   )
 
   // Mouse drag for adding/removing seats
@@ -571,7 +668,7 @@ export function CanvasEditor({
         }
       })
     },
-    [isPreview, aisleMode, layoutData.type, layoutData.aisleColumns, seatSet, updateLayout]
+    [isPreview, aisleMode, layoutData.type, layoutData.type === 'NUMBERED' ? (layoutData as NumberedLayout).aisleColumns : [], seatSet, updateLayout]
   )
 
   const handleCellMouseEnter = useCallback(
@@ -596,7 +693,7 @@ export function CanvasEditor({
         })
       }
     },
-    [layoutData.type, layoutData.aisleColumns, seatSet, updateLayout]
+    [layoutData.type, layoutData.type === 'NUMBERED' ? (layoutData as NumberedLayout).aisleColumns : [], seatSet, updateLayout]
   )
 
   // Toggle aisle column
@@ -905,7 +1002,7 @@ export function CanvasEditor({
         w,
         h,
         capacity: w * h,
-        colorCode: DEFAULT_COLORS[(Array.isArray(layoutData.zones) ? layoutData.zones : []).length % DEFAULT_COLORS.length],
+        colorCode: DEFAULT_COLORS[(layoutData.type === 'GENERAL_ADMISSION' ? (layoutData as GALayout).zones : []).length % DEFAULT_COLORS.length],
       }
 
       updateLayout((prev) => {
@@ -1086,24 +1183,16 @@ export function CanvasEditor({
   // ═════════════════════════════════════════
 
   const getExportLayoutData = useCallback(() => {
-    return deepClone(layoutData)
-  }, [layoutData])
+    const data = deepClone(layoutData)
+    return { ...data, objects: deepClone(objects), stageType }
+  }, [layoutData, objects, stageType])
 
   // ═════════════════════════════════════════
   // Render helpers
   // ═════════════════════════════════════════
 
   const renderStageBar = () => (
-    <div className="mb-5">
-      <div className="bg-charcoal rounded-xl py-3 px-8 text-center stage-glow border border-gold/20 max-w-md mx-auto">
-        <p className="font-serif text-gold text-sm sm:text-base tracking-[0.3em] font-semibold">
-          S T A G E
-        </p>
-        <p className="font-serif text-gold/60 text-[10px] sm:text-xs tracking-[0.2em] mt-0.5">
-          T E A T E R &nbsp; R E N D R A
-        </p>
-      </div>
-    </div>
+    <StageRenderer stageType={stageType} size="sm" />
   )
 
   // ─── NUMBERED Grid Render ──────────────
@@ -1587,6 +1676,32 @@ export function CanvasEditor({
 
             <Separator className="bg-white/10" />
 
+            {/* ─── Stage Type Selector ─── */}
+            <div className="space-y-3">
+              <h3 className="text-[11px] uppercase tracking-wider text-warm-white/40 font-medium">
+                Tipe Panggung
+              </h3>
+              <Select value={stageType} onValueChange={(v) => setStageType(v as StageType)}>
+                <SelectTrigger className="h-8 text-xs bg-white/10 border-white/10 text-warm-white">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-charcoal border-white/10">
+                  <SelectItem value="PROSCENIUM" className="text-xs text-warm-white">Proscenium</SelectItem>
+                  <SelectItem value="AMPHITHEATER" className="text-xs text-warm-white">Amphitheater</SelectItem>
+                  <SelectItem value="THRUST" className="text-xs text-warm-white">Thrust</SelectItem>
+                  <SelectItem value="BLACK_BOX" className="text-xs text-warm-white">Black Box</SelectItem>
+                  <SelectItem value="ARENA" className="text-xs text-warm-white">Arena</SelectItem>
+                </SelectContent>
+              </Select>
+              <div className="flex justify-center">
+                <div className="scale-[0.45] origin-top">
+                  <StageRenderer stageType={stageType} size="sm" />
+                </div>
+              </div>
+            </div>
+
+            <Separator className="bg-white/10" />
+
             {/* ─── NUMBERED: Aisle + Sections ─── */}
             {isNumbered && (
               <>
@@ -1763,6 +1878,177 @@ export function CanvasEditor({
               </div>
             )}
 
+            {/* ─── Objects Panel ─── */}
+            <>
+              <Separator className="bg-white/10" />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[11px] uppercase tracking-wider text-warm-white/40 font-medium flex items-center gap-1.5">
+                    <Shapes className="w-3 h-3" />
+                    Objek
+                  </h3>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addObject('FOH')}
+                      className="h-5 px-1.5 text-[9px] text-warm-white/60 hover:text-gold hover:bg-white/10"
+                    >
+                      FOH
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addObject('ENTRANCE')}
+                      className="h-5 px-1.5 text-[9px] text-warm-white/60 hover:text-gold hover:bg-white/10"
+                    >
+                      Pintu
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addObject('CUSTOM_SHAPE')}
+                      className="h-5 px-1.5 text-[9px] text-warm-white/60 hover:text-gold hover:bg-white/10"
+                    >
+                      <Plus className="w-2.5 h-2.5" />
+                    </Button>
+                  </div>
+                </div>
+
+                {objects.length === 0 ? (
+                  <p className="text-[10px] text-warm-white/30 px-1">
+                    Belum ada objek. Tambahkan FOH, pintu, atau bentuk kustom.
+                  </p>
+                ) : (
+                  <div className="space-y-1 max-h-40 overflow-y-auto">
+                    {objects.map((obj) => (
+                      <div
+                        key={obj.id}
+                        className={cn(
+                          'flex items-center gap-2 p-1.5 rounded-lg transition-colors cursor-pointer group',
+                          obj.id === selectedObjectId
+                            ? 'bg-white/10 border border-white/20'
+                            : 'bg-white/5 hover:bg-white/8 border border-transparent'
+                        )}
+                        onClick={() => setSelectedObjectId(obj.id)}
+                      >
+                        <div className="w-3 h-3 rounded-sm shrink-0 border" style={{ backgroundColor: obj.color + '60', borderColor: obj.color }} />
+                        <div className="flex-1 min-w-0">
+                          <div className="text-[10px] font-medium text-warm-white/80 truncate">
+                            {obj.type === 'ENTRANCE' ? '🚪 ' : ''}{obj.label}
+                          </div>
+                          <div className="text-[8px] text-warm-white/40">
+                            {obj.w}×{obj.h} @ ({obj.r},{obj.c})
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); openEditObjectDialog(obj) }}
+                            className="h-4 w-4 p-0 text-warm-white/40 hover:text-gold"
+                          >
+                            <Edit3 className="w-2.5 h-2.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => { e.stopPropagation(); deleteObject(obj.id) }}
+                            className="h-4 w-4 p-0 text-warm-white/40 hover:text-danger"
+                          >
+                            <Trash2 className="w-2.5 h-2.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected Object Properties */}
+              {selectedObject && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 p-2 rounded-lg bg-white/5 border border-white/10">
+                    <div className="w-4 h-4 rounded-sm shrink-0" style={{ backgroundColor: selectedObject.color + '60', border: `1px solid ${selectedObject.color}` }} />
+                    <span className="text-[10px] font-medium text-warm-white/80 flex-1 truncate">
+                      {selectedObject.type === 'ENTRANCE' ? '🚪 ' : ''}{selectedObject.label}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openEditObjectDialog(selectedObject)}
+                      className="h-5 w-5 p-0 text-warm-white/60 hover:text-gold"
+                    >
+                      <Edit3 className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => deleteObject(selectedObject.id)}
+                      className="h-5 w-5 p-0 text-warm-white/60 hover:text-danger"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div>
+                      <label className="text-[10px] text-warm-white/50 block mb-0.5">Nama</label>
+                      <Input
+                        value={selectedObject.label}
+                        onChange={(e) => updateObject(selectedObject.id, { label: e.target.value })}
+                        className="h-6 text-[10px] bg-white/10 border-white/10 text-warm-white"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <label className="text-[10px] text-warm-white/50 block mb-0.5">Baris</label>
+                        <Input
+                          type="number" value={selectedObject.r} min={0}
+                          onChange={(e) => updateObject(selectedObject.id, { r: Math.max(0, parseInt(e.target.value) || 0) })}
+                          className="h-6 text-[10px] bg-white/10 border-white/10 text-warm-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-warm-white/50 block mb-0.5">Kolom</label>
+                        <Input
+                          type="number" value={selectedObject.c} min={0}
+                          onChange={(e) => updateObject(selectedObject.id, { c: Math.max(0, parseInt(e.target.value) || 0) })}
+                          className="h-6 text-[10px] bg-white/10 border-white/10 text-warm-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-warm-white/50 block mb-0.5">Lebar</label>
+                        <Input
+                          type="number" value={selectedObject.w} min={1}
+                          onChange={(e) => updateObject(selectedObject.id, { w: Math.max(1, parseInt(e.target.value) || 1) })}
+                          className="h-6 text-[10px] bg-white/10 border-white/10 text-warm-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-warm-white/50 block mb-0.5">Tinggi</label>
+                        <Input
+                          type="number" value={selectedObject.h} min={1}
+                          onChange={(e) => updateObject(selectedObject.id, { h: Math.max(1, parseInt(e.target.value) || 1) })}
+                          className="h-6 text-[10px] bg-white/10 border-white/10 text-warm-white"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-warm-white/50 block mb-0.5">Warna</label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="color" value={selectedObject.color}
+                          onChange={(e) => updateObject(selectedObject.id, { color: e.target.value })}
+                          className="h-6 w-8 p-0.5 bg-white/10 border-white/10 cursor-pointer"
+                        />
+                        <span className="text-[9px] text-warm-white/40 font-mono">{selectedObject.color}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+
             {/* ─── GA: Zone Properties Panel ─── */}
             {!isNumbered && selectedZone && (
               <>
@@ -1867,7 +2153,7 @@ export function CanvasEditor({
             )}
             <Button
               onClick={() => {
-                onSaveAndExit(getExportLayoutData())
+                onSaveAndExit(getExportLayoutData(), stageType)
               }}
               className="w-full bg-gold hover:bg-gold-dark text-charcoal font-medium gap-2 h-9 text-sm"
             >
@@ -1996,6 +2282,47 @@ export function CanvasEditor({
         </div>
       </div>
       </SectionBoundary>
+
+      {/* ═══════ OBJECT EDIT DIALOG ═══════ */}
+      <Dialog open={objectDialogOpen} onOpenChange={setObjectDialogOpen}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle className="text-base font-serif">Edit Objek</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs">Nama</Label>
+              <Input value={objectForm.label} onChange={(e) => setObjectForm((p) => ({ ...p, label: e.target.value }))} className="h-9 text-sm" />
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+              <div>
+                <Label className="text-[10px]">Baris</Label>
+                <Input type="number" value={objectForm.r} min={0} onChange={(e) => setObjectForm((p) => ({ ...p, r: Math.max(0, parseInt(e.target.value) || 0) }))} className="h-8 text-sm" />
+              </div>
+              <div>
+                <Label className="text-[10px]">Kolom</Label>
+                <Input type="number" value={objectForm.c} min={0} onChange={(e) => setObjectForm((p) => ({ ...p, c: Math.max(0, parseInt(e.target.value) || 0) }))} className="h-8 text-sm" />
+              </div>
+              <div>
+                <Label className="text-[10px]">Lebar</Label>
+                <Input type="number" value={objectForm.w} min={1} onChange={(e) => setObjectForm((p) => ({ ...p, w: Math.max(1, parseInt(e.target.value) || 1) }))} className="h-8 text-sm" />
+              </div>
+              <div>
+                <Label className="text-[10px]">Tinggi</Label>
+                <Input type="number" value={objectForm.h} min={1} onChange={(e) => setObjectForm((p) => ({ ...p, h: Math.max(1, parseInt(e.target.value) || 1) }))} className="h-8 text-sm" />
+              </div>
+            </div>
+            <div>
+              <Label className="text-xs">Warna</Label>
+              <Input type="color" value={objectForm.color} onChange={(e) => setObjectForm((p) => ({ ...p, color: e.target.value }))} className="h-9 w-16 p-1" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setObjectDialogOpen(false)}>Batal</Button>
+            <Button size="sm" onClick={handleSaveObject} className="bg-charcoal hover:bg-charcoal/90 text-gold">Simpan</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ═══════ SECTION EDIT DIALOG ═══════ */}
       <Dialog open={sectionDialogOpen} onOpenChange={setSectionDialogOpen}>

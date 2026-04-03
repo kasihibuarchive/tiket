@@ -30,7 +30,7 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await request.json()
-    const { name, layoutData } = body
+    const { name, layoutData, stageType } = body
 
     const seatMap = await db.seatMap.findUnique({ where: { id } })
     if (!seatMap) {
@@ -50,6 +50,7 @@ export async function PUT(
       data: {
         ...(name !== undefined && { name }),
         ...(layoutData !== undefined && { layoutData }),
+        ...(stageType !== undefined && { stageType }),
       },
     })
 

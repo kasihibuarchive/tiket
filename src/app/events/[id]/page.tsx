@@ -8,6 +8,7 @@ import { SeatMap } from '@/components/seat-map'
 import { CheckoutForm } from '@/components/checkout-form'
 import { Badge } from '@/components/ui/badge'
 import { formatEventDate, formatEventTime } from '@/lib/date'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -31,6 +32,7 @@ interface EventData {
   priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
   seatSummary: { total: number; available: number; sold: number }
   seatMapLayout?: any
+  showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
 }
 
 interface SeatData {
@@ -90,6 +92,7 @@ export default function EventDetailPage() {
   const [showCheckout, setShowCheckout] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
 
   useEffect(() => {
     async function fetchData() {
@@ -170,6 +173,13 @@ export default function EventDetailPage() {
     ? formatEventTime(event.openGate)
     : null
 
+  // Show dates
+  const showDates = event.showDates && event.showDates.length > 0 ? event.showDates : [{ date: event.showDate, openGate: event.openGate, label: null }]
+  const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
+  const activeDateStr = activeShowDate ? formatEventDate(activeShowDate.date) : dateStr
+  const activeTimeStr = activeShowDate ? formatEventTime(activeShowDate.date) : timeStr
+  const activeGateTimeStr = activeShowDate?.openGate ? formatEventTime(activeShowDate.openGate) : null
+
   const availablePercent = event.seatSummary.total > 0
     ? Math.round((event.seatSummary.available / event.seatSummary.total) * 100)
     : 0
@@ -217,18 +227,38 @@ export default function EventDetailPage() {
                 <div className="space-y-2 mb-6">
                   <div className="flex items-center gap-2 text-sm text-white/60">
                     <Calendar className="w-4 h-4 text-gold" />
-                    <span>{dateStr}</span>
+                    <span>{activeDateStr}</span>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-white/60">
                     <Clock className="w-4 h-4 text-gold" />
-                    <span>Start: {timeStr}</span>
-                    {gateTimeStr && <span>• Buka Pintu: {gateTimeStr}</span>}
+                    <span>Start: {activeTimeStr}</span>
+                    {activeGateTimeStr && <span>• Buka Pintu: {activeGateTimeStr}</span>}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-white/60">
                     <MapPin className="w-4 h-4 text-gold" />
                     <span>{event.location}</span>
                   </div>
                 </div>
+
+                {/* Multi-day show dates tabs */}
+                {showDates.length > 1 && (
+                  <div className="flex flex-wrap gap-2 mb-6">
+                    {showDates.map((sd, idx) => (
+                      <button
+                        key={sd.id || idx}
+                        onClick={() => setSelectedShowDateIdx(idx)}
+                        className={cn(
+                          'px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                          idx === selectedShowDateIdx
+                            ? 'bg-gold text-charcoal'
+                            : 'bg-white/10 text-white/60 hover:bg-white/20'
+                        )}
+                      >
+                        {sd.label || `Hari ${idx + 1}`}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 <div className="bg-white/5 rounded-lg p-4 mb-6">
                   <h3 className="font-serif text-sm text-gold mb-2">Sinopsis</h3>
