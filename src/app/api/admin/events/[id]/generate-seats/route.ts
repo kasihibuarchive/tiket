@@ -145,7 +145,13 @@ export async function POST(
       priceCategoryMap[pc.name] = pc.id
     }
 
-    // Generate seats from seat map layout
+    // Get show dates for this event
+    const showDates = await db.eventShowDate.findMany({
+      where: { eventId: id },
+      orderBy: { date: 'asc' },
+    })
+
+    // Generate seats from seat map layout (base seat records)
     const seatData = generateSeatsFromLayout(seatMap.layoutData, id, priceCategoryMap)
 
     if (seatData.length === 0) {
@@ -155,18 +161,44 @@ export async function POST(
       )
     }
 
-    // Create seats in DB
-    const result = await db.seat.createMany({
-      data: seatData.map((s) => ({
-        eventId: id,
-        seatCode: s.seatCode,
-        status: s.status,
-        row: s.row,
-        col: s.col,
-        priceCategoryId: s.priceCategoryId,
-        zoneName: s.zoneName,
-      })),
-    })
+    // ─── Multi-day: duplicate seats per show date ─────────────────────
+    // If event has multiple show dates, create separate seat inventories per date.
+    // If event has only 1 show date (or none), create seats without showDateId (backward compat).
+    let totalCreated = 0
+
+    if (showDates.length > 1) {
+      // Multi-day event: create seats for EACH show date
+      for (const sd of showDates) {
+        const result = await db.seat.createMany({
+          data: seatData.map((s) => ({
+            eventId: id,
+            eventShowDateId: sd.id,
+            seatCode: s.seatCode,
+            status: s.status,
+            row: s.row,
+            col: s.col,
+            priceCategoryId: s.priceCategoryId,
+            zoneName: s.zoneName,
+          })),
+        })
+        totalCreated += result.count
+      }
+    } else {
+      // Single-day event: create seats without showDateId
+      const result = await db.seat.createMany({
+        data: seatData.map((s) => ({
+          eventId: id,
+          eventShowDateId: showDates.length === 1 ? showDates[0].id : null,
+          seatCode: s.seatCode,
+          status: s.status,
+          row: s.row,
+          col: s.col,
+          priceCategoryId: s.priceCategoryId,
+          zoneName: s.zoneName,
+        })),
+      })
+      totalCreated = result.count
+    }
 
     // Link event to seat map
     await db.event.update({
@@ -174,9 +206,15 @@ export async function POST(
       data: { seatMapId },
     })
 
+    const perDayLabel = showDates.length > 1
+      ? ` (${showDates.length} hari × ${seatData.length} kursi/hari)`
+      : ''
+
     return NextResponse.json({
-      message: `${result.count} kursi berhasil di-generate dari Seat Map "${seatMap.name}"`,
-      totalSeats: result.count,
+      message: `${totalCreated} kursi berhasil di-generate dari Seat Map "${seatMap.name}"${perDayLabel}`,
+      totalSeats: totalCreated,
+      seatsPerDay: seatData.length,
+      showDatesCount: showDates.length,
       seatMapName: seatMap.name,
       seatMapType: seatMap.seatType,
     })

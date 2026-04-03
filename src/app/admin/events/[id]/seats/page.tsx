@@ -524,7 +524,12 @@ export default function SeatEditorPage() {
       <div className="bg-white rounded-xl p-6 border border-border/50">
         <div className="max-w-4xl mx-auto">
           {/* Stage */}
-          <StageRenderer stageType={(parsedLayout as any)?.stageType || (layoutData as any)?.stageType} size="md" />
+          <StageRenderer
+            stageType={(parsedLayout as any)?.stageType || (layoutData as any)?.stageType}
+            size="md"
+            thrustWidth={(parsedLayout as any)?.thrustWidth || (layoutData as any)?.thrustWidth}
+            thrustDepth={(parsedLayout as any)?.thrustDepth || (layoutData as any)?.thrustDepth}
+          />
 
           {/* Objects */}
           {(() => {

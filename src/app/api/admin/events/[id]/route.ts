@@ -63,6 +63,7 @@ export async function PUT(
       adminFee,
       priceCategories,
       showDates,
+      teaserVideoUrl,
     } = body
 
     const event = await db.event.findUnique({ where: { id } })
@@ -93,6 +94,7 @@ export async function PUT(
         openGate: effectiveOpenGate,
         location: location ?? event.location,
         posterUrl: posterUrl !== undefined ? posterUrl : event.posterUrl,
+        teaserVideoUrl: teaserVideoUrl !== undefined ? teaserVideoUrl : event.teaserVideoUrl,
         synopsis: synopsis ?? event.synopsis,
         isPublished: isPublished !== undefined ? isPublished : event.isPublished,
         adminFee: adminFee !== undefined ? adminFee : event.adminFee,

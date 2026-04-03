@@ -287,6 +287,16 @@ export function CanvasEditor({
 
   // ─── State ─────────────────────────────
   const [stageType, setStageType] = useState<StageType>((initialStageType as StageType) || 'PROSCENIUM')
+  const [thrustWidth, setThrustWidth] = useState<number>(() => {
+    try {
+      return (initialLayoutData as any)?.thrustWidth || 45
+    } catch { return 45 }
+  })
+  const [thrustDepth, setThrustDepth] = useState<number>(() => {
+    try {
+      return (initialLayoutData as any)?.thrustDepth || 3
+    } catch { return 3 }
+  })
   const [layoutData, setLayoutData] = useState<LayoutData>(() => {
     try {
       if (initialLayoutData && typeof initialLayoutData === 'object') {
@@ -1184,15 +1194,21 @@ export function CanvasEditor({
 
   const getExportLayoutData = useCallback(() => {
     const data = deepClone(layoutData)
-    return { ...data, objects: deepClone(objects), stageType }
-  }, [layoutData, objects, stageType])
+    const exportData: any = { ...data, objects: deepClone(objects), stageType }
+    // Save thrust customization
+    if (stageType === 'THRUST') {
+      exportData.thrustWidth = thrustWidth
+      exportData.thrustDepth = thrustDepth
+    }
+    return exportData
+  }, [layoutData, objects, stageType, thrustWidth, thrustDepth])
 
   // ═════════════════════════════════════════
   // Render helpers
   // ═════════════════════════════════════════
 
   const renderStageBar = () => (
-    <StageRenderer stageType={stageType} size="sm" />
+    <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
   )
 
   // ─── NUMBERED Grid Render ──────────────
@@ -1212,7 +1228,7 @@ export function CanvasEditor({
       const colIndices = Array.from({ length: cols }, (_, i) => i)
 
     return (
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto relative">
         <div className="inline-block min-w-full">
           {rowIndices.map((r) => (
             <div key={r} className="flex items-center gap-0.5 mb-0.5">
@@ -1326,6 +1342,10 @@ export function CanvasEditor({
             </div>
           )}
         </div>
+        {/* Non-clickable objects overlay — offset for row labels (w-6 = 24px + gap 2px) */}
+        {objects.length > 0 && (
+          <ObjectsOverlay objects={objects} cellSize={CELL_SIZE + 2} offsetX={26} />
+        )}
       </div>
     )
     } catch (err) {
@@ -1466,6 +1486,11 @@ export function CanvasEditor({
               height: (Math.abs(currentCellRef.current.r - zoneCreateStart.r) + 1) * CELL_SIZE,
             }}
           />
+        )}
+
+        {/* Non-clickable objects overlay */}
+        {objects.length > 0 && (
+          <ObjectsOverlay objects={objects} cellSize={CELL_SIZE} />
         )}
       </div>
     )
@@ -1695,9 +1720,42 @@ export function CanvasEditor({
               </Select>
               <div className="flex justify-center">
                 <div className="scale-[0.45] origin-top">
-                  <StageRenderer stageType={stageType} size="sm" />
+                  <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
                 </div>
               </div>
+              {/* Thrust customization controls */}
+              {stageType === 'THRUST' && (
+                <div className="space-y-2 pt-1">
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-warm-white/50">Lebar Tonjolan</label>
+                      <span className="text-[10px] text-gold font-mono">{thrustWidth}%</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={30}
+                      max={100}
+                      value={thrustWidth}
+                      onChange={(e) => setThrustWidth(Number(e.target.value))}
+                      className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-gold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] text-warm-white/50">Kedalaman Tonjolan</label>
+                      <span className="text-[10px] text-gold font-mono">{thrustDepth} baris</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={1}
+                      max={8}
+                      value={thrustDepth}
+                      onChange={(e) => setThrustDepth(Number(e.target.value))}
+                      className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-gold"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
 
             <Separator className="bg-white/10" />

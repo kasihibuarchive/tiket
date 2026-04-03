@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
@@ -43,6 +43,7 @@ interface SeatData {
   col: number
   priceCategory: { id: string; name: string; price: number; colorCode: string } | null
   lockedUntil: string | null
+  eventShowDateId?: string | null
 }
 
 const CATEGORY_ICONS: Record<string, typeof Crown> = {
@@ -86,7 +87,7 @@ export default function EventDetailPage() {
   const eventId = params.id as string
 
   const [event, setEvent] = useState<EventData | null>(null)
-  const [seats, setSeats] = useState<SeatData[]>([])
+  const [allSeats, setAllSeats] = useState<SeatData[]>([])
   const [selectedSeats, setSelectedSeats] = useState<SeatData[]>([])
   const [totalPrice, setTotalPrice] = useState(0)
   const [showCheckout, setShowCheckout] = useState(false)
@@ -113,7 +114,7 @@ export default function EventDetailPage() {
         const seatsData = await seatsRes.json()
 
         setEvent(eventData)
-        setSeats(seatsData.seats || [])
+        setAllSeats(seatsData.seats || [])
       } catch (err) {
         console.error('Fetch error:', err)
         setError('Gagal memuat data')
@@ -124,6 +125,43 @@ export default function EventDetailPage() {
 
     if (eventId) fetchData()
   }, [eventId])
+
+  // Show dates with fallback
+  const showDates = useMemo(() =>
+    event?.showDates && event.showDates.length > 0
+      ? event.showDates
+      : [{ id: null, date: event?.showDate, openGate: event?.openGate, label: null }],
+    [event]
+  )
+
+  const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
+
+  // Filter seats by active show date
+  const filteredSeats = useMemo(() => {
+    if (!activeShowDate?.id) {
+      // No show date (single day event or legacy data) — show all seats
+      return allSeats
+    }
+    // Filter seats belonging to this show date
+    const dateSeats = allSeats.filter(s => s.eventShowDateId === activeShowDate.id)
+    // If no seats have showDateId (old data), fall back to all seats
+    return dateSeats.length > 0 ? dateSeats : allSeats.filter(s => !s.eventShowDateId)
+  }, [allSeats, activeShowDate])
+
+  // Seat summary for the active show date
+  const seatSummary = useMemo(() => {
+    const total = filteredSeats.length
+    const available = filteredSeats.filter(s => s.status === 'AVAILABLE').length
+    const sold = filteredSeats.filter(s => s.status === 'SOLD').length
+    return { total, available, sold }
+  }, [filteredSeats])
+
+  // Reset selection when switching show dates
+  useEffect(() => {
+    setSelectedSeats([])
+    setTotalPrice(0)
+    setShowCheckout(false)
+  }, [selectedShowDateIdx])
 
   const handleSelectionChange = useCallback((newSelectedSeats: SeatData[], newTotalPrice: number) => {
     setSelectedSeats(newSelectedSeats)
@@ -169,19 +207,12 @@ export default function EventDetailPage() {
 
   const dateStr = formatEventDate(event.showDate)
   const timeStr = formatEventTime(event.showDate)
-  const gateTimeStr = event.openGate
-    ? formatEventTime(event.openGate)
-    : null
-
-  // Show dates
-  const showDates = event.showDates && event.showDates.length > 0 ? event.showDates : [{ date: event.showDate, openGate: event.openGate, label: null }]
-  const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
   const activeDateStr = activeShowDate ? formatEventDate(activeShowDate.date) : dateStr
   const activeTimeStr = activeShowDate ? formatEventTime(activeShowDate.date) : timeStr
   const activeGateTimeStr = activeShowDate?.openGate ? formatEventTime(activeShowDate.openGate) : null
 
-  const availablePercent = event.seatSummary.total > 0
-    ? Math.round((event.seatSummary.available / event.seatSummary.total) * 100)
+  const availablePercent = seatSummary.total > 0
+    ? Math.round((seatSummary.available / seatSummary.total) * 100)
     : 0
 
   return (
@@ -216,6 +247,11 @@ export default function EventDetailPage() {
                   {event.isPublished && (
                     <Badge variant="secondary" className="bg-success/20 text-success text-xs">
                       Aktif
+                    </Badge>
+                  )}
+                  {showDates.length > 1 && (
+                    <Badge variant="secondary" className="bg-blue-500/20 text-blue-300 text-xs">
+                      Multi-Hari
                     </Badge>
                   )}
                 </div>
@@ -292,13 +328,13 @@ export default function EventDetailPage() {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm text-white/70">Ketersediaan Kursi</span>
                     <span className="text-sm font-semibold text-gold">
-                      {event.seatSummary.available} / {event.seatSummary.total}
+                      {seatSummary.available} / {seatSummary.total}
                     </span>
                   </div>
                   <Progress value={availablePercent} className="h-2 bg-white/10" />
                   <div className="flex justify-between mt-2 text-xs text-white/40">
                     <span>{availablePercent}% tersedia</span>
-                    <span>{event.seatSummary.sold} terjual</span>
+                    <span>{seatSummary.sold} terjual</span>
                   </div>
                 </div>
 
@@ -344,7 +380,8 @@ export default function EventDetailPage() {
             {!showCheckout ? (
               <SeatMap
                 eventId={eventId}
-                seats={seats}
+                showDateId={activeShowDate?.id || null}
+                seats={filteredSeats}
                 priceCategories={event.priceCategories}
                 layoutData={event.seatMapLayout}
                 onSelectionChange={handleSelectionChange}
@@ -353,6 +390,7 @@ export default function EventDetailPage() {
             ) : (
               <CheckoutForm
                 eventId={eventId}
+                showDateId={activeShowDate?.id || null}
                 selectedSeats={selectedSeats}
                 totalPrice={totalPrice}
                 onBack={handleBackToSeats}

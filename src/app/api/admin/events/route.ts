@@ -61,6 +61,7 @@ export async function POST(request: NextRequest) {
       adminFee,
       priceCategories,
       showDates,
+      teaserVideoUrl,
     } = body
 
     if (!title || !showDate || !location || !synopsis) {
@@ -95,6 +96,7 @@ export async function POST(request: NextRequest) {
         openGate: effectiveOpenGate,
         location,
         posterUrl: posterUrl || null,
+        teaserVideoUrl: teaserVideoUrl || null,
         synopsis,
         isPublished: isPublished || false,
         adminFee: adminFee || 0,

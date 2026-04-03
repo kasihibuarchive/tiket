@@ -37,6 +37,7 @@ interface PriceCategoryData {
 
 interface SeatMapProps {
   eventId: string
+  showDateId?: string | null
   seats: SeatData[]
   priceCategories: PriceCategoryData[]
   layoutData?: any
@@ -60,7 +61,7 @@ const SEAT_GAP = 3 // px gap between seats in a block
 // =====================
 // Seat Map Component
 // =====================
-export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutData, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
+export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
   const [seats, setSeats] = useState<SeatData[]>(initialSeats)
   const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
   const [lockCountdown, setLockCountdown] = useState<number | null>(null)
@@ -530,7 +531,12 @@ export function SeatMap({ eventId, seats: initialSeats, priceCategories, layoutD
     return (
       <div className="w-full max-w-5xl mx-auto">
         {/* Stage */}
-        <StageRenderer stageType={parsedLayout?.stageType} size="lg" />
+        <StageRenderer
+          stageType={parsedLayout?.stageType}
+          size="lg"
+          thrustWidth={(parsedLayout as any)?.thrustWidth}
+          thrustDepth={(parsedLayout as any)?.thrustDepth}
+        />
 
         {/* Objects overlay */}
         {parsedLayout?.objects && parsedLayout.objects.length > 0 && (

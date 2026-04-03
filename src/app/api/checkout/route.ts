@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const {
-      eventId, customerName, customerEmail, customerWa, seatCodes, sessionId,
+      eventId, showDateId, customerName, customerEmail, customerWa, seatCodes, sessionId,
       promoCodeId, merchandise,
     } = body
 
@@ -22,8 +22,12 @@ export async function POST(request: NextRequest) {
 
     const checkoutId = CHECKOUT_PREFIX + sessionId
 
-    // Validate seats
-    const seats = await db.seat.findMany({ where: { eventId, seatCode: { in: seatCodes } } })
+    // Validate seats — if showDateId is provided, filter by it
+    const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+    if (showDateId) {
+      seatWhere.eventShowDateId = showDateId
+    }
+    const seats = await db.seat.findMany({ where: seatWhere })
     if (seats.length !== seatCodes.length) return NextResponse.json({ error: 'Kursi tidak ditemukan' }, { status: 404 })
 
     const invalidSeats = seats.filter((s) => s.status === 'SOLD')
@@ -235,6 +239,7 @@ export async function POST(request: NextRequest) {
       data: {
         transactionId: tid,
         eventId,
+        showDateId: showDateId || null,
         customerName,
         customerEmail,
         customerWa,

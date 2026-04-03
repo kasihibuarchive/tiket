@@ -97,7 +97,9 @@ model EventShowDate {
   updatedAt DateTime @updatedAt
 
   // Relations
-  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  event       Event       @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  seats       Seat[]
+  transactions Transaction[]
 
   @@index([eventId])
 }
@@ -143,15 +145,18 @@ model Seat {
   zoneName    String?    // Zone name for General Admission grouping (e.g., "Festival Kiri")
 
   // Relations
-  event         Event         @relation(fields: [eventId], references: [id], onDelete: Cascade)
-  priceCategory PriceCategory? @relation(fields: [priceCategoryId], references: [id])
+  event          Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  eventShowDate  EventShowDate? @relation(fields: [eventShowDateId], references: [id], onDelete: Cascade)
+  priceCategory  PriceCategory? @relation(fields: [priceCategoryId], references: [id])
 
-  priceCategoryId String?
+  eventShowDateId String?
+  priceCategoryId  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([eventId, status])
+  @@index([eventShowDateId])
   @@index([seatCode])
   @@index([zoneName])
 }
@@ -170,6 +175,7 @@ model Transaction {
   id               String        @id @default(cuid())
   transactionId    String        @unique // custom format like TRX-1234 or COMP-1234
   eventId          String
+  showDateId       String?       // Which show date this transaction is for (multi-day events)
   customerName     String
   customerEmail    String
   customerWa       String        // WhatsApp number
@@ -188,12 +194,14 @@ model Transaction {
   merchandiseData  String?       // JSON: [{merchandiseId, name, price, quantity}]
 
   // Relations
-  event     Event     @relation(fields: [eventId], references: [id])
-  promoCode PromoCode? @relation(fields: [promoCodeId], references: [id])
+  event          Event          @relation(fields: [eventId], references: [id])
+  eventShowDate  EventShowDate? @relation(fields: [showDateId], references: [id])
+  promoCode      PromoCode?     @relation(fields: [promoCodeId], references: [id])
 
   @@index([transactionId])
   @@index([paymentStatus])
   @@index([customerEmail])
+  @@index([showDateId])
 }
 
 // =====================

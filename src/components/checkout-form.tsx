@@ -47,6 +47,7 @@ interface AppliedPromo {
 
 interface CheckoutFormProps {
   eventId: string
+  showDateId?: string | null
   selectedSeats: SelectedSeat[]
   totalPrice: number
   onBack: () => void
@@ -66,7 +67,7 @@ declare global {
   }
 }
 
-export function CheckoutForm({ eventId, selectedSeats, totalPrice, onBack, adminFee = 0 }: CheckoutFormProps) {
+export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, onBack, adminFee = 0 }: CheckoutFormProps) {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({
@@ -323,6 +324,7 @@ export function CheckoutForm({ eventId, selectedSeats, totalPrice, onBack, admin
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           eventId,
+          showDateId: showDateId || undefined,
           customerName: formData.customerName,
           customerEmail: formData.customerEmail,
           customerWa: formData.customerWa.startsWith('+') ? formData.customerWa : '+62' + formData.customerWa,
