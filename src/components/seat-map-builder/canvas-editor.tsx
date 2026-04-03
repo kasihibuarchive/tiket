@@ -1228,8 +1228,8 @@ export function CanvasEditor({
       const colIndices = Array.from({ length: cols }, (_, i) => i)
 
     return (
-      <div className="overflow-x-auto relative">
-        <div className="inline-block min-w-full">
+      <div className="overflow-x-auto">
+        <div className="inline-block min-w-full relative">
           {rowIndices.map((r) => (
             <div key={r} className="flex items-center gap-0.5 mb-0.5">
               {/* Row label */}
@@ -1341,11 +1341,11 @@ export function CanvasEditor({
               <div className="w-6 shrink-0" />
             </div>
           )}
+          {/* Non-clickable objects overlay — inside grid wrapper so it scrolls with columns */}
+          {objects.length > 0 && (
+            <ObjectsOverlay objects={objects} cellSize={CELL_SIZE + 2} offsetX={26} />
+          )}
         </div>
-        {/* Non-clickable objects overlay — offset for row labels (w-6 = 24px + gap 2px) */}
-        {objects.length > 0 && (
-          <ObjectsOverlay objects={objects} cellSize={CELL_SIZE + 2} offsetX={26} />
-        )}
       </div>
     )
     } catch (err) {

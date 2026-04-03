@@ -531,22 +531,9 @@ export default function SeatEditorPage() {
             thrustDepth={(parsedLayout as any)?.thrustDepth || (layoutData as any)?.thrustDepth}
           />
 
-          {/* Objects */}
-          {(() => {
-            const objs = (parsedLayout as any)?.objects || (layoutData as any)?.objects
-            if (objs && objs.length > 0) {
-              return (
-                <div className="relative mb-4">
-                  <ObjectsOverlay objects={objs} cellSize={SEAT_W + SEAT_GAP} />
-                </div>
-              )
-            }
-            return null
-          })()}
-
           {/* Grid */}
           <div className="overflow-x-auto pb-4">
-            <div className="min-w-[320px]">
+            <div className="min-w-[320px] relative" id="admin-grid-wrapper">
               {parsedLayout ? (
                 /* ─── Flat Grid: 1:1 with seat map editor ────────────── */
                 (() => {
@@ -665,6 +652,14 @@ export default function SeatEditorPage() {
                   ))}
                 </>
               )}
+              {/* Objects overlay — inside grid wrapper so it scrolls with columns */}
+              {(() => {
+                const objs = (parsedLayout as any)?.objects || (layoutData as any)?.objects
+                if (objs && objs.length > 0) {
+                  return <ObjectsOverlay objects={objs} cellSize={SEAT_W + SEAT_GAP} offsetX={24} />
+                }
+                return null
+              })()}
             </div>
           </div>
         </div>

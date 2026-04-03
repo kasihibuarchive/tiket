@@ -538,13 +538,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           thrustDepth={(parsedLayout as any)?.thrustDepth}
         />
 
-        {/* Objects overlay */}
-        {parsedLayout?.objects && parsedLayout.objects.length > 0 && (
-          <div className="relative mb-4">
-            <ObjectsOverlay objects={parsedLayout.objects} cellSize={SEAT_W + SEAT_GAP} />
-          </div>
-        )}
-
         {/* Lock rejection notice */}
         {lockRejectionMsg && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
@@ -556,7 +549,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         {/* Seat Grid — Flat grid, 1:1 with editor */}
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
-            <div className="mx-auto" style={{ minWidth: gridW }}>
+            <div className="mx-auto relative" style={{ minWidth: gridW }}>
               {displayRows.map((ri) => {
                 const label = lLabels[ri] || String.fromCharCode(65 + ri)
                 const colMap = gridLookup.get(ri) || new Map()
@@ -613,6 +606,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                   </div>
                 )
               })}
+              {/* Objects overlay — inside grid so it scrolls with columns */}
+              {parsedLayout?.objects && parsedLayout.objects.length > 0 && (
+                <ObjectsOverlay objects={parsedLayout.objects} cellSize={SEAT_W + SEAT_GAP} offsetX={24} />
+              )}
             </div>
           </div>
         </div>
