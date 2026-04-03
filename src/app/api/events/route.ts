@@ -25,10 +25,15 @@ export async function GET(request: NextRequest) {
     const eventIds = events.map((e) => e.id)
     const allPriceCategories = await db.priceCategory.findMany({ where: { eventId: { in: eventIds } } })
     const allSeats = await db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } })
+    const allShowDates = await db.eventShowDate.findMany({
+      where: { eventId: { in: eventIds } },
+      orderBy: { date: 'asc' },
+    })
 
     const eventsWithSummary = events.map((event) => {
       const eventSeats = allSeats.filter((s) => s.eventId === event.id)
       const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
+      const eventShowDates = allShowDates.filter((sd) => sd.eventId === event.id)
       const totalSeats = eventSeats.length
       const availableSeats = eventSeats.filter((s) => s.status === 'AVAILABLE').length
       const soldSeats = eventSeats.filter((s) => s.status === 'SOLD').length
@@ -46,6 +51,7 @@ export async function GET(request: NextRequest) {
         createdAt: event.createdAt,
         updatedAt: event.updatedAt,
         priceCategories: eventPriceCats,
+        showDates: eventShowDates,
         seatSummary: {
           total: totalSeats,
           available: availableSeats,

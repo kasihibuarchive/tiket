@@ -16,6 +16,10 @@ export async function GET(
 
     const priceCategories = await db.priceCategory.findMany({ where: { eventId: id } })
     const seats = await db.seat.findMany({ where: { eventId: id }, select: { status: true } })
+    const showDates = await db.eventShowDate.findMany({
+      where: { eventId: id },
+      orderBy: { date: 'asc' },
+    })
 
     const totalSeats = seats.length
     const availableSeats = seats.filter((s) => s.status === 'AVAILABLE').length
@@ -36,6 +40,7 @@ export async function GET(
     return NextResponse.json({
       ...event,
       priceCategories,
+      showDates,
       seatSummary: {
         total: totalSeats,
         available: availableSeats,

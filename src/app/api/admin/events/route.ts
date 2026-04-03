@@ -11,10 +11,15 @@ export async function GET() {
     const eventIds = events.map((e) => e.id)
     const allPriceCategories = await db.priceCategory.findMany({ where: { eventId: { in: eventIds } } })
     const allSeats = await db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } })
+    const allShowDates = await db.eventShowDate.findMany({
+      where: { eventId: { in: eventIds } },
+      orderBy: { date: 'asc' },
+    })
 
     const eventsWithSummary = events.map((event) => {
       const eventSeats = allSeats.filter((s) => s.eventId === event.id)
       const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
+      const eventShowDates = allShowDates.filter((sd) => sd.eventId === event.id)
       const totalSeats = eventSeats.length
       const availableSeats = eventSeats.filter((s) => s.status === 'AVAILABLE').length
       const soldSeats = eventSeats.filter((s) => s.status === 'SOLD').length
@@ -22,6 +27,7 @@ export async function GET() {
       return {
         ...event,
         priceCategories: eventPriceCats,
+        showDates: eventShowDates,
         seatSummary: {
           total: totalSeats,
           available: availableSeats,
@@ -54,6 +60,7 @@ export async function POST(request: NextRequest) {
       isPublished,
       adminFee,
       priceCategories,
+      showDates,
     } = body
 
     if (!title || !showDate || !location || !synopsis) {
@@ -63,13 +70,29 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create event first, then create price categories separately — NO include in create
+    // Determine the effective showDate (earliest from showDates, or provided showDate)
+    let effectiveShowDate = new Date(showDate)
+    let effectiveOpenGate = openGate ? new Date(openGate) : null
+
+    if (showDates && Array.isArray(showDates) && showDates.length > 0) {
+      // Sort by date to find earliest
+      const sorted = [...showDates].sort(
+        (a: { date: string }, b: { date: string }) => new Date(a.date).getTime() - new Date(b.date).getTime()
+      )
+      effectiveShowDate = new Date(sorted[0].date)
+      // Use openGate from earliest show date if available
+      if (sorted[0].openGate) {
+        effectiveOpenGate = new Date(sorted[0].openGate)
+      }
+    }
+
+    // Create event first, then create price categories and show dates separately — NO include in create
     const event = await db.event.create({
       data: {
         title,
         category: category || 'Teater',
-        showDate: new Date(showDate),
-        openGate: openGate ? new Date(openGate) : null,
+        showDate: effectiveShowDate,
+        openGate: effectiveOpenGate,
         location,
         posterUrl: posterUrl || null,
         synopsis,
@@ -91,9 +114,27 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    const createdPriceCats = await db.priceCategory.findMany({ where: { eventId: event.id } })
+    // Create EventShowDate records
+    if (showDates && Array.isArray(showDates) && showDates.length > 0) {
+      await db.eventShowDate.createMany({
+        data: showDates.map((sd: { date: string; openGate?: string; label?: string }) => ({
+          eventId: event.id,
+          date: new Date(sd.date),
+          openGate: sd.openGate ? new Date(sd.openGate) : null,
+          label: sd.label || null,
+        })),
+      })
+    }
 
-    return NextResponse.json({ event: { ...event, priceCategories: createdPriceCats } }, { status: 201 })
+    const createdPriceCats = await db.priceCategory.findMany({ where: { eventId: event.id } })
+    const createdShowDates = await db.eventShowDate.findMany({
+      where: { eventId: event.id },
+      orderBy: { date: 'asc' },
+    })
+
+    return NextResponse.json({
+      event: { ...event, priceCategories: createdPriceCats, showDates: createdShowDates },
+    }, { status: 201 })
   } catch (error) {
     console.error('Error creating event:', error)
     return NextResponse.json(

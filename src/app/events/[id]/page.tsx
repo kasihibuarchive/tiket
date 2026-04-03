@@ -13,7 +13,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import {
   Calendar, MapPin, Clock, Tag,
-  Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck
+  Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck, Play
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -25,6 +25,7 @@ interface EventData {
   openGate: string | null
   location: string
   posterUrl: string | null
+  teaserVideoUrl: string | null
   synopsis: string
   isPublished: boolean
   priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
@@ -46,6 +47,35 @@ const CATEGORY_ICONS: Record<string, typeof Crown> = {
   VIP: Crown,
   Regular: User,
   Student: GraduationCap,
+}
+
+/** Convert various video URLs to embeddable iframe URLs. Returns null if unparseable. */
+function getEmbedUrl(url: string): string | null {
+  if (!url || typeof url !== 'string') return null
+
+  const trimmed = url.trim()
+
+  // YouTube: https://www.youtube.com/watch?v=XXXXX
+  let match = trimmed.match(/[?&]v=([a-zA-Z0-9_-]{11})/)
+  if (match) return `https://www.youtube.com/embed/${match[1]}`
+
+  // YouTube Shorts: https://www.youtube.com/shorts/XXXXX
+  match = trimmed.match(/youtube\.com\/shorts\/([a-zA-Z0-9_-]{11})/)
+  if (match) return `https://www.youtube.com/embed/${match[1]}`
+
+  // youtu.be: https://youtu.be/XXXXX
+  match = trimmed.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/)
+  if (match) return `https://www.youtube.com/embed/${match[1]}`
+
+  // YouTube embed (already embeddable): https://www.youtube.com/embed/XXXXX
+  match = trimmed.match(/youtube\.com\/embed\/([a-zA-Z0-9_-]{11})/)
+  if (match) return trimmed
+
+  // Vimeo: https://vimeo.com/XXXXX
+  match = trimmed.match(/vimeo\.com\/(\d+)/)
+  if (match) return `https://player.vimeo.com/video/${match[1]}`
+
+  return null
 }
 
 export default function EventDetailPage() {
@@ -206,6 +236,27 @@ export default function EventDetailPage() {
                     {event.synopsis}
                   </p>
                 </div>
+
+                {/* Teaser Video */}
+                {event.teaserVideoUrl && getEmbedUrl(event.teaserVideoUrl) && (
+                  <div className="bg-white/5 rounded-lg p-4 mb-6 border border-gold/10">
+                    <h3 className="font-serif text-sm text-gold mb-3 flex items-center gap-2">
+                      <Play className="w-4 h-4" />
+                      Video Teaser
+                    </h3>
+                    <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                      <iframe
+                        className="absolute inset-0 w-full h-full rounded-lg"
+                        src={getEmbedUrl(event.teaserVideoUrl)!}
+                        title={`Teaser - ${event.title}`}
+                        frameBorder="0"
+                        loading="lazy"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  </div>
+                )}
 
                 <div className="bg-white/5 rounded-lg p-4 mb-6">
                   <div className="flex items-center justify-between mb-2">

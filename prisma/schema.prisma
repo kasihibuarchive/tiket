@@ -15,12 +15,21 @@ enum SeatMapType {
   GENERAL_ADMISSION
 }
 
+enum StageType {
+  PROSCENIUM      // Stage at front, audience faces one direction (default)
+  AMPHITHEATER    // Curved/semicircular seating around stage
+  BLACK_BOX       // Stage in center, audience on all sides
+  THRUST          // Stage extends into audience on 3 sides
+  ARENA           // Audience surrounds stage on all 4 sides
+}
+
 model SeatMap {
   id          String        @id @default(cuid())
   name        String        // e.g., "Auditorium Rendra", "Black Box"
   creatorName String        // Admin name who created it
   seatType    SeatMapType   @default(NUMBERED)
-  layoutData  Json          @default("[]") // JSON: array of seat objects or zone objects
+  stageType   StageType     @default(PROSCENIUM) // Stage layout variant
+  layoutData  Json          @default("[]") // JSON: layout object with seats/zones/objects
   isTemplate  Boolean       @default(false) // System template (locked, not directly editable)
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
@@ -50,27 +59,47 @@ model MapEditorLock {
 // EVENT MODEL
 // =====================
 model Event {
-  id          String   @id @default(cuid())
-  title       String
-  category    String   @default("Teater")
-  showDate    DateTime
-  openGate    DateTime?
-  location    String
-  posterUrl   String?
-  synopsis    String
-  isPublished Boolean  @default(false)
-  adminFee    Int      @default(0) // Admin fee per ticket in IDR
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  title           String
+  category        String   @default("Teater")
+  showDate        DateTime // Kept for backward compatibility — oldest show date
+  openGate        DateTime?
+  location        String
+  posterUrl       String?
+  synopsis        String
+  teaserVideoUrl  String?  // YouTube/Vimeo embed URL for teaser video
+  isPublished     Boolean  @default(false)
+  adminFee        Int      @default(0) // Admin fee per ticket in IDR
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // Relations
   priceCategories PriceCategory[]
+  showDates       EventShowDate[]
   seats           Seat[]
   transactions    Transaction[]
   merchandise     Merchandise[]
   promoCodes      PromoCode[]
   seatMapId       String?
   seatMap         SeatMap?  @relation(fields: [seatMapId], references: [id], onDelete: SetNull)
+}
+
+// =====================
+// EVENT SHOW DATE MODEL (Multi-Day)
+// =====================
+model EventShowDate {
+  id        String   @id @default(cuid())
+  eventId   String
+  date      DateTime // Show date & time for this day
+  openGate  DateTime? // Gate opening time for this specific day
+  label     String?  // Custom label e.g., "Premiere", " Gala", "Day 1"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
 }
 
 // =====================

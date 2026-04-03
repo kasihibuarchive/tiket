@@ -21,6 +21,10 @@ export async function GET(
       orderBy: { createdAt: 'desc' },
       take: 50,
     })
+    const showDates = await db.eventShowDate.findMany({
+      where: { eventId: id },
+      orderBy: { date: 'asc' },
+    })
 
     // Attach priceCategory to each seat
     const seatsWithCat = seats.map((seat) => {
@@ -28,7 +32,9 @@ export async function GET(
       return { ...seat, priceCategory: cat }
     })
 
-    return NextResponse.json({ event: { ...event, priceCategories, seats: seatsWithCat, transactions } })
+    return NextResponse.json({
+      event: { ...event, priceCategories, seats: seatsWithCat, transactions, showDates },
+    })
   } catch (error) {
     console.error('Error fetching admin event:', error)
     return NextResponse.json(
@@ -56,6 +62,7 @@ export async function PUT(
       isPublished,
       adminFee,
       priceCategories,
+      showDates,
     } = body
 
     const event = await db.event.findUnique({ where: { id } })
@@ -63,13 +70,27 @@ export async function PUT(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
+    // Determine effective showDate (earliest from showDates, or provided showDate)
+    let effectiveShowDate = showDate ? new Date(showDate) : event.showDate
+    let effectiveOpenGate = openGate ? new Date(openGate) : event.openGate
+
+    if (showDates && Array.isArray(showDates) && showDates.length > 0) {
+      const sorted = [...showDates].sort(
+        (a: { date: string }, b: { date: string }) => new Date(a.date).getTime() - new Date(b.date).getTime()
+      )
+      effectiveShowDate = new Date(sorted[0].date)
+      if (sorted[0].openGate) {
+        effectiveOpenGate = new Date(sorted[0].openGate)
+      }
+    }
+
     await db.event.update({
       where: { id },
       data: {
         title: title ?? event.title,
         category: category ?? event.category,
-        showDate: showDate ? new Date(showDate) : event.showDate,
-        openGate: openGate ? new Date(openGate) : event.openGate,
+        showDate: effectiveShowDate,
+        openGate: effectiveOpenGate,
         location: location ?? event.location,
         posterUrl: posterUrl !== undefined ? posterUrl : event.posterUrl,
         synopsis: synopsis ?? event.synopsis,
@@ -93,11 +114,32 @@ export async function PUT(
       })
     }
 
+    // Update show dates if provided — delete all old, create new
+    if (showDates && Array.isArray(showDates)) {
+      await db.eventShowDate.deleteMany({ where: { eventId: id } })
+      if (showDates.length > 0) {
+        await db.eventShowDate.createMany({
+          data: showDates.map((sd: { date: string; openGate?: string; label?: string }) => ({
+            eventId: id,
+            date: new Date(sd.date),
+            openGate: sd.openGate ? new Date(sd.openGate) : null,
+            label: sd.label || null,
+          })),
+        })
+      }
+    }
+
     // Re-fetch separately — NO include
     const updatedEvent = await db.event.findUnique({ where: { id } })
     const updatedPriceCats = await db.priceCategory.findMany({ where: { eventId: id } })
+    const updatedShowDates = await db.eventShowDate.findMany({
+      where: { eventId: id },
+      orderBy: { date: 'asc' },
+    })
 
-    return NextResponse.json({ event: { ...updatedEvent, priceCategories: updatedPriceCats } })
+    return NextResponse.json({
+      event: { ...updatedEvent, priceCategories: updatedPriceCats, showDates: updatedShowDates },
+    })
   } catch (error) {
     console.error('Error updating event:', error)
     return NextResponse.json(
@@ -122,6 +164,7 @@ export async function DELETE(
     await db.transaction.deleteMany({ where: { eventId: id } })
     await db.seat.deleteMany({ where: { eventId: id } })
     await db.priceCategory.deleteMany({ where: { eventId: id } })
+    await db.eventShowDate.deleteMany({ where: { eventId: id } })
     await db.event.delete({ where: { id } })
 
     return NextResponse.json({ message: 'Event deleted successfully' })

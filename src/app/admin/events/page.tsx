@@ -22,7 +22,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import {
-  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2
+  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video
 } from 'lucide-react'
 
 interface EventData {
@@ -50,6 +50,7 @@ interface EventFormData {
   openGate: string
   location: string
   posterUrl: string
+  teaserVideoUrl: string
   synopsis: string
   isPublished: boolean
   adminFee: number
@@ -63,6 +64,7 @@ const emptyForm: EventFormData = {
   openGate: '',
   location: '',
   posterUrl: '',
+  teaserVideoUrl: '',
   synopsis: '',
   isPublished: false,
   adminFee: 0,
@@ -123,6 +125,7 @@ export default function AdminEventsPage() {
       openGate: '',
       location: event.location,
       posterUrl: '',
+      teaserVideoUrl: (event as any).teaserVideoUrl || '',
       synopsis: '',
       isPublished: event.isPublished,
       adminFee: (event as any).adminFee || 0,
@@ -504,6 +507,20 @@ export default function AdminEventsPage() {
                 onChange={(e) => setFormData({ ...formData, posterUrl: e.target.value })}
                 placeholder="https://example.com/poster.jpg"
               />
+            </div>
+
+            {/* Teaser Video URL */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium flex items-center gap-2">
+                <Video className="w-4 h-4 text-gold" />
+                URL Video Teaser (opsional)
+              </Label>
+              <Input
+                value={formData.teaserVideoUrl}
+                onChange={(e) => setFormData({ ...formData, teaserVideoUrl: e.target.value })}
+                placeholder="https://www.youtube.com/watch?v=..."
+              />
+              <p className="text-xs text-muted-foreground">Mendukung YouTube dan Vimeo. Video akan ditampilkan di halaman publik event.</p>
             </div>
 
             {/* Synopsis */}

@@ -1,6 +1,19 @@
 // Shared seat layout parsing utilities
 // Used by both the public seat map (seat-map.tsx) and the usher seat map view
 
+export type LayoutObjectType = 'FOH' | 'ENTRANCE' | 'CUSTOM_SHAPE'
+
+export interface LayoutObject {
+  id: string
+  type: LayoutObjectType
+  label: string
+  r: number
+  c: number
+  w: number
+  h: number
+  color: string
+}
+
 export interface ParsedLayout {
   gridSize: { rows: number; cols: number }
   rowLabels: string[]
@@ -9,6 +22,8 @@ export interface ParsedLayout {
   rowSeatMap: Map<number, Array<{ c: number; seatNum: number; block?: string }>>
   embeddedRows: Record<string, number> // source row index → target row index
   displayRows: number[] // row indices to actually render (excludes embedded source rows)
+  objects?: LayoutObject[]
+  stageType?: string
 }
 
 /**
@@ -148,5 +163,22 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
     }
   }
 
-  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows }
+  // Parse non-clickable objects
+  const objects: LayoutObject[] = Array.isArray(data.objects)
+    ? data.objects.map((o: any) => ({
+        id: o.id || `obj-${Math.random().toString(36).slice(2, 8)}`,
+        type: (o.type || 'CUSTOM_SHAPE') as LayoutObjectType,
+        label: o.label || '',
+        r: o.r ?? 0,
+        c: o.c ?? 0,
+        w: o.w ?? 1,
+        h: o.h ?? 1,
+        color: o.color || '#6B7280',
+      }))
+    : []
+
+  // Parse stage type
+  const stageType: string = data.stageType || 'PROSCENIUM'
+
+  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType }
 }
