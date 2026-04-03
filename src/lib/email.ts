@@ -1,13 +1,16 @@
 import nodemailer from 'nodemailer'
 import { generateTicketPdf } from '@/lib/generate-ticket-pdf'
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-})
+// Lazy transporter — created fresh on every call so runtime env vars are always used
+function getTransporter() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: process.env.EMAIL_USER,
+      pass: process.env.EMAIL_PASS,
+    },
+  })
+}
 
 interface EmailTicketData {
   customerName: string
@@ -28,17 +31,35 @@ interface EmailTicketData {
 }
 
 export async function sendETicketEmail(data: EmailTicketData) {
+  console.log('[EMAIL] sendETicketEmail called for:', data.customerEmail, '| order:', data.transactionId)
+
+  // Check env vars first
+  const emailUser = process.env.EMAIL_USER
+  const emailPass = process.env.EMAIL_PASS
+  if (!emailUser || !emailPass) {
+    console.error('[EMAIL] Missing EMAIL_USER or EMAIL_PASS! USER:', emailUser ? 'SET' : 'UNDEF', 'PASS:', emailPass ? 'SET' : 'UNDEF')
+    return
+  }
+  console.log('[EMAIL] Env vars OK, generating PDF...')
+
   // Generate PDF e-ticket
-  const pdfBuffer = await generateTicketPdf({
-    customerName: data.customerName,
-    eventName: data.eventName,
-    showDate: data.showDate,
-    location: data.location,
-    seatCodes: data.seatCodes,
-    transactionId: data.transactionId,
-    totalAmount: data.totalAmount,
-    qrCodeDataUrl: data.qrCodeDataUrl,
-  })
+  let pdfBuffer: Buffer
+  try {
+    pdfBuffer = await generateTicketPdf({
+      customerName: data.customerName,
+      eventName: data.eventName,
+      showDate: data.showDate,
+      location: data.location,
+      seatCodes: data.seatCodes,
+      transactionId: data.transactionId,
+      totalAmount: data.totalAmount,
+      qrCodeDataUrl: data.qrCodeDataUrl,
+    })
+    console.log('[EMAIL] PDF generated, size:', pdfBuffer.length, 'bytes. Sending email via SMTP...')
+  } catch (pdfErr: any) {
+    console.error('[EMAIL] ❌ Failed to generate PDF:', pdfErr.message || pdfErr)
+    throw pdfErr
+  }
 
   const html = `
     <!DOCTYPE html>
@@ -115,17 +136,25 @@ export async function sendETicketEmail(data: EmailTicketData) {
     </html>
   `
 
-  await transporter.sendMail({
-    from: `"Teater Rendra" <${process.env.EMAIL_USER}>`,
-    to: data.customerEmail,
-    subject: 'E-TIKET TEATER RENDRA',
-    html,
-    attachments: [
-      {
-        filename: `e-ticket-${data.transactionId}.pdf`,
-        content: pdfBuffer,
-        contentType: 'application/pdf',
-      },
-    ],
-  })
+  const transporter = getTransporter()
+
+  try {
+    const info = await transporter.sendMail({
+      from: `"Teater Rendra" <${emailUser}>`,
+      to: data.customerEmail,
+      subject: 'E-TIKET TEATER RENDRA',
+      html,
+      attachments: [
+        {
+          filename: `e-ticket-${data.transactionId}.pdf`,
+          content: pdfBuffer,
+          contentType: 'application/pdf',
+        },
+      ],
+    })
+    console.log('[EMAIL] ✅ Email sent successfully! MessageID:', info.messageId, 'to:', data.customerEmail)
+  } catch (err: any) {
+    console.error('[EMAIL] ❌ Failed to send email:', err.message || err)
+    throw err
+  }
 }

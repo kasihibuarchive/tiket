@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
         const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
           weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
         })
+        console.log('[WEBHOOK] Sending e-ticket email to:', transaction.customerEmail, 'for order:', order_id)
         sendETicketEmail({
           customerName: transaction.customerName,
           customerEmail: transaction.customerEmail,
@@ -74,7 +75,9 @@ export async function POST(request: NextRequest) {
           totalAmount: transaction.totalAmount,
           qrCodeDataUrl: qrDataUrl,
           template: emailTemplate ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer } : undefined,
-        }).catch((emailError: any) => console.error('Failed to send E-Ticket email:', emailError))
+        }).then(() => {
+          console.log('[WEBHOOK] E-ticket email sent successfully to:', transaction.customerEmail)
+        }).catch((emailError: any) => console.error('[WEBHOOK] Failed to send E-Ticket email:', emailError))
       }
 
       return NextResponse.json({ status: 'ok' })

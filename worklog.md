@@ -83,3 +83,25 @@ Stage Summary:
 - Login fix: ✅ admin/admin123 and usher1/usher123 both login successfully
 - Email fix: ✅ env var mismatch corrected (EMAIL_USER/EMAIL_PASS now matches code)
 - Seed API: ✅ Now supports role parameter for creating usher accounts
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix email tidak terkirim ke pemesan
+
+Work Log:
+- Found root cause: `.env` uses `EMAIL_USER`/`EMAIL_PASS` but code reads `MAIL_USER`/`MAIL_PASS`
+- Fixed `src/lib/email.ts`: Changed env var names to match `.env`
+- Refactored transporter from module-level constant to lazy function (created inside sendETicketEmail)
+- Added comprehensive logging: env var check, PDF generation, SMTP send, success/failure
+- Fixed webhook and verify routes with detailed email logging
+- Fixed inline Python daemon SyntaxError by creating proper `daemon.py` script
+- Created `daemon.py` as standalone file to avoid bash escaping issues
+- Tested email via CLI: successfully sent to yunchaaruna@gmail.com
+- Removed test-email endpoint (404 in standalone mode for new routes)
+
+Stage Summary:
+- Email fix deployed: env vars now match, transporter is lazy
+- CLI test confirmed email works with Gmail SMTP
+- daemon.py now a proper file instead of inline bash
+- Need new transaction to verify email in production flow

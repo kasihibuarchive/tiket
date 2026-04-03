@@ -87,6 +87,7 @@ export async function GET(
               })
 
               const { sendETicketEmail } = await import('@/lib/email')
+              console.log('[VERIFY] Sending e-ticket email to:', transaction.customerEmail, 'for order:', transactionId)
               sendETicketEmail({
                 customerName: transaction.customerName,
                 customerEmail: transaction.customerEmail,
@@ -98,7 +99,9 @@ export async function GET(
                 totalAmount: transaction.totalAmount,
                 qrCodeDataUrl: qrDataUrl,
                 template: emailTemplate ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer } : undefined,
-              }).catch((err: any) => console.error('Email error:', err))
+              }).then(() => {
+                console.log('[VERIFY] E-ticket email sent successfully to:', transaction.customerEmail)
+              }).catch((err: any) => console.error('[VERIFY] Email error:', err))
             }
 
             // Refetch updated transaction
