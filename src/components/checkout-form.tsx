@@ -578,7 +578,7 @@ export function CheckoutForm({ eventId, selectedSeats, totalPrice, onBack, admin
           {liveMerchItem && (
             <div className="space-y-4">
               {liveMerchItem.imageUrl && (
-                <div className="aspect-square rounded-lg overflow-hidden bg-charcoal/5">
+                <div className="aspect-square rounded-lg overflow-hidden bg-charcoal/5 max-h-[35vh]">
                   <img src={liveMerchItem.imageUrl} alt={liveMerchItem.name} className="w-full h-full object-cover" />
                 </div>
               )}

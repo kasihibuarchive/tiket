@@ -114,7 +114,7 @@ type LayoutData = NumberedLayout | GALayout
 // ═══════════════════════════════════════════
 
 const MAX_HISTORY = 20
-const AUTOSAVE_INTERVAL = 180000 // 3 minutes
+const AUTOSAVE_INTERVAL = 60000 // 1 minute
 const CELL_SIZE = 28 // px per grid cell
 const MIN_GRID = 1
 const MAX_GRID = 30
@@ -1857,8 +1857,14 @@ export function CanvasEditor({
             )}
           </div>
 
-          {/* Sidebar Footer */}
-          <div className="p-4 border-t border-white/10 space-y-2">
+          {/* Sidebar Footer - Sticky */}
+          <div className="p-4 border-t border-white/10 space-y-2 bg-charcoal sticky bottom-0 z-10">
+            {isAutoSaving && (
+              <div className="flex items-center gap-1.5 text-[10px] text-gold/60">
+                <span className="inline-block w-2 h-2 rounded-full bg-gold animate-pulse" />
+                Menyimpan...
+              </div>
+            )}
             <Button
               onClick={() => {
                 onSaveAndExit(getExportLayoutData())
@@ -1866,7 +1872,7 @@ export function CanvasEditor({
               className="w-full bg-gold hover:bg-gold-dark text-charcoal font-medium gap-2 h-9 text-sm"
             >
               <Save className="w-4 h-4" />
-              Save & Exit
+              Simpan & Keluar
             </Button>
           </div>
         </div>

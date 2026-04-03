@@ -48,3 +48,20 @@ Stage Summary:
 - Caddy proxy on port 81 → Next.js on port 3000 working correctly
 - Admin auth flow more robust: won't create redirect loops on navigation
 - Build deployed and verified stable after 20+ seconds
+
+---
+Task ID: 1
+Agent: Main
+Task: Fix 3 bugs - Merch popup scroll, Payment gateway, Save button in seat editor
+
+Work Log:
+- Bug 1 (Merch popup scroll): Added `max-h-[35vh]` to image container in checkout-form.tsx merch dialog so image doesn't take full screen on mobile
+- Bug 2 (Payment gateway): Discovered root cause - standalone server wasn't loading .env file. Fixed Python daemon to explicitly read .env and set os.environ before exec. Verified Midtrans API key works (sandbox returns valid token). Now copies .env to standalone dir too.
+- Bug 3 (Save button): Made canvas-editor sidebar footer sticky with `sticky bottom-0`, reduced autosave interval from 3min to 1min, renamed "Save & Exit" to "Simpan & Keluar", added saving indicator. Made admin seat editor page header sticky so Simpan button always visible.
+- Rebuilt project, copied static files, started daemon with env var loading fix
+
+Stage Summary:
+- All 3 bugs fixed
+- Gateway root cause: standalone Next.js doesn't auto-load .env - must explicitly pass env vars to daemon process
+- Server running on port 3000 with Midtrans env vars properly loaded
+- Key files modified: checkout-form.tsx, canvas-editor.tsx, admin/events/[id]/seats/page.tsx

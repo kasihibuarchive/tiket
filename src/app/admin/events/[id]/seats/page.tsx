@@ -416,8 +416,8 @@ export default function SeatEditorPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+      {/* Header - Sticky */}
+      <div className="flex items-center justify-between sticky top-0 z-10 bg-[#F8F6F3] py-2 -mt-2">
         <div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">Seat Map Editor</h1>
           <p className="text-sm text-muted-foreground mt-1">
