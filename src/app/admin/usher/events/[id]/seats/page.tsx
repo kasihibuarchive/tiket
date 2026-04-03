@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   Check, X, Crown, User, GraduationCap, Loader2,
-  ArrowLeft, Mail, Phone, Hash, Clock, CreditCard, Users, ChevronRight
+  ArrowLeft, Mail, Phone, Hash, Clock, CreditCard, Users, ChevronRight, Send
 } from 'lucide-react'
 
 // =====================
@@ -89,6 +89,8 @@ export default function UsherSeatMapPage() {
   const [selectedSeatCode, setSelectedSeatCode] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isResending, setIsResending] = useState(false)
+  const [resendResult, setResendResult] = useState<{ success: boolean; message: string } | null>(null)
 
   // Fetch seats, event, and price categories
   useEffect(() => {
@@ -161,30 +163,62 @@ export default function UsherSeatMapPage() {
     return () => clearInterval(interval)
   }, [eventId, selectedSeatCode])
 
-  // Handle seat click (read-only — only sold seats show info)
+  // Handle seat click (read-only — sold and invitation seats show info)
   const handleSeatClick = useCallback((seat: SeatData) => {
-    if (seat.status === 'SOLD') {
+    if (seat.status === 'SOLD' || seat.status === 'INVITATION') {
       const ownerInfo = seatOwnerMap[seat.seatCode]
       if (ownerInfo) {
         setSelectedSeatCode(seat.seatCode)
         setSelectedSeat(ownerInfo)
+        setResendResult(null)
       }
     } else {
       setSelectedSeatCode(null)
       setSelectedSeat(null)
+      setResendResult(null)
     }
   }, [seatOwnerMap])
+
+  // Handle resend email
+  async function handleResendEmail() {
+    if (!selectedSeat?.transactionId) return
+
+    setIsResending(true)
+    setResendResult(null)
+
+    try {
+      const res = await fetch('/api/usher/resend-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transactionId: selectedSeat.transactionId,
+        }),
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        setResendResult({ success: true, message: 'E-tiket berhasil dikirim ulang!' })
+      } else {
+        setResendResult({ success: false, message: data.error || 'Gagal mengirim ulang e-tiket.' })
+      }
+    } catch {
+      setResendResult({ success: false, message: 'Terjadi kesalahan jaringan.' })
+    } finally {
+      setIsResending(false)
+    }
+  }
 
   // Compute seat stats
   const totalSeats = seats.length
   const soldSeats = seats.filter((s) => s.status === 'SOLD').length
+  const invitationSeats = seats.filter((s) => s.status === 'INVITATION').length
   const availableSeats = seats.filter((s) => s.status === 'AVAILABLE').length
   const lockedSeats = seats.filter((s) => s.status === 'LOCKED_TEMPORARY').length
   const checkedInSeats = Object.values(seatOwnerMap).filter((s) => s.checkInTime).length
 
   const getSeatColor = (seat: SeatData) => {
     if (seat.status === 'SOLD') {
-      // Checked-in seats get a different shade
       const ownerInfo = seatOwnerMap[seat.seatCode]
       if (ownerInfo?.checkInTime) {
         return 'bg-success'
@@ -261,7 +295,7 @@ export default function UsherSeatMapPage() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         <Card className="border-border/50">
           <CardContent className="p-3 text-center">
             <p className="text-xs text-muted-foreground">Total Kursi</p>
@@ -272,6 +306,12 @@ export default function UsherSeatMapPage() {
           <CardContent className="p-3 text-center">
             <p className="text-xs text-muted-foreground">Terjual</p>
             <p className="text-lg font-bold text-charcoal">{soldSeats}</p>
+          </CardContent>
+        </Card>
+        <Card className="border-border/50">
+          <CardContent className="p-3 text-center">
+            <p className="text-xs text-muted-foreground">Undangan</p>
+            <p className="text-lg font-bold text-seat-invitation">{invitationSeats}</p>
           </CardContent>
         </Card>
         <Card className="border-border/50">
@@ -337,7 +377,7 @@ export default function UsherSeatMapPage() {
                             const isLocked = seat.status === 'LOCKED_TEMPORARY'
                             const isUnavailable = seat.status === 'UNAVAILABLE'
                             const isInvitation = seat.status === 'INVITATION'
-                            const isClickable = isSold
+                            const isClickable = isSold || isInvitation
                             const isSelected = selectedSeatCode === seatCode
 
                             return (
@@ -350,7 +390,7 @@ export default function UsherSeatMapPage() {
                                   isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
                                   !isClickable && 'cursor-default',
                                   isUnavailable && 'opacity-20',
-                                  isSold && 'text-white',
+                                  (isSold || isInvitation) && 'text-white',
                                   isLocked && 'text-white',
                                   isSelected && 'ring-2 ring-gold ring-offset-1'
                                 )}
@@ -360,7 +400,7 @@ export default function UsherSeatMapPage() {
                                     : undefined
                                 }
                                 title={
-                                  isSold
+                                  isSold || isInvitation
                                     ? `${seatCode} — Klik untuk detail`
                                     : isLocked
                                     ? `${seatCode} — Dikunci`
@@ -399,7 +439,7 @@ export default function UsherSeatMapPage() {
                             const isLocked = seat.status === 'LOCKED_TEMPORARY'
                             const isUnavailable = seat.status === 'UNAVAILABLE'
                             const isInvitation = seat.status === 'INVITATION'
-                            const isClickable = isSold
+                            const isClickable = isSold || isInvitation
                             const isSelected = selectedSeatCode === seatCode
 
                             return (
@@ -412,7 +452,7 @@ export default function UsherSeatMapPage() {
                                   isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
                                   !isClickable && 'cursor-default',
                                   isUnavailable && 'opacity-20',
-                                  isSold && 'text-white',
+                                  (isSold || isInvitation) && 'text-white',
                                   isLocked && 'text-white',
                                   isSelected && 'ring-2 ring-gold ring-offset-1'
                                 )}
@@ -422,7 +462,7 @@ export default function UsherSeatMapPage() {
                                     : undefined
                                 }
                                 title={
-                                  isSold
+                                  isSold || isInvitation
                                     ? `${seatCode} — Klik untuk detail`
                                     : isLocked
                                     ? `${seatCode} — Dikunci`
@@ -518,7 +558,7 @@ export default function UsherSeatMapPage() {
                     {selectedSeatCode}
                   </CardTitle>
                   <button
-                    onClick={() => { setSelectedSeat(null); setSelectedSeatCode(null) }}
+                    onClick={() => { setSelectedSeat(null); setSelectedSeatCode(null); setResendResult(null) }}
                     className="text-muted-foreground hover:text-charcoal text-xs"
                   >
                     Tutup
@@ -567,7 +607,13 @@ export default function UsherSeatMapPage() {
                       <CreditCard className="w-3 h-3" /> Total Pembayaran
                     </p>
                     <p className="text-sm font-semibold text-charcoal">
-                      Rp {selectedSeat.totalAmount.toLocaleString('id-ID')}
+                      {selectedSeat.totalAmount === 0 ? (
+                        <Badge className="bg-seat-invitation/20 text-seat-invitation border-seat-invitation/30 text-xs">
+                          Tiket Komplimen
+                        </Badge>
+                      ) : (
+                        `Rp ${selectedSeat.totalAmount.toLocaleString('id-ID')}`
+                      )}
                     </p>
                   </div>
 
@@ -585,7 +631,7 @@ export default function UsherSeatMapPage() {
                     {selectedSeat.checkInTime ? (
                       <div className="space-y-1">
                         <Badge className="bg-success/10 text-success border-success/20 text-xs">
-                          ✓ Sudah Check-In
+                          Sudah Check-In
                         </Badge>
                         <p className="text-[10px] text-muted-foreground">
                           {new Date(selectedSeat.checkInTime).toLocaleString('id-ID', {
@@ -619,6 +665,39 @@ export default function UsherSeatMapPage() {
                     </div>
                   )}
                 </div>
+
+                {/* Resend Email Button */}
+                <div className="pt-2 space-y-3">
+                  <Button
+                    onClick={handleResendEmail}
+                    disabled={isResending}
+                    className="w-full bg-gold hover:bg-gold-dark text-charcoal text-sm"
+                    size="sm"
+                  >
+                    {isResending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Mengirim...
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4 mr-2" />
+                        Kirim Ulang E-Tiket
+                      </>
+                    )}
+                  </Button>
+
+                  {resendResult && (
+                    <p className={cn(
+                      'text-xs text-center py-1.5 px-3 rounded-md',
+                      resendResult.success
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-red-50 text-red-700 border border-red-200'
+                    )}>
+                      {resendResult.message}
+                    </p>
+                  )}
+                </div>
               </CardContent>
             </Card>
           ) : (
@@ -633,7 +712,7 @@ export default function UsherSeatMapPage() {
                       Detail Penonton
                     </p>
                     <p className="text-xs text-muted-foreground/60 mt-1">
-                      Klik kursi yang <span className="font-semibold">terjual</span> untuk melihat informasi pemesan
+                      Klik kursi yang <span className="font-semibold">terjual</span> atau <span className="font-semibold">undangan</span> untuk melihat informasi
                     </p>
                   </div>
                 </div>

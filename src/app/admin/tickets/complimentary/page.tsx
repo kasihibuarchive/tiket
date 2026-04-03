@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select'
 import {
   Gift, Send, Loader2, Ticket, Users, X, MapPin, Clock, Mail, Phone,
-  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp,
+  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp, RotateCcw,
 } from 'lucide-react'
 import { formatShortDate, formatEventDateTime } from '@/lib/date'
 
@@ -99,6 +99,10 @@ export default function ComplimentaryTicketsPage() {
   // Recent tickets
   const [recentTickets, setRecentTickets] = useState<ComplimentaryTicket[]>([])
   const [isLoadingRecent, setIsLoadingRecent] = useState(true)
+
+  // Resend email state
+  const [resendingId, setResendingId] = useState<string | null>(null)
+  const [resendResult, setResendResult] = useState<{ id: string; success: boolean; message: string } | null>(null)
 
   // ─── Derived values ─────────────────────────────────────────────────────
 
@@ -208,7 +212,7 @@ export default function ComplimentaryTicketsPage() {
         const eventData = await eventRes.json()
         if (eventData.seatMapId) {
           // Fetch seat map info
-          const mapRes = await fetch(`/api/admin/seat-maps`)
+          const mapRes = await fetch('/api/admin/seat-maps')
           if (mapRes.ok) {
             const mapsData = await mapRes.json()
             const map = (mapsData.seatMaps || []).find((m: any) => m.id === eventData.seatMapId)
@@ -255,6 +259,35 @@ export default function ComplimentaryTicketsPage() {
     if (seat.status !== 'AVAILABLE') return 'bg-gray-300 text-gray-500 cursor-not-allowed'
     if (selectedSeats.includes(seat.seatCode)) return 'bg-gold text-white cursor-pointer hover:bg-gold-dark shadow-sm ring-2 ring-gold/50'
     return 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+  }
+
+  // ─── Resend email ───────────────────────────────────────────────────────
+
+  async function handleResendEmail(ticketId: string, transactionId: string) {
+    setResendingId(ticketId)
+    setResendResult(null)
+
+    try {
+      const res = await fetch('/api/usher/resend-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId }),
+      })
+
+      const data = await res.json()
+
+      if (res.ok) {
+        setResendResult({ id: ticketId, success: true, message: 'E-tiket berhasil dikirim ulang!' })
+      } else {
+        setResendResult({ id: ticketId, success: false, message: data.error || 'Gagal mengirim ulang.' })
+      }
+    } catch {
+      setResendResult({ id: ticketId, success: false, message: 'Terjadi kesalahan jaringan.' })
+    } finally {
+      setResendingId(null)
+      // Auto-hide after 5 seconds
+      setTimeout(() => setResendResult(null), 5000)
+    }
   }
 
   // ─── Submit ─────────────────────────────────────────────────────────────
@@ -840,6 +873,7 @@ export default function ComplimentaryTicketsPage() {
                     <TableHead className="text-xs">Kursi</TableHead>
                     <TableHead className="text-xs">Dibuat</TableHead>
                     <TableHead className="text-xs text-center">Status</TableHead>
+                    <TableHead className="text-xs text-center">Aksi</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -897,6 +931,27 @@ export default function ComplimentaryTicketsPage() {
                               <XCircle className="w-3 h-3 mr-1" />
                               GAGAL
                             </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-center">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-[10px] gap-1"
+                            onClick={() => handleResendEmail(ticket.id, ticket.transactionId)}
+                            disabled={resendingId === ticket.id}
+                          >
+                            {resendingId === ticket.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <RotateCcw className="w-3 h-3" />
+                            )}
+                            Kirim Ulang
+                          </Button>
+                          {resendResult?.id === ticket.id && (
+                            <p className={`text-[10px] mt-1 ${resendResult.success ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {resendResult.message}
+                            </p>
                           )}
                         </TableCell>
                       </TableRow>

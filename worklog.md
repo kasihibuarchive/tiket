@@ -105,3 +105,25 @@ Stage Summary:
 - CLI test confirmed email works with Gmail SMTP
 - daemon.py now a proper file instead of inline bash
 - Need new transaction to verify email in production flow
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix complimentary tickets, email delivery, and add usher resend email feature
+
+Work Log:
+- Fixed email.ts: Changed from `service: 'gmail'` to explicit `host: 'smtp.gmail.com'`, `port: 587`, `secure: false`, added TLS config with `rejectUnauthorized: false` and `ciphers: 'SSLv3'`
+- Fixed usher seat map (events/[id]/seats/page.tsx): Made INVITATION seats clickable so ushers can view complimentary ticket holder info. Previously only SOLD seats were clickable.
+- Added stats card for "Undangan" (invitation) count in usher seat map
+- Created API `/api/usher/resend-email/route.ts` (POST): Resends e-ticket email for a given transactionId. Validates transaction exists and is PAID, generates QR if missing, sends email synchronously.
+- Added "Kirim Ulang E-Tiket" (Resend E-Ticket) button in usher seat info panel with loading state and success/error feedback
+- Added "Kirim Ulang" (Resend) button column in admin complimentary tickets table with per-row resend capability
+- Fixed invitation seats to render with `text-white` class for proper contrast
+- Rebuilt and restarted server successfully
+
+Stage Summary:
+- Complimentary ticket holders now visible and clickable in usher seat map
+- Email TLS config improved for better Gmail compatibility
+- Resend email feature available for both admin (complimentary table) and usher (seat info panel)
+- New file: src/app/api/usher/resend-email/route.ts
+- Modified files: src/lib/email.ts, src/app/admin/usher/events/[id]/seats/page.tsx, src/app/admin/tickets/complimentary/page.tsx
