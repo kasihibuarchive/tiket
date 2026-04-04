@@ -278,7 +278,13 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
 
     // Check if paint data exists
     if (Array.isArray(raw.seatColumns) && raw.seatColumns.length > 0) {
-      const { seats, rowLabels } = deriveGridSeats(raw.seatColumns)
+      // PRESERVE existing seats/rowLabels if they were saved with the layout.
+      // Only re-derive from seatColumns if the saved data doesn't have them,
+      // to avoid column-based normalization changing seat positions on reload.
+      const hasExistingSeats = Array.isArray(raw.seats) && raw.seats.length > 0
+      const hasExistingLabels = Array.isArray(raw.rowLabels) && raw.rowLabels.length > 0
+      const seats = hasExistingSeats ? raw.seats : deriveGridSeats(raw.seatColumns).seats
+      const rowLabels = hasExistingLabels ? raw.rowLabels : deriveGridSeats(raw.seatColumns).rowLabels
       return {
         type: 'NUMBERED',
         gridSize: {

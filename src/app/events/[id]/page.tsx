@@ -95,26 +95,19 @@ export default function EventDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
 
+  // Fetch event data (without seats — seats are fetched per show date below)
   useEffect(() => {
-    async function fetchData() {
+    async function fetchEvent() {
       try {
         setIsLoading(true)
-        const [eventRes, seatsRes] = await Promise.all([
-          fetch(`/api/events/${eventId}`),
-          fetch(`/api/events/${eventId}/seats`),
-        ])
-
-        if (!eventRes.ok || !seatsRes.ok) {
+        const eventRes = await fetch(`/api/events/${eventId}`)
+        if (!eventRes.ok) {
           setError('Event tidak ditemukan')
           setIsLoading(false)
           return
         }
-
         const eventData = await eventRes.json()
-        const seatsData = await seatsRes.json()
-
         setEvent(eventData)
-        setAllSeats(seatsData.seats || [])
       } catch (err) {
         console.error('Fetch error:', err)
         setError('Gagal memuat data')
@@ -122,8 +115,7 @@ export default function EventDetailPage() {
         setIsLoading(false)
       }
     }
-
-    if (eventId) fetchData()
+    if (eventId) fetchEvent()
   }, [eventId])
 
   // Show dates with fallback
@@ -136,9 +128,11 @@ export default function EventDetailPage() {
 
   const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
 
-  // Re-fetch seats when active show date changes — server filters by showDateId
+  // Fetch seats filtered by active show date — runs on mount AND when show date changes.
+  // This is the ONLY place seats are fetched (no separate initial fetch),
+  // preventing race conditions between unfiltered and filtered seat data.
   useEffect(() => {
-    if (!eventId) return
+    if (!eventId || !event) return
     let cancelled = false
     async function fetchSeatsByDate() {
       setAllSeats([]) // Clear immediately so stale data never shows
@@ -156,7 +150,7 @@ export default function EventDetailPage() {
     }
     fetchSeatsByDate()
     return () => { cancelled = true }
-  }, [activeShowDate?.id, eventId])
+  }, [activeShowDate?.id, eventId, event])
 
   // Seats are already filtered server-side by showDateId — use directly
   const filteredSeats = allSeats
