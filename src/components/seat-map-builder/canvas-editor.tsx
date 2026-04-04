@@ -224,38 +224,95 @@ function sortColumnsByAvgY(columns: SeatColumn[]): SeatColumn[] {
 }
 
 function deriveGridSeats(columns: SeatColumn[]): { seats: SeatPosition[]; rowLabels: string[] } {
-  // Sort columns by average Y position so guest view row order matches editor visual order.
-  // Without this, columns painted in non-sequential Y positions (e.g., D between A and B)
-  // would appear in insertion order in the guest view, breaking the layout.
-  const sorted = sortColumnsByAvgY(columns)
-  const rowLabels = sorted.map(col => col.label)
+  const SNAP = SNAP_GRID_SIZE
 
-  // First pass: compute raw grid positions for all seats
-  const rawSeats: { r: number; c: number }[] = []
-  sorted.forEach((col, rIdx) => {
+  // Collect all painted seats from all columns
+  const allSeats: { x: number; y: number; colLabel: string; colIdx: number }[] = []
+  columns.forEach((col, idx) => {
     col.seats.forEach(seat => {
-      rawSeats.push({ r: rIdx, c: Math.round(seat.x / SNAP_GRID_SIZE) })
+      allSeats.push({ x: seat.x, y: seat.y, colLabel: col.label, colIdx: idx })
     })
   })
 
-  // Normalize: shift all columns so the leftmost seat starts at c=0.
-  // This prevents empty columns on the left side of the guest view.
-  const minC = rawSeats.length > 0 ? Math.min(...rawSeats.map(s => s.c)) : 0
-  const shifted: { r: number; c: number }[] = rawSeats.map(s => ({ r: s.r, c: s.c - minC }))
+  if (allSeats.length === 0) return { seats: [], rowLabels: [] }
 
-  // Deduplicate: if two seats in the same row share the same c value,
-  // shift the later ones right so every seat gets a unique column.
-  // Without this, the viewer's colMap (Map.set) silently overwrites duplicates,
-  // making seats vanish in the guest/usher view after regeneration.
+  // Determine whether to use column-per-row mapping or position-based derivation.
+  // Column-per-row works when each column represents one horizontal row (seats at a
+  // single Y position). It breaks when seats are spread across multiple Y values
+  // within a column (e.g., user painted seats freely into a single column).
+  const uniqueYCount = new Set(allSeats.map(s => s.y)).size
+  const usePositionBased = columns.length < 2 || columns.length !== uniqueYCount
+
+  if (!usePositionBased) {
+    // ── Column-per-row mapping (safe path for well-structured data) ──
+    const sorted = sortColumnsByAvgY(columns)
+    const rowLabels = sorted.map(col => col.label)
+
+    const rawSeats: { r: number; c: number }[] = []
+    sorted.forEach((col, rIdx) => {
+      col.seats.forEach(seat => {
+        rawSeats.push({ r: rIdx, c: Math.round(seat.x / SNAP) })
+      })
+    })
+
+    const minC = rawSeats.length > 0 ? Math.min(...rawSeats.map(s => s.c)) : 0
+    const shifted = rawSeats.map(s => ({ r: s.r, c: s.c - minC }))
+
+    const seats: SeatPosition[] = []
+    const usedCPerRow = new Map<number, Set<number>>()
+    for (const s of shifted) {
+      const used = usedCPerRow.get(s.r) || new Set<number>()
+      let c = s.c
+      while (used.has(c)) c++
+      used.add(c)
+      seats.push({ r: s.r, c })
+      usedCPerRow.set(s.r, used)
+    }
+
+    return { seats, rowLabels }
+  }
+
+  // ── Position-based 2D grid derivation ──
+  // Groups seats by snapped Y position (rows), then by X position (columns).
+  // This handles cases where seats are painted freely across the canvas,
+  // e.g., all seats in a single column at various Y positions.
+
+  // Group by snapped Y position
+  const rowMap = new Map<number, typeof allSeats>()
+  for (const s of allSeats) {
+    const yKey = Math.round(s.y / SNAP)
+    if (!rowMap.has(yKey)) rowMap.set(yKey, [])
+    rowMap.get(yKey)!.push(s)
+  }
+
+  // Sort rows top-to-bottom
+  const sortedYKeys = [...rowMap.keys()].sort((a, b) => a - b)
+
+  // Global min X for column offset normalization
+  const allXKeys = allSeats.map(s => Math.round(s.x / SNAP))
+  const minX = Math.min(...allXKeys)
+
   const seats: SeatPosition[] = []
-  const usedCPerRow = new Map<number, Set<number>>()
-  for (const s of shifted) {
-    const used = usedCPerRow.get(s.r) || new Set<number>()
-    let c = s.c
-    while (used.has(c)) c++
-    used.add(c)
-    seats.push({ r: s.r, c })
-    usedCPerRow.set(s.r, used)
+  const rowLabels: string[] = []
+
+  for (const yKey of sortedYKeys) {
+    const rowSeats = rowMap.get(yKey)!
+    const rowIdx = rowLabels.length
+
+    // Sort seats within row by X position (left to right)
+    rowSeats.sort((a, b) => a.x - b.x)
+
+    // Assign column positions with dedup
+    const usedC = new Set<number>()
+    for (const s of rowSeats) {
+      let c = Math.round(s.x / SNAP) - minX
+      while (usedC.has(c)) c++
+      usedC.add(c)
+      seats.push({ r: rowIdx, c })
+    }
+
+    // Auto-generate row labels (A, B, C…) since column labels don't map 1:1 to rows
+    rowLabels.push(String.fromCharCode(65 + rowIdx))
   }
 
   return { seats, rowLabels }
@@ -301,14 +358,20 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
 
     // Check if paint data exists
     if (Array.isArray(raw.seatColumns) && raw.seatColumns.length > 0) {
-      // PRESERVE existing seats/rowLabels if they were saved with the layout.
-      // Only re-derive from seatColumns if the saved data doesn't have them,
-      // to avoid column-based normalization changing seat positions on reload.
+      const derived = deriveGridSeats(raw.seatColumns)
+
+      // Check if existing saved seats are consistent with the derived grid.
+      // If existing seats have fewer rows than derived (e.g., all r=0 when there
+      // should be 7 rows), the saved data was created by a buggy deriveGridSeats
+      // and must be re-derived from seatColumns.
       const hasExistingSeats = Array.isArray(raw.seats) && raw.seats.length > 0
       const hasExistingLabels = Array.isArray(raw.rowLabels) && raw.rowLabels.length > 0
-      const derived = deriveGridSeats(raw.seatColumns)
-      let seats = hasExistingSeats ? raw.seats : derived.seats
-      const rowLabels = hasExistingLabels ? raw.rowLabels : derived.rowLabels
+      const existingMaxRow = hasExistingSeats ? Math.max(...raw.seats.map((s: any) => s.r ?? 0)) + 1 : 0
+      const derivedMaxRow = derived.seats.length > 0 ? Math.max(...derived.seats.map(s => s.r)) + 1 : 0
+      const needsReDerive = hasExistingSeats && derivedMaxRow > existingMaxRow
+
+      let seats = (hasExistingSeats && !needsReDerive) ? raw.seats : derived.seats
+      const rowLabels = (hasExistingLabels && !needsReDerive) ? raw.rowLabels : derived.rowLabels
 
       // Deduplicate existing seats: if two seats in the same row share the
       // same c value, shift the later ones right.  This heals data that was
@@ -327,12 +390,14 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
         seats = deduped
       }
 
-      // gridSize.cols should match the actual seat spread, not canvas pixel width
+      // gridSize should match the actual seat spread, not column count.
+      // Use the max row index + 1 from seat data for accurate row count.
       const maxCol = seats.length > 0 ? Math.max(...seats.map(s => s.c)) + 1 : 1
+      const maxRow = seats.length > 0 ? Math.max(...seats.map(s => s.r)) + 1 : 1
       return {
         type: 'NUMBERED',
         gridSize: {
-          rows: raw.seatColumns.length || 1,
+          rows: maxRow,
           cols: maxCol,
         },
         aisleColumns,

@@ -186,3 +186,30 @@ Stage Summary:
 - Bug fixed: `displayRows is not defined` in admin seats page (line 855)
 - File modified: `src/app/admin/events/[id]/seats/page.tsx`
 - All 5 views verified working. Screenshots saved to `/home/z/my-project/download/screenshots/`.
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix seat builder vs admin seats mismatch — deriveGridSeats produces wrong grid
+
+Work Log:
+- User reported seat builder (canvas) shows 7-row layout but admin seats shows 1 row × 28 cols
+- Analyzed DB data: "test" seatmap has 1 SeatColumn with 28 seats at 7 unique Y positions
+- Root cause: deriveGridSeats() maps each SeatColumn to a row (column index = row index)
+  - With 1 column → all 28 seats get r=0 → 1 row
+  - But canvas actually shows 7 rows (7 unique Y values: y=32,64,96,128,160,192,224)
+- Also found gridSize.rows was set to seatColumns.length (1) instead of actual row count
+- Fixed deriveGridSeats() with hybrid approach:
+  - If columns.length matches unique Y count → column-per-row (safe for well-structured data)
+  - If mismatch → position-based 2D grid derivation (Y→row, X→col)
+- Fixed normalizeLayoutData(): gridSize.rows uses max seat r + 1, not column count
+- Fixed normalizeLayoutData(): added needsReDerive check to heal corrupted saved data
+  - If derivedMaxRow > existingMaxRow → force re-derive from seatColumns
+- Verified fix for "test" seatmap: now correctly produces 7 rows × 9 cols
+- Verified "tes" and "Screenshot-Test" seatmaps unaffected (still 4 rows each)
+- Regenerated TEST event seats: 28 seats across 7 rows (A-1..A-9, B-1..B-9, C-1..C-2, D-1..D-2, E-1..E-2, F-1..F-2, G-1..G-2)
+
+Stage Summary:
+- Files modified: src/components/seat-map-builder/canvas-editor.tsx
+- 3 changes: (1) deriveGridSeats hybrid logic, (2) gridSize.rows from seat data, (3) needsReDerive heal check
+- DB data fixed for "test" seatmap and TEST event seats regenerated
