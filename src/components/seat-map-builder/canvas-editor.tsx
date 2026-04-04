@@ -1016,6 +1016,11 @@ export function CanvasEditor({
     lastPaintedPosRef.current = null
   }, [])
 
+  const handlePaintCanvasMouseLeave = useCallback(() => {
+    isPaintDraggingRef.current = false
+    lastPaintedPosRef.current = null
+  }, [])
+
   // Canvas context menu (right-click to erase)
   const handlePaintCanvasContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
