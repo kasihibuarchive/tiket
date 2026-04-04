@@ -381,7 +381,7 @@ export default function EventDetailPage() {
 
         {/* Seat Selection */}
         <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 abstract-bg">
-          <div className="max-w-5xl mx-auto">
+          <div className="max-w-7xl mx-auto">
             <div className="text-center mb-8">
               <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">Pilih kursi Anda</p>
               <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">

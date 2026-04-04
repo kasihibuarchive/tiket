@@ -89,6 +89,7 @@ interface SeatData {
   col: number
   priceCategoryId: string | null
   priceCategory: { id: string; name: string; price: number; colorCode: string } | null
+  eventShowDateId?: string | null
 }
 
 interface PriceCategoryData {
@@ -98,29 +99,50 @@ interface PriceCategoryData {
   colorCode: string
 }
 
+interface ShowDateData {
+  id: string
+  date: string
+  openGate: string | null
+  label: string | null
+}
+
 interface EventInfo {
   id: string
   title: string
   seatMapId: string | null
   seatType?: string
+  showDates?: ShowDateData[]
 }
 
 export default function SeatEditorPage() {
   const params = useParams()
   const eventId = params.id as string
 
-  const [seats, setSeats] = useState<SeatData[]>([])
+  const [allSeats, setAllSeats] = useState<SeatData[]>([])
   const [priceCategories, setPriceCategories] = useState<PriceCategoryData[]>([])
   const [eventInfo, setEventInfo] = useState<EventInfo | null>(null)
   const [layoutData, setLayoutData] = useState<any>(null)
   const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(true)
+  const [showDates, setShowDates] = useState<ShowDateData[]>([])
+  const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(-1) // -1 = all days
   const [isSaving, setIsSaving] = useState(false)
   const [isDeletingSeats, setIsDeletingSeats] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   const isDraggingRef = useRef(false)
   const dragModeRef = useRef<'select' | 'deselect'>('select')
+
+  // Active show date
+  const activeShowDate = selectedShowDateIdx >= 0 && showDates[selectedShowDateIdx]
+    ? showDates[selectedShowDateIdx]
+    : null
+
+  // Filter seats based on selected day
+  const seats = useMemo(() => {
+    if (!activeShowDate) return allSeats
+    return allSeats.filter(s => s.eventShowDateId === activeShowDate.id || !s.eventShowDateId)
+  }, [allSeats, activeShowDate])
 
   useEffect(() => {
     async function fetchData() {
@@ -132,7 +154,7 @@ export default function SeatEditorPage() {
 
         if (seatsRes.ok) {
           const data = await seatsRes.json()
-          setSeats(data.seats || [])
+          setAllSeats(data.seats || [])
           setPriceCategories(data.priceCategories || [])
         }
 
@@ -140,6 +162,11 @@ export default function SeatEditorPage() {
           const data = await eventRes.json()
           const ev = data.event || null
           setEventInfo(ev)
+          // Populate show dates
+          if (ev?.showDates && ev.showDates.length > 1) {
+            setShowDates(ev.showDates)
+            setSelectedShowDateIdx(0)
+          }
           // Fetch layoutData from the seat map
           if (ev?.seatMapId) {
             try {
@@ -162,6 +189,24 @@ export default function SeatEditorPage() {
 
     if (eventId) fetchData()
   }, [eventId])
+
+  // Re-fetch seats when active show date changes
+  useEffect(() => {
+    if (!eventId) return
+    const url = activeShowDate
+      ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
+      : `/api/events/${eventId}/seats`
+    let cancelled = false
+    fetch(url)
+      .then(res => res.ok ? res.json() : { seats: [], priceCategories: [] })
+      .then(data => {
+        if (cancelled) return
+        setAllSeats(data.seats || [])
+        if (data.priceCategories) setPriceCategories(data.priceCategories)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [activeShowDate?.id, eventId])
 
   // ─── Parse layoutData for flat grid rendering (1:1 with seat map editor) ──
   const parsedLayout = useMemo(() => parseLayoutData(layoutData), [layoutData])
@@ -204,6 +249,12 @@ export default function SeatEditorPage() {
     const uniqueRows = new Set(seats.map(s => s.row))
     return uniqueRows.size <= 5 && seats.length / uniqueRows.size > 10
   }, [seats, parsedLayout])
+
+  // Clear selection when switching days
+  useEffect(() => {
+    setSelectedSeatCodes(new Set())
+    setHasUnsavedChanges(false)
+  }, [selectedShowDateIdx])
 
   // ─── Mouse handlers ─────────────────────────────────────────────────
   const handleMouseDown = useCallback((seat: SeatData) => {
@@ -253,7 +304,7 @@ export default function SeatEditorPage() {
   // ─── Seat operations (local state only — use Simpan button to persist) ─
   function assignPriceCategory(priceCategoryId: string) {
     if (selectedSeatCodes.size === 0) return
-    setSeats((prev) =>
+    setAllSeats((prev) =>
       prev.map((s) =>
         selectedSeatCodes.has(s.seatCode)
           ? { ...s, priceCategoryId, priceCategory: priceCategories.find((pc) => pc.id === priceCategoryId) || null }
@@ -266,7 +317,7 @@ export default function SeatEditorPage() {
 
   function setSeatStatus(status: string) {
     if (selectedSeatCodes.size === 0) return
-    setSeats((prev) =>
+    setAllSeats((prev) =>
       prev.map((s) =>
         selectedSeatCodes.has(s.seatCode) ? { ...s, status } : s
       )
@@ -314,7 +365,7 @@ export default function SeatEditorPage() {
     try {
       const res = await fetch(`/api/admin/events/${eventId}/seats`, { method: 'DELETE' })
       if (res.ok) {
-        setSeats([])
+        setAllSeats([])
         setSelectedSeatCodes(new Set())
       } else {
         const data = await res.json()
@@ -403,7 +454,7 @@ export default function SeatEditorPage() {
     )
   }
 
-  if (seats.length === 0) {
+  if (allSeats.length === 0) {
     return (
       <div className="text-center py-20">
         <p className="text-muted-foreground">Belum ada kursi untuk event ini.</p>
@@ -425,10 +476,41 @@ export default function SeatEditorPage() {
             {eventInfo?.title && <span className="font-medium">{eventInfo.title}</span>}
             {' — '}
             {seats.length} kursi
+            {allSeats.length !== seats.length && <span className="text-muted-foreground/60"> (dari {allSeats.length} total)</span>}
             {selectedSeatCodes.size > 0
               ? ` — ${selectedSeatCodes.size} dipilih`
               : ' — Klik dan drag untuk memilih'}
           </p>
+          {/* Multi-day tabs */}
+          {showDates.length > 1 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button
+                onClick={() => setSelectedShowDateIdx(-1)}
+                className={cn(
+                  'px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                  selectedShowDateIdx === -1
+                    ? 'bg-gold text-charcoal'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                )}
+              >
+                Semua Hari
+              </button>
+              {showDates.map((sd, idx) => (
+                <button
+                  key={sd.id || idx}
+                  onClick={() => setSelectedShowDateIdx(idx)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                    idx === selectedShowDateIdx
+                      ? 'bg-gold text-charcoal'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  )}
+                >
+                  {sd.label || `Hari ${idx + 1}`}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {hasUnsavedChanges && (

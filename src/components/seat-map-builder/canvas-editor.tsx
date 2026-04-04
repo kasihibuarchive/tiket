@@ -1299,7 +1299,7 @@ export function CanvasEditor({
             zIndex: 5,
           }}
         >
-          <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
+          <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} fillParent />
         </div>
       )
     }
@@ -1319,7 +1319,7 @@ export function CanvasEditor({
         onPositionChange={setStagePosition}
         label={`Stage (${stageType})`}
       >
-        <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
+        <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} fillParent />
       </DraggableObject>
     )
   }

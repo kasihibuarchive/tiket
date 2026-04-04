@@ -550,7 +550,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         {/* Seat Grid — Flat grid, 1:1 with editor. Stage inside so it scrolls on mobile. */}
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
-            <div className="mx-auto relative" style={{ minWidth: gridW }}>
+            <div className="relative" style={{ minWidth: gridW }}>
               {/* Stage — INSIDE scroll container */}
               {hasCustomStagePosition ? (
                 /* Custom position from admin editor (drag-and-drop) */
@@ -568,6 +568,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                     size={stageSize}
                     thrustWidth={(parsedLayout as any)?.thrustWidth}
                     thrustDepth={(parsedLayout as any)?.thrustDepth}
+                    fillParent
                   />
                 </div>
               ) : !isInsetStage ? (
@@ -786,7 +787,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
 
       {/* Seat Grid — Stage inside so it scrolls on mobile */}
       <div className="overflow-x-auto pb-4">
-        <div className="min-w-[320px]">
+        <div className="min-w-[320px] relative">
           {/* Stage — inside scroll container */}
           <StageRenderer stageType="PROSCENIUM" size="lg" />
           {ROW_CONFIG.map((rowConfig) => (

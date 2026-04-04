@@ -688,7 +688,7 @@ export default function AdminEventsPage() {
             </DialogClose>
             <Button
               onClick={handleSave}
-              disabled={isSaving || !formData.title || !formData.location || !formData.showDate || formData.showDates.every((sd) => !sd.date)}
+              disabled={isSaving || !formData.title || !formData.location || !formData.showDate}
               className="bg-charcoal hover:bg-charcoal/90 text-gold text-sm"
             >
               {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}

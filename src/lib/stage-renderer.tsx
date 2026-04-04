@@ -12,6 +12,8 @@ interface StageRendererProps {
   // Thrust customization (only for THRUST type)
   thrustWidth?: number    // 30-100, percentage of total width
   thrustDepth?: number    // 1-8, number of grid rows for extension
+  // Fill parent container (for draggable stage in editor)
+  fillParent?: boolean
 }
 
 const SIZE_CLASSES = {
@@ -20,17 +22,24 @@ const SIZE_CLASSES = {
   lg: { container: 'max-w-md py-5 px-8', main: 'text-lg sm:text-xl', sub: 'text-xs sm:text-sm', scale: 1.3 },
 }
 
-export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className, thrustWidth = 45, thrustDepth = 3 }: StageRendererProps) {
+export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className, thrustWidth = 45, thrustDepth = 3, fillParent = false }: StageRendererProps) {
   const sz = SIZE_CLASSES[size]
 
   const label = (
     <div className="text-center relative z-10">
-      <p className={cn('font-serif text-gold tracking-[0.3em] font-semibold', sz.main)}>
+      <p className={cn('font-serif text-gold tracking-[0.3em] font-semibold', fillParent ? 'text-[10px] sm:text-xs' : sz.main)}>
         S T A G E
       </p>
-      <p className={cn('font-serif text-gold/60 tracking-[0.2em] mt-0.5', sz.sub)}>
+      <p className={cn('font-serif text-gold/60 tracking-[0.2em] mt-0.5', fillParent ? 'text-[8px] sm:text-[10px]' : sz.sub)}>
         T E A T E R A N
       </p>
+    </div>
+  )
+
+  // Shared fill-parent stage inner box
+  const fillParentInner = (
+    <div className={cn('bg-charcoal rounded-xl border border-gold/20 stage-glow text-center flex items-center justify-center w-full h-full px-4', className)}>
+      {label}
     </div>
   )
 
@@ -38,6 +47,17 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
     case 'AMPHITHEATER': {
       // Amphitheater: semicircular stage — audience sits in curved/arc rows
       // wrapping around a central stage area. Stage is wider and rounded.
+      if (fillParent) {
+        return (
+          <div className={cn('flex justify-center w-full h-full', className)}>
+            <div className={cn('bg-charcoal border border-gold/20 stage-glow text-center overflow-hidden relative w-full h-full flex items-center justify-center px-4')}
+              style={{ borderRadius: '50% 50% 12% 12%' }}
+            >
+              {label}
+            </div>
+          </div>
+        )
+      }
       return (
         <div className={cn('mb-5 flex justify-center', className)}>
           <div
@@ -76,6 +96,17 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
       // Audience sits on 3 sides of the extension.
       // thrustWidth controls how wide the extension is (30-100%)
       // thrustDepth controls how far it extends into the audience (1-8 rows)
+      if (fillParent) {
+        const extWidth = Math.max(30, Math.min(100, thrustWidth))
+        return (
+          <div className={cn('flex flex-col items-center w-full h-full', className)}>
+            <div className={cn('bg-charcoal border border-b-0 border-gold/20 stage-glow flex-1 w-full flex items-center justify-center rounded-t-xl')} style={{ borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }}>
+              {label}
+            </div>
+            <div className="bg-charcoal border-x border-b border-gold/20 stage-glow relative" style={{ width: `${extWidth}%`, height: 20, borderBottomLeftRadius: 6, borderBottomRightRadius: 6, minWidth: 60 }} />
+          </div>
+        )
+      }
       const extWidth = Math.max(30, Math.min(100, thrustWidth))
       const extDepth = Math.max(1, Math.min(8, thrustDepth))
       const extHeightPx = extDepth * 8 * sz.scale
@@ -127,6 +158,19 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
       // Black Box: Flexible/performance space with a raised square platform
       // in the CENTER of the seating area. Audience sits on all sides
       // (typically 3 or 4 sides). The stage is more intimate, smaller.
+      if (fillParent) {
+        return (
+          <div className={cn('flex justify-center items-center w-full h-full', className)}>
+            <div className={cn('bg-charcoal border-2 border-dashed border-gold/30 stage-glow text-center relative w-full h-full flex items-center justify-center')} style={{ borderRadius: 4 }}>
+              {label}
+              <div className="absolute top-1 left-1 w-3 h-3 border-t-2 border-l-2 border-gold/40" />
+              <div className="absolute top-1 right-1 w-3 h-3 border-t-2 border-r-2 border-gold/40" />
+              <div className="absolute bottom-1 left-1 w-3 h-3 border-b-2 border-l-2 border-gold/40" />
+              <div className="absolute bottom-1 right-1 w-3 h-3 border-b-2 border-r-2 border-gold/40" />
+            </div>
+          </div>
+        )
+      }
       return (
         <div className={cn('mb-5 flex justify-center', className)}>
           <div className="relative flex flex-col items-center">
@@ -185,6 +229,15 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
       // Arena / Theater-in-the-round: Central stage completely surrounded
       // by audience on all 4 sides. Like a boxing ring or circular performance.
       // The stage is typically circular/oval in the center.
+      if (fillParent) {
+        return (
+          <div className={cn('flex justify-center items-center w-full h-full', className)}>
+            <div className={cn('bg-charcoal border border-gold/20 stage-glow text-center overflow-hidden w-full h-full flex items-center justify-center')} style={{ borderRadius: '50%' }}>
+              {label}
+            </div>
+          </div>
+        )
+      }
       const diameter = size === 'sm' ? 160 : size === 'md' ? 200 : 250
 
       return (
@@ -245,6 +298,15 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
     default: {
       // Proscenium: Standard stage at front, audience faces it from one direction.
       // The most common theater layout — rectangular stage with an arch frame.
+      if (fillParent) {
+        return (
+          <div className={cn('flex justify-center w-full h-full', className)}>
+            <div className={cn('bg-charcoal rounded-xl border border-gold/20 stage-glow text-center flex items-center justify-center w-full h-full px-4')}>
+              {label}
+            </div>
+          </div>
+        )
+      }
       return (
         <div className={cn('mb-5 flex justify-center', className)}>
           <div className={cn('bg-charcoal rounded-xl border border-gold/20 stage-glow text-center', sz.container)}>

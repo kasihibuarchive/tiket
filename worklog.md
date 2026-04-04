@@ -128,3 +128,53 @@ Fix 3 bugs: (1) Draggable/resizable stage in admin editor, (2) Guest view empty 
 2. **Removed fallback filtering**: Changed `filteredSeats` from a complex `useMemo` with fallback logic (`dateSeats.length > 0 ? dateSeats : allSeats.filter(s => !s.eventShowDateId)`) to simply `const filteredSeats = allSeats` — since the server already filters by showDateId, no client-side filtering is needed. The old fallback was returning wrong data when seats didn't have showDateId set.
 
 **Lint**: All changes pass lint (0 new errors). TypeScript compiles without errors in modified files. Pre-existing errors remain in unrelated files.
+
+---
+## Task ID: 4 - main-agent
+### Work Task
+Fix 4 bugs: (1) Multi-day tabs in admin seat editor, (2) Empty space on right in guest view, (3) Event creation button stays disabled, (4) Stage shape doesn't resize with drag.
+
+### Work Summary
+
+#### BUG 1: Multi-day tabs in admin seat editor
+**File modified**: `src/app/admin/events/[id]/seats/page.tsx`
+
+**Changes**:
+1. Added `ShowDateData` interface and `showDates` field to `EventInfo`
+2. Added state: `showDates`, `selectedShowDateIdx` (default -1 = all days), `allSeats` (replaces old `seats` state)
+3. `seats` is now a `useMemo` derived from `allSeats` filtered by active show date
+4. After fetching event info, if event has >1 show date, populate `showDates` and default to first day
+5. Added a `useEffect` that re-fetches seats from API when `activeShowDate?.id` changes
+6. Added pill buttons (tabs) in the header area with "Semua Hari" and per-day options
+7. Clear selection and unsaved changes when switching days
+8. Updated all `setSeats()` calls to `setAllSeats()` since seats is now derived
+9. Empty state check uses `allSeats.length` instead of `seats.length`
+
+#### BUG 2: Empty space on right in guest view
+**Files modified**: `src/components/seat-map.tsx`, `src/app/events/[id]/page.tsx`
+
+**Changes**:
+1. Removed `mx-auto` from the grid container in LayoutData mode (line 553) — replaced with just `relative` so grid is left-aligned
+2. Added `relative` to the legacy mode container for consistency
+3. Changed `max-w-5xl` to `max-w-7xl` on the guest event page seat selection section for wider layout
+
+#### BUG 3: Event creation button stays disabled
+**File modified**: `src/app/admin/events/page.tsx`
+
+**Changes**:
+1. Removed `formData.showDates.every((sd) => !sd.date)` from the disabled condition on the create/edit event button
+2. The `showDates` array always has at least one entry with empty date by default, causing `.every()` to return `true`
+3. The main `showDate` field already handles date validation, so the showDates check was redundant and blocking form submission
+
+#### BUG 4: Stage shape doesn't resize with drag
+**Files modified**: `src/lib/stage-renderer.tsx`, `src/components/seat-map-builder/canvas-editor.tsx`, `src/components/seat-map.tsx`
+
+**Changes**:
+1. Added `fillParent?: boolean` prop to `StageRendererProps`
+2. Each of the 5 stage types (PROSCENIUM, AMPHITHEATER, THRUST, BLACK_BOX, ARENA) now has a `fillParent` variant that uses `w-full h-full` instead of fixed `max-w-*` classes
+3. When `fillParent` is true, text sizing falls back to `sm` scale for consistent appearance
+4. Passed `fillParent` prop to StageRenderer in:
+   - Canvas editor's `renderDraggableStage()` (both preview and edit mode)
+   - Guest seat map when `hasCustomStagePosition` is true
+
+**Lint**: All changes pass lint (0 new errors). Pre-existing errors remain in non-project JS files.
