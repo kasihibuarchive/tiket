@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import {
-  Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw
+  Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 
@@ -137,6 +137,19 @@ export default function SeatEditorPage() {
   const activeShowDate = selectedShowDateIdx >= 0 && showDates[selectedShowDateIdx]
     ? showDates[selectedShowDateIdx]
     : null
+
+  // Group seats by showDateId for "Semua Hari" divider view
+  const seatsByDate = useMemo(() => {
+    if (activeShowDate) return null // Single day mode — no grouping needed
+    if (showDates.length <= 1) return null // Only 1 day — no divider needed
+    const groups = new Map<string | null, SeatData[]>()
+    for (const s of allSeats) {
+      const key = s.eventShowDateId || null
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(s)
+    }
+    return groups
+  }, [allSeats, activeShowDate, showDates.length])
 
   // Filter seats based on selected day
   const seats = useMemo(() => {
@@ -402,6 +415,109 @@ export default function SeatEditorPage() {
     return seat.priceCategory?.colorCode || '#C8A951'
   }
 
+  // ─── Build row layout from seat data (fallback when no parsedLayout) ──
+  function buildRowLayout(seatList: SeatData[]) {
+    if (seatList.length === 0) return []
+    const rowMap = new Map<string, SeatData[]>()
+    for (const seat of seatList) {
+      if (!rowMap.has(seat.row)) rowMap.set(seat.row, [])
+      rowMap.get(seat.row)!.push(seat)
+    }
+    const rowEntries = [...rowMap.entries()].sort((a, b) => {
+      if (a[0].length === 1 && b[0].length === 1) return a[0].localeCompare(b[0])
+      return (a[1][0]?.col || 0) - (b[1][0]?.col || 0)
+    })
+    return rowEntries.map(([rowName, rowSeats]) => {
+      const sorted = [...rowSeats].sort((a, b) => a.col - b.col)
+      return { rowName, seats: sorted, totalSeats: sorted.length }
+    })
+  }
+
+  // ─── Render flat grid from layoutData (reusable for multi-day divider) ─
+  function renderFlatGrid(lookup: Map<string, SeatData>) {
+    if (!parsedLayout) return null
+    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections } = parsedLayout
+    const { cols } = gridSize
+    const aisleColumns = parsedLayout.aisleColumns || []
+
+    // Build reverse map: target row → source rows
+    const embeddedInto: Record<number, number[]> = {}
+    for (const [srcStr, tgt] of Object.entries(embeddedRows)) {
+      const src = parseInt(srcStr)
+      if (!embeddedInto[tgt]) embeddedInto[tgt] = []
+      embeddedInto[tgt].push(src)
+    }
+
+    // Build grid lookup: displayRow → col → { seatCode, seatNum }
+    const gridLookup = new Map<number, Map<number, { seatCode: string; seatNum: number }>>()
+    for (const ri of displayRows) {
+      const colMap = new Map<number, { seatCode: string; seatNum: number }>()
+      const rowSeats = rowSeatMap.get(ri) || []
+      for (const s of rowSeats) {
+        const label = lLabels[ri] || String.fromCharCode(65 + ri)
+        colMap.set(s.c, { seatCode: `${label}-${s.seatNum}`, seatNum: s.seatNum })
+      }
+      const srcRows = embeddedInto[ri] || []
+      for (const srcRi of srcRows) {
+        const srcSeats = rowSeatMap.get(srcRi) || []
+        const srcLabel = lLabels[srcRi] || String.fromCharCode(65 + srcRi)
+        for (const s of srcSeats) {
+          colMap.set(s.c, { seatCode: `${srcLabel}-${s.seatNum}`, seatNum: s.seatNum })
+        }
+      }
+      gridLookup.set(ri, colMap)
+    }
+
+    const CELL_TOTAL = SEAT_W + SEAT_GAP
+    const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+
+    const getRowColor = (rowIdx: number) => {
+      const section = sections.find(s => rowIdx >= s.fromRow && rowIdx <= s.toRow)
+      if (section) return CATEGORY_CONFIG[section.name]?.defaultColor || section.colorCode
+      return '#8B8680'
+    }
+
+    return (
+      <div className="mx-auto" style={{ minWidth: gridW }}>
+        {displayRows.map((ri) => {
+          const label = lLabels[ri] || String.fromCharCode(65 + ri)
+          const colMap = gridLookup.get(ri) || new Map()
+          const rowColor = getRowColor(ri)
+
+          return (
+            <div
+              key={ri}
+              className="flex items-center mb-[3px]"
+              style={{ height: SEAT_W }}
+            >
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                {label}
+              </div>
+              <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
+                {Array.from({ length: cols }, (_, c) => {
+                  if (aisleColumns.includes(c)) {
+                    return (
+                      <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5" style={{ width: 2, height: SEAT_W * 0.6 }} />
+                    )
+                  }
+                  const seatInfo = colMap.get(c)
+                  if (seatInfo) {
+                    const seatData = lookup.get(seatInfo.seatCode)
+                    return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum)
+                  }
+                  return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+                })}
+              </div>
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                {label}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    )
+  }
+
   // ─── Render seat button ─────────────────────────────────────────────
   const renderSeatButton = (seat: SeatData | undefined, seatCode?: string, displayNum?: number) => {
     if (!seat) {
@@ -613,93 +729,71 @@ export default function SeatEditorPage() {
             thrustDepth={(parsedLayout as any)?.thrustDepth || (layoutData as any)?.thrustDepth}
           />
 
+          {/* ─── Multi-Day Divider View (Semua Hari) ─── */}
+          {seatsByDate && showDates.length > 1 && !activeShowDate ? (
+            <div className="space-y-8 mt-4">
+              {showDates.map((sd, dayIdx) => {
+                const daySeats = allSeats.filter(s => s.eventShowDateId === sd.id || (!s.eventShowDateId && dayIdx === 0))
+                const dayLookup = new Map<string, SeatData>()
+                for (const s of daySeats) dayLookup.set(s.seatCode, s)
+                const dayAvailable = daySeats.filter(s => s.status === 'AVAILABLE').length
+                const daySold = daySeats.filter(s => s.status === 'SOLD').length
+
+                return (
+                  <div key={sd.id || dayIdx}>
+                    {/* Day divider header */}
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+                      <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-charcoal text-gold">
+                        <CalendarDays className="w-3.5 h-3.5" />
+                        <span className="text-xs font-semibold">{sd.label || `Hari ${dayIdx + 1}`}</span>
+                        <Separator orientation="vertical" className="h-3 bg-gold/30" />
+                        <span className="text-[10px] text-gold/70">{daySeats.length} kursi</span>
+                        <span className="text-[10px] text-gold/50">•</span>
+                        <span className="text-[10px] text-emerald-400">{dayAvailable} tersedia</span>
+                        <span className="text-[10px] text-gold/50">•</span>
+                        <span className="text-[10px] text-red-400">{daySold} terjual</span>
+                      </div>
+                      <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+                    </div>
+
+                    {/* Day grid */}
+                    <div className="overflow-x-auto pb-2">
+                      <div className="min-w-[320px] relative">
+                        {parsedLayout ? (
+                          renderFlatGrid(dayLookup)
+                        ) : (
+                          <div className="space-y-1">
+                            {(() => {
+                              const dayRowLayout = buildRowLayout(daySeats)
+                              return dayRowLayout.map((row) => (
+                                <div key={row.rowName} className="flex items-center gap-1 mb-1">
+                                  <div className="w-6 text-center text-xs font-semibold font-serif text-muted-foreground shrink-0">
+                                    {row.rowName}
+                                  </div>
+                                  <div className="flex gap-1">
+                                    {row.seats.map((seat: SeatData, i: number) => renderSeatButton(seat, undefined, i + 1))}
+                                  </div>
+                                </div>
+                              ))
+                            })()}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+          <>
+          {/* ─── Single Day / Normal Grid ─── */}
+
           {/* Grid */}
           <div className="overflow-x-auto pb-4">
             <div className="min-w-[320px] relative" id="admin-grid-wrapper">
               {parsedLayout ? (
-                /* ─── Flat Grid: 1:1 with seat map editor ────────────── */
-                (() => {
-                  const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections } = parsedLayout
-                  const { cols } = gridSize
-                  const aisleColumns = parsedLayout.aisleColumns || []
-
-                  // Build reverse map: target row → source rows
-                  const embeddedInto: Record<number, number[]> = {}
-                  for (const [srcStr, tgt] of Object.entries(embeddedRows)) {
-                    const src = parseInt(srcStr)
-                    if (!embeddedInto[tgt]) embeddedInto[tgt] = []
-                    embeddedInto[tgt].push(src)
-                  }
-
-                  // Build grid lookup: displayRow → col → { seatCode, seatNum }
-                  const gridLookup = new Map<number, Map<number, { seatCode: string; seatNum: number }>>()
-                  for (const ri of displayRows) {
-                    const colMap = new Map<number, { seatCode: string; seatNum: number }>()
-                    const rowSeats = rowSeatMap.get(ri) || []
-                    for (const s of rowSeats) {
-                      const label = lLabels[ri] || String.fromCharCode(65 + ri)
-                      colMap.set(s.c, { seatCode: `${label}-${s.seatNum}`, seatNum: s.seatNum })
-                    }
-                    const srcRows = embeddedInto[ri] || []
-                    for (const srcRi of srcRows) {
-                      const srcSeats = rowSeatMap.get(srcRi) || []
-                      const srcLabel = lLabels[srcRi] || String.fromCharCode(65 + srcRi)
-                      for (const s of srcSeats) {
-                        colMap.set(s.c, { seatCode: `${srcLabel}-${s.seatNum}`, seatNum: s.seatNum })
-                      }
-                    }
-                    gridLookup.set(ri, colMap)
-                  }
-
-                  const CELL_TOTAL = SEAT_W + SEAT_GAP
-                  const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
-
-                  const getRowColor = (rowIdx: number) => {
-                    const section = sections.find(s => rowIdx >= s.fromRow && rowIdx <= s.toRow)
-                    if (section) return CATEGORY_CONFIG[section.name]?.defaultColor || section.colorCode
-                    return '#8B8680'
-                  }
-
-                  return (
-                    <div className="mx-auto" style={{ minWidth: gridW }}>
-                      {displayRows.map((ri) => {
-                        const label = lLabels[ri] || String.fromCharCode(65 + ri)
-                        const colMap = gridLookup.get(ri) || new Map()
-                        const rowColor = getRowColor(ri)
-
-                        return (
-                          <div
-                            key={ri}
-                            className="flex items-center mb-[3px]"
-                            style={{ height: SEAT_W }}
-                          >
-                            <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
-                              {label}
-                            </div>
-                            <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
-                              {Array.from({ length: cols }, (_, c) => {
-                                if (aisleColumns.includes(c)) {
-                                  return (
-                                    <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5" style={{ width: 2, height: SEAT_W * 0.6 }} />
-                                  )
-                                }
-                                const seatInfo = colMap.get(c)
-                                if (seatInfo) {
-                                  const seatData = seatLookup.get(seatInfo.seatCode)
-                                  return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum)
-                                }
-                                return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
-                              })}
-                            </div>
-                            <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
-                              {label}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )
-                })()
+                renderFlatGrid(seatLookup)
               ) : isGA ? (
                 /* ─── GA Layout: zones as rows ─────────────────────────── */
                 <div className="space-y-4">
@@ -744,6 +838,8 @@ export default function SeatEditorPage() {
               })()}
             </div>
           </div>
+          </>
+          )}
         </div>
       </div>
 

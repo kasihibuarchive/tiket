@@ -178,3 +178,64 @@ Fix 4 bugs: (1) Multi-day tabs in admin seat editor, (2) Empty space on right in
    - Guest seat map when `hasCustomStagePosition` is true
 
 **Lint**: All changes pass lint (0 new errors). Pre-existing errors remain in non-project JS files.
+
+---
+## Task ID: 5 - main-agent
+### Work Task
+Bug 3 - Overhaul Seat Map Builder with "Paint" Concept: Complete redesign of how seats are created in the NUMBERED seat map builder.
+
+### Work Summary
+
+**File modified**: `src/components/seat-map-builder/canvas-editor.tsx` (rewritten from 2747 → 2149 lines)
+
+**Core Architecture Change**:
+- **Removed**: Old rigid grid system (rows × cols toggle) where seats were placed by clicking cells in a fixed grid
+- **Added**: "Paint" concept where admin creates named columns (A–Z) and paints seats freely on an independent canvas
+
+**New Data Types**:
+- `PaintedSeat { id, x, y, seatNum }` — a seat placed at pixel coordinates on the canvas
+- `SeatColumn { id, label, color, seats[] }` — a named column group (A, B, C...) containing painted seats
+- Extended `NumberedLayout` with optional `seatColumns`, `canvasWidth`, `canvasHeight` fields
+
+**New Features**:
+1. **Column-based seat painting**: Admin adds columns labeled A–Z (max 26). Each column tracks its own painted seats, auto-numbered in painting order. Max 64 seats per column with error toast when exceeded.
+2. **Independent canvas**: Resizable via width/height inputs (320–2000px range). Default 640×480px. Separate from any grid binding.
+3. **Magnetic snap mode**: Toggle ON/OFF. When ON, seats snap to 32px invisible grid (configurable constant `SNAP_GRID_SIZE`). Visual grid dots shown when active. When OFF, seats placed at exact click positions.
+4. **Drag-painting**: Click and drag to rapidly place multiple seats. Duplicate position prevention.
+5. **Right-click to erase**: Context menu prevented; right-clicking a seat removes it and renumbers remaining seats in that column.
+6. **Column selection**: Click a column in sidebar to select it for painting. Active column highlighted with gold ring on canvas.
+7. **Column labels on canvas**: Auto-rendered on the left edge, positioned at the average Y of seats in each column.
+
+**Backward Compatibility**:
+- `normalizeLayoutData()` detects old format (seats: [{r,c}]) and auto-converts to paint columns
+- Old seats grouped by row → columns with labels from rowLabels
+- Positions converted: x = c × SNAP_GRID_SIZE, y = r × SNAP_GRID_SIZE
+- On save, `getExportLayoutData()` exports both old-format grid data AND `paintedSeats`/`canvasWidth`/`canvasHeight` for re-editing
+- Grid derivation: columns sorted by average Y → row indices; seat x positions → column positions
+- `deriveGridSeats()` and `sortColumnsByAvgY()` helper functions handle conversion
+
+**Sidebar Changes** (NUMBERED mode):
+- Removed: Grid Size rows/cols controls, Aisle Mode toggle
+- Added: "Kolom Kursi" section with Add/Delete column buttons and column list
+- Added: "Snap Magnetik" toggle (ON/OFF with blue highlight)
+- Added: "Ukuran Kanvas" section with width/height number inputs
+- Sections: Now reference column indices instead of row indices. Labels show "Kolom X–Y"
+- Section dialog: "Baris Awal/Akhir" → "Kolom Awal/Akhir"
+
+**Preserved Features**:
+- GENERAL_ADMISSION mode (GA zones, drag, resize) — completely untouched
+- Stage drag & drop (DraggableObject)
+- Objects (FOH, ENTRANCE, CUSTOM_SHAPE) with drag & drop
+- Stage type selection, thrust customization
+- Preview mode
+- Auto-save (1 min interval)
+- Undo/Redo (Ctrl+Z/Y) — now tracks paint state via layoutData
+- Element lock/unlock
+- Toast notifications via `useToast()` hook
+
+**Additional Fix**:
+- Fixed pre-existing JSX syntax error in `src/app/admin/events/[id]/seats/page.tsx` (line 788): ternary expression missing Fragment wrapper for the false branch
+
+**Build**: Passes successfully. **Lint**: 0 new errors (5 pre-existing in non-project JS files).
+**File size**: 2149 lines (well under 4000 limit).
+**All UI labels**: Indonesian (Bahasa Indonesia).

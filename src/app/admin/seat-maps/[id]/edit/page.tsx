@@ -73,6 +73,12 @@ export default function SeatMapEditPage() {
         rowLabels: Array.isArray(raw.rowLabels) ? raw.rowLabels : [],
         seats: Array.isArray(raw.seats) ? raw.seats : [],
         sections: Array.isArray(raw.sections) ? raw.sections : [],
+        // Preserve stage/objects positions (previously stripped, causing reset)
+        ...(raw.stagePosition && typeof raw.stagePosition === 'object' && { stagePosition: raw.stagePosition }),
+        ...(raw.objects && Array.isArray(raw.objects) && { objects: raw.objects }),
+        ...(raw.thrustWidth && { thrustWidth: raw.thrustWidth }),
+        ...(raw.thrustDepth && { thrustDepth: raw.thrustDepth }),
+        ...(raw.embeddedRows && typeof raw.embeddedRows === 'object' && { embeddedRows: raw.embeddedRows }),
       }
     }
     return {
@@ -81,6 +87,9 @@ export default function SeatMapEditPage() {
         ? { rows: Number(raw.gridSize.rows) || 1, cols: Number(raw.gridSize.cols) || 1 }
         : { rows: 8, cols: 10 },
       zones: Array.isArray(raw.zones) ? raw.zones : [],
+      // Preserve stage/objects positions
+      ...(raw.stagePosition && typeof raw.stagePosition === 'object' && { stagePosition: raw.stagePosition }),
+      ...(raw.objects && Array.isArray(raw.objects) && { objects: raw.objects }),
     }
   }, [])
 
