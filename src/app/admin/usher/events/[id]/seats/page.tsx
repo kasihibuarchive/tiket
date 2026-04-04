@@ -445,16 +445,17 @@ export default function UsherSeatMapPage() {
     }
 
     seatGridContent = (
-      <div className="mx-auto w-full flex flex-col items-center relative" style={{ minWidth: gridW, paddingTop }}>
-        {/* Custom stage position from admin editor — mapped from canvas coords */}
+      <div className="mx-auto w-fit flex flex-col items-center relative" style={{ minWidth: gridW, paddingTop }}>
+        {/* Custom stage position — absolutely positioned ABOVE seats as overlay layer */}
         {hasCustomStagePosition && !isInsetStage && stageGuest && (
           <div
-            className="absolute"
+            className="absolute pointer-events-none"
             style={{
               left: stageGuest.x,
               top: stageGuest.y,
               width: stageGuest.w,
-              zIndex: 5,
+              height: stageGuest.h,
+              zIndex: 10,
             }}
           >
             <StageRenderer

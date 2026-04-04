@@ -440,7 +440,7 @@ export default function SeatEditorPage() {
   }
 
   // ─── Render flat grid from layoutData (reusable for multi-day divider) ─
-  function renderFlatGrid(lookup: Map<string, SeatData>) {
+  function renderFlatGridInner(lookup: Map<string, SeatData>) {
     if (!parsedLayout) return null
     const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections } = parsedLayout
     const { cols } = gridSize
@@ -486,7 +486,7 @@ export default function SeatEditorPage() {
     }
 
     return (
-      <div className="mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
+      <>
         {displayRows.map((ri, idx) => {
           const label = lLabels[ri] || String.fromCharCode(65 + ri)
           const colMap = gridLookup.get(ri) || new Map()
@@ -534,7 +534,7 @@ export default function SeatEditorPage() {
             </React.Fragment>
           )
         })}
-      </div>
+      </>
     )
   }
 
@@ -781,9 +781,35 @@ export default function SeatEditorPage() {
 
                     {/* Day grid */}
                     <div className="overflow-x-auto pb-2">
-                      <div className="min-w-[320px] relative">
+                      <div className="min-w-[320px]">
                         {parsedLayout ? (
-                          renderFlatGrid(dayLookup)
+                          <div className="relative mx-auto w-fit flex flex-col items-center" style={{ minWidth: (() => {
+                            const CELL_TOTAL = SEAT_W + SEAT_GAP
+                            const cols = parsedLayout.gridSize.cols
+                            return cols * CELL_TOTAL - SEAT_GAP + 60
+                          })() }}>
+                            {stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
+                              <div
+                                className="absolute pointer-events-none"
+                                style={{
+                                  left: stageLayout.stageGuest.x,
+                                  top: stageLayout.stageGuest.y,
+                                  width: stageLayout.stageGuest.w,
+                                  height: stageLayout.stageGuest.h,
+                                  zIndex: 10,
+                                }}
+                              >
+                                <StageRenderer
+                                  stageType={stageLayout.stageType}
+                                  size={stageLayout.stageSize}
+                                  thrustWidth={parsedLayout?.thrustWidth}
+                                  thrustDepth={parsedLayout?.thrustDepth}
+                                  fillParent
+                                />
+                              </div>
+                            )}
+                            {renderFlatGridInner(dayLookup)}
+                          </div>
                         ) : (
                           <div className="space-y-1">
                             {(() => {
@@ -814,33 +840,52 @@ export default function SeatEditorPage() {
           {/* Grid */}
           <div className="overflow-x-auto pb-4">
             <div
-              className="min-w-[320px] relative"
+              className="min-w-[320px]"
               id="admin-grid-wrapper"
               style={stageLayout && stageLayout.hasCustomStagePos ? { paddingTop: stageLayout.paddingTop } : undefined}
             >
-              {/* Custom stage position — inside the grid container, absolutely positioned */}
-              {stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
-                <div
-                  className="absolute"
-                  style={{
-                    left: stageLayout.stageGuest.x,
-                    top: stageLayout.stageGuest.y,
-                    width: stageLayout.stageGuest.w,
-                    zIndex: 5,
-                  }}
-                >
-                  <StageRenderer
-                    stageType={stageLayout.stageType}
-                    size={stageLayout.stageSize}
-                    thrustWidth={parsedLayout?.thrustWidth}
-                    thrustDepth={parsedLayout?.thrustDepth}
-                    fillParent
-                  />
-                </div>
-              )}
-
               {parsedLayout ? (
-                renderFlatGrid(seatLookup)
+                /* Centered wrapper for both stage overlay and grid rows */
+                <div className="relative mx-auto w-fit flex flex-col items-center" style={{ minWidth: (() => {
+                  const CELL_TOTAL = SEAT_W + SEAT_GAP
+                  const cols = parsedLayout.gridSize.cols
+                  return cols * CELL_TOTAL - SEAT_GAP + 60
+                })() }}>
+                  {/* Custom stage position — absolutely positioned ABOVE seats as an overlay layer */}
+                  {stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
+                    <div
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: stageLayout.stageGuest.x,
+                        top: stageLayout.stageGuest.y,
+                        width: stageLayout.stageGuest.w,
+                        height: stageLayout.stageGuest.h,
+                        zIndex: 10,
+                      }}
+                    >
+                      <StageRenderer
+                        stageType={stageLayout.stageType}
+                        size={stageLayout.stageSize}
+                        thrustWidth={parsedLayout?.thrustWidth}
+                        thrustDepth={parsedLayout?.thrustDepth}
+                        fillParent
+                      />
+                    </div>
+                  )}
+                  {renderFlatGridInner(seatLookup)}
+                  {/* Objects overlay — inside centered grid container */}
+                  {parsedLayout?.objects && parsedLayout.objects.length > 0 && stageLayout && (
+                    <ObjectsOverlay
+                      objects={parsedLayout.objects}
+                      cellSize={SEAT_W + SEAT_GAP}
+                      offsetX={LABEL_W}
+                      canvasSeatBounds={stageLayout.canvasSeatBounds}
+                      gridCols={stageLayout.cols}
+                      gridRows={stageLayout.displayRowsCount}
+                      paddingTop={stageLayout.paddingTop}
+                    />
+                  )}
+                </div>
               ) : isGA ? (
                 /* ─── GA Layout: zones as rows ─────────────────────────── */
                 <div className="space-y-4">
@@ -876,18 +921,6 @@ export default function SeatEditorPage() {
                 </>
               )}
 
-              {/* Objects overlay — inside grid wrapper so it scrolls with columns */}
-              {parsedLayout?.objects && parsedLayout.objects.length > 0 && stageLayout && (
-                <ObjectsOverlay
-                  objects={parsedLayout.objects}
-                  cellSize={SEAT_W + SEAT_GAP}
-                  offsetX={LABEL_W}
-                  canvasSeatBounds={stageLayout.canvasSeatBounds}
-                  gridCols={stageLayout.cols}
-                  gridRows={stageLayout.displayRowsCount}
-                  paddingTop={stageLayout.paddingTop}
-                />
-              )}
             </div>
           </div>
           </>

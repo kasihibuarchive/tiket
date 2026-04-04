@@ -606,17 +606,18 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         {/* Seat Grid — Flat grid, 1:1 with editor. Stage inside so it scrolls on mobile. */}
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
-            <div className="relative mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW, paddingTop }}>
+            <div className="relative mx-auto w-fit flex flex-col items-center" style={{ minWidth: gridW, paddingTop }}>
               {/* Stage — INSIDE scroll container */}
               {hasCustomStagePosition && stageGuest ? (
                 /* Custom position from admin editor — mapped from canvas coords */
                 <div
-                  className="absolute"
+                  className="absolute pointer-events-none"
                   style={{
                     left: stageGuest.x,
                     top: stageGuest.y,
                     width: stageGuest.w,
-                    zIndex: 5,
+                    height: stageGuest.h,
+                    zIndex: 10,
                   }}
                 >
                   <StageRenderer
