@@ -321,28 +321,27 @@ export function ObjectsOverlay({
   cellSize = 28,
   offsetX = 0,
   className,
-  canvasWidth,
-  gridCols,
+  canvasSeatBounds,
+  gridCols = 0,
+  gridRows = 0,
+  paddingTop = 0,
 }: {
   objects?: Array<{ id: string; type: string; label: string; r: number; c: number; w: number; h: number; color: string; x?: number; y?: number; pixelW?: number; pixelH?: number }>
   cellSize?: number
   offsetX?: number
   className?: string
-  /** Canvas pixel width from builder (for scaling pixel positions to grid) */
-  canvasWidth?: number
-  /** Number of grid columns in the seat layout */
+  /** Canvas seat bounding box (originX, originY, spanX, spanY) for coordinate mapping */
+  canvasSeatBounds?: { originX: number; originY: number; spanX: number; spanY: number }
+  /** Number of grid columns in the guest view */
   gridCols?: number
+  /** Number of display rows in the guest view grid */
+  gridRows?: number
+  /** Extra padding-top on the container (for elements above the seat grid) */
+  paddingTop?: number
 }) {
   if (!objects || objects.length === 0) return null
 
-  // Compute scale factors when we have canvas dimensions.
-  // Canvas builder uses SNAP_GRID_SIZE=32 per cell; guest view uses cellSize.
-  // We scale pixel positions so objects align with the seat grid.
-  const hasScaleInfo = typeof canvasWidth === 'number' && typeof gridCols === 'number' && gridCols > 0
-  const canvasGridW = hasScaleInfo ? canvasWidth / gridCols : 0 // avg px per grid cell in canvas
-  const scaleX = hasScaleInfo && canvasGridW > 0 ? cellSize / canvasGridW : 1
-  const SNAP = 32
-  const scaleY = hasScaleInfo ? cellSize / SNAP : 1
+  const PAINTED = 28
 
   return (
     <div className={cn('absolute pointer-events-none', className)} style={{ top: 0, left: 0 }}>
@@ -350,14 +349,22 @@ export function ObjectsOverlay({
         const hasPixelPos = typeof obj.x === 'number' && typeof obj.y === 'number'
         let posX: number, posY: number, posW: number, posH: number
 
-        if (hasPixelPos && hasScaleInfo) {
-          // Scale canvas pixel positions to guest-view grid coordinates
-          posX = offsetX + obj.x! * scaleX
-          posY = obj.y! * scaleY
-          posW = (obj.pixelW || (obj.w * SNAP)) * scaleX
-          posH = (obj.pixelH || (obj.h * SNAP)) * scaleY
+        if (hasPixelPos && canvasSeatBounds && gridCols > 0 && gridRows > 0) {
+          // Map canvas pixel position → guest view grid coordinates.
+          // The canvas seat bounding box maps to the guest grid area:
+          //   canvas (originX, originY, spanX, spanY) → guest (offsetX, paddingTop, gridCols*cell, gridRows*cell)
+          const b = canvasSeatBounds
+          const guestGridW = gridCols * cellSize
+          const guestGridH = gridRows * cellSize
+          const objW = obj.pixelW || obj.w * PAINTED
+          const objH = obj.pixelH || obj.h * PAINTED
+
+          posX = offsetX + ((obj.x! - b.originX) / b.spanX) * guestGridW
+          posY = paddingTop + ((obj.y! - b.originY) / b.spanY) * guestGridH
+          posW = (objW / b.spanX) * guestGridW
+          posH = (objH / b.spanY) * guestGridH
         } else if (hasPixelPos) {
-          // No scale info — use raw pixels (fallback)
+          // No bounds info — use raw pixels (fallback)
           posX = obj.x!
           posY = obj.y!
           posW = obj.pixelW || obj.w * cellSize
@@ -365,7 +372,7 @@ export function ObjectsOverlay({
         } else {
           // Grid-based r,c positioning
           posX = offsetX + obj.c * cellSize
-          posY = obj.r * cellSize
+          posY = paddingTop + obj.r * cellSize
           posW = obj.w * cellSize
           posH = obj.h * cellSize
         }

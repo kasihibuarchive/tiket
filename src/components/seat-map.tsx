@@ -550,14 +550,48 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const stagePosition = parsedLayout?.stagePosition
     const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
-    // Scale canvas pixel coords → guest view grid coords when canvasWidth is known.
-    // Canvas builder uses ~32px per grid cell; guest view uses CELL_TOTAL=31px.
-    const SNAP = 32
-    const canvasW = parsedLayout?.canvasWidth
-    const canvasH = parsedLayout?.canvasHeight
-    const hasCanvasInfo = typeof canvasW === 'number' && canvasW > 0
-    const canvasScaleX = hasCanvasInfo && cols > 0 ? CELL_TOTAL / (canvasW / cols) : 1
-    const canvasScaleY = hasCanvasInfo ? CELL_TOTAL / SNAP : 1
+    // ── Canvas → Guest View coordinate mapping ──────────────────────────
+    // Map canvas pixel positions (stage, objects) to the guest view grid.
+    // We use canvasSeatBounds (bounding box of seats in canvas pixels)
+    // and map that to the guest grid area (cols × displayRows × CELL_TOTAL).
+    const csb = parsedLayout?.canvasSeatBounds
+    const hasBounds = !!csb && cols > 0 && displayRows.length > 0
+    const guestGridW = cols * CELL_TOTAL
+    const guestGridH = displayRows.length * CELL_TOTAL
+
+    // Helper: transform canvas (cx, cy, cw, ch) → guest (gx, gy, gw, gh)
+    function toGuest(cx: number, cy: number, cw: number, ch: number) {
+      if (!csb) return { x: cx, y: cy, w: cw, h: ch }
+      return {
+        x: LABEL_W + ((cx - csb.originX) / csb.spanX) * guestGridW,
+        y: ((cy - csb.originY) / csb.spanY) * guestGridH,
+        w: (cw / csb.spanX) * guestGridW,
+        h: (ch / csb.spanY) * guestGridH,
+      }
+    }
+
+    // Calculate paddingTop to accommodate elements above the seat grid.
+    // If stage/objects are above the first seat row (canvas Y < seatOriginY),
+    // they would get negative guest Y. We add paddingTop to shift everything down.
+    let stageGuest = hasCustomStagePosition && hasBounds
+      ? toGuest(stagePosition.x, stagePosition.y, stagePosition.width, stagePosition.height) : null
+    const allGuestYs: number[] = []
+    if (stageGuest) allGuestYs.push(stageGuest.y)
+    if (parsedLayout?.objects) {
+      for (const obj of parsedLayout.objects) {
+        if (typeof obj.x === 'number' && typeof obj.y === 'number' && hasBounds) {
+          const g = toGuest(obj.x, obj.y, obj.pixelW || 60, obj.pixelH || 30)
+          allGuestYs.push(g.y)
+        }
+      }
+    }
+    const minGuestY = allGuestYs.length > 0 ? Math.min(...allGuestYs) : 0
+    const paddingTop = minGuestY < 0 ? Math.ceil(-minGuestY) + 4 : 0
+
+    // Re-calculate stage guest position with paddingTop offset
+    if (stageGuest && paddingTop > 0) {
+      stageGuest = { ...stageGuest, y: stageGuest.y + paddingTop }
+    }
 
     return (
       <div className="w-full">
@@ -572,16 +606,16 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         {/* Seat Grid — Flat grid, 1:1 with editor. Stage inside so it scrolls on mobile. */}
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
-            <div className="relative mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
+            <div className="relative mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW, paddingTop }}>
               {/* Stage — INSIDE scroll container */}
-              {hasCustomStagePosition ? (
-                /* Custom position from admin editor (drag-and-drop) — scale from canvas coords */
+              {hasCustomStagePosition && stageGuest ? (
+                /* Custom position from admin editor — mapped from canvas coords */
                 <div
                   className="absolute"
                   style={{
-                    left: hasCanvasInfo ? LABEL_W + stagePosition.x * canvasScaleX : stagePosition.x,
-                    top: hasCanvasInfo ? stagePosition.y * canvasScaleY : stagePosition.y,
-                    width: hasCanvasInfo ? stagePosition.width * canvasScaleX : stagePosition.width,
+                    left: stageGuest.x,
+                    top: stageGuest.y,
+                    width: stageGuest.w,
                     zIndex: 5,
                   }}
                 >
@@ -676,8 +710,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                   objects={parsedLayout.objects}
                   cellSize={SEAT_W + SEAT_GAP}
                   offsetX={LABEL_W}
-                  canvasWidth={canvasW}
+                  canvasSeatBounds={csb}
                   gridCols={cols}
+                  gridRows={displayRows.length}
+                  paddingTop={paddingTop}
                 />
               )}
             </div>

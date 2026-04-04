@@ -418,23 +418,42 @@ export default function UsherSeatMapPage() {
     const stagePosition = parsedLayout?.stagePosition
     const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
-    // Scale canvas pixel coords → usher view grid coords
-    const SNAP = 32
-    const canvasW = parsedLayout?.canvasWidth
-    const hasCanvasInfo = typeof canvasW === 'number' && canvasW > 0
-    const canvasScaleX = hasCanvasInfo && cols > 0 ? CELL_TOTAL / (canvasW / cols) : 1
-    const canvasScaleY = hasCanvasInfo ? CELL_TOTAL / SNAP : 1
+    // ── Canvas → Usher View coordinate mapping ──────────────────────────
+    const csb = parsedLayout?.canvasSeatBounds
+    const hasBounds = !!csb && cols > 0 && displayRows.length > 0
+    const guestGridW = cols * CELL_TOTAL
+    const guestGridH = displayRows.length * CELL_TOTAL
+
+    function toGuest(cx: number, cy: number, cw: number, ch: number) {
+      if (!csb) return { x: cx, y: cy, w: cw, h: ch }
+      return {
+        x: LABEL_W + ((cx - csb.originX) / csb.spanX) * guestGridW,
+        y: ((cy - csb.originY) / csb.spanY) * guestGridH,
+        w: (cw / csb.spanX) * guestGridW,
+        h: (ch / csb.spanY) * guestGridH,
+      }
+    }
+
+    let stageGuest = hasCustomStagePosition && hasBounds
+      ? toGuest(stagePosition.x, stagePosition.y, stagePosition.width, stagePosition.height) : null
+    const allGuestYs: number[] = []
+    if (stageGuest) allGuestYs.push(stageGuest.y)
+    const minGuestY = allGuestYs.length > 0 ? Math.min(...allGuestYs) : 0
+    const paddingTop = minGuestY < 0 ? Math.ceil(-minGuestY) + 4 : 0
+    if (stageGuest && paddingTop > 0) {
+      stageGuest = { ...stageGuest, y: stageGuest.y + paddingTop }
+    }
 
     seatGridContent = (
-      <div className="mx-auto w-full flex flex-col items-center relative" style={{ minWidth: gridW }}>
-        {/* Custom stage position from admin editor — scale from canvas coords */}
-        {hasCustomStagePosition && !isInsetStage && (
+      <div className="mx-auto w-full flex flex-col items-center relative" style={{ minWidth: gridW, paddingTop }}>
+        {/* Custom stage position from admin editor — mapped from canvas coords */}
+        {hasCustomStagePosition && !isInsetStage && stageGuest && (
           <div
             className="absolute"
             style={{
-              left: hasCanvasInfo ? LABEL_W + stagePosition.x * canvasScaleX : stagePosition.x,
-              top: hasCanvasInfo ? stagePosition.y * canvasScaleY : stagePosition.y,
-              width: hasCanvasInfo ? stagePosition.width * canvasScaleX : stagePosition.width,
+              left: stageGuest.x,
+              top: stageGuest.y,
+              width: stageGuest.w,
               zIndex: 5,
             }}
           >

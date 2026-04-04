@@ -19,6 +19,22 @@ export interface LayoutObject {
   pixelH?: number
 }
 
+/**
+ * Canvas-to-guest-view coordinate transform computed from seatColumns.
+ * Consumers use these bounds to map canvas pixel coords (stage, objects)
+ * into guest-view grid coordinates.
+ */
+export interface CanvasSeatBounds {
+  /** Canvas pixel X of the leftmost seat */
+  originX: number
+  /** Canvas pixel Y of the topmost seat */
+  originY: number
+  /** Canvas pixel span of the seat grid horizontally (rightmost right edge - leftmost left edge) */
+  spanX: number
+  /** Canvas pixel span of the seat grid vertically (bottommost bottom edge - topmost top edge) */
+  spanY: number
+}
+
 export interface ParsedLayout {
   gridSize: { rows: number; cols: number }
   rowLabels: string[]
@@ -29,11 +45,14 @@ export interface ParsedLayout {
   displayRows: number[] // row indices to actually render (excludes embedded source rows)
   objects?: LayoutObject[]
   stageType?: string
+  /** Stage position in canvas pixel coordinates */
   stagePosition?: { x: number; y: number; width: number; height: number }
   thrustWidth?: number
   thrustDepth?: number
   canvasWidth?: number
   canvasHeight?: number
+  /** Bounding box of seats in canvas pixel space (for coordinate mapping) */
+  canvasSeatBounds?: CanvasSeatBounds
 }
 
 /**
@@ -215,5 +234,35 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
 
   const canvasWidth = typeof data.canvasWidth === 'number' ? data.canvasWidth : undefined
   const canvasHeight = typeof data.canvasHeight === 'number' ? data.canvasHeight : undefined
-  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType, stagePosition, thrustWidth, thrustDepth, canvasWidth, canvasHeight }
+
+  // Compute canvas seat bounds from seatColumns for coordinate mapping.
+  // This allows consumers to map stage/objects canvas pixel positions
+  // to the guest-view grid coordinate system.
+  let canvasSeatBounds: CanvasSeatBounds | undefined
+  const SNAP = 32
+  const PAINTED_SEAT = 28
+  if (Array.isArray(data.seatColumns) && data.seatColumns.length > 0) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+    for (const col of data.seatColumns) {
+      if (!Array.isArray(col.seats)) continue
+      for (const s of col.seats) {
+        const sx = typeof s.x === 'number' ? s.x : 0
+        const sy = typeof s.y === 'number' ? s.y : 0
+        if (sx < minX) minX = sx
+        if (sy < minY) minY = sy
+        if (sx + PAINTED_SEAT > maxX) maxX = sx + PAINTED_SEAT
+        if (sy + PAINTED_SEAT > maxY) maxY = sy + PAINTED_SEAT
+      }
+    }
+    if (minX < Infinity && minY < Infinity) {
+      canvasSeatBounds = {
+        originX: minX,
+        originY: minY,
+        spanX: Math.max(maxX - minX, PAINTED_SEAT),
+        spanY: Math.max(maxY - minY, PAINTED_SEAT),
+      }
+    }
+  }
+
+  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType, stagePosition, thrustWidth, thrustDepth, canvasWidth, canvasHeight, canvasSeatBounds }
 }

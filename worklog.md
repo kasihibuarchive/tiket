@@ -115,3 +115,27 @@ Stage Summary:
 - Fixed by: Adding scale factor calculation based on canvasWidth/gridCols in ObjectsOverlay and stage rendering
 - Files modified: src/lib/seat-layout.ts, src/lib/stage-renderer.tsx, src/components/seat-map.tsx, src/app/admin/usher/events/[id]/seats/page.tsx, src/app/admin/events/[id]/seats/page.tsx
 
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: E2E test - fix coordinate mapping for stage/objects (bugs 3 & 4)
+
+Work Log:
+- Created test seatmap "E2E-Test-Fix" with 3 rows × 5 cols, stage at y=10, object (LOBI) at y=220
+- Linked to TEST event and regenerated seats (15 seats: A-1 to C-5) ✓
+- First approach (canvasScaleX/Y) was WRONG: didn't account for vertical offset between canvas and guest view
+- In canvas: seats start at y=128, stage at y=10 (118px gap above seats)
+- In guest view: rows start at y=0, so stage at scaled y=9.7 overlapped first row
+- Rewrote to use canvasSeatBounds: bounding box of seats in canvas pixel space
+- Maps canvas seat bounds → guest grid bounds: originX→LABEL_W, originY→0, span→gridSpan
+- Added paddingTop calculation for elements above seat grid
+- Re-tested: stage above grid ✓, object at grid bottom ✓, proportional gaps preserved ✓
+- Cleaned up test data
+
+Stage Summary:
+- Root cause: coordinate system mismatch + lack of vertical offset compensation
+- Fix: canvasSeatBounds in parseLayoutData() + toGuest() transform in each view
+- paddingTop shifts grid down to accommodate stage/objects above seats
+- All 4 files updated: seat-layout.ts, stage-renderer.tsx, seat-map.tsx, usher seats/page.tsx
+- Server rebuilt + restarted, E2E test passed
