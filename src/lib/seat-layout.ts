@@ -32,6 +32,8 @@ export interface ParsedLayout {
   stagePosition?: { x: number; y: number; width: number; height: number }
   thrustWidth?: number
   thrustDepth?: number
+  canvasWidth?: number
+  canvasHeight?: number
 }
 
 /**
@@ -211,5 +213,7 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
   const thrustWidth = data.thrustWidth || undefined
   const thrustDepth = data.thrustDepth || undefined
 
-  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType, stagePosition, thrustWidth, thrustDepth }
+  const canvasWidth = typeof data.canvasWidth === 'number' ? data.canvasWidth : undefined
+  const canvasHeight = typeof data.canvasHeight === 'number' ? data.canvasHeight : undefined
+  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType, stagePosition, thrustWidth, thrustDepth, canvasWidth, canvasHeight }
 }

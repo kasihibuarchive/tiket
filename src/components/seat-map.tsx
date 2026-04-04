@@ -540,6 +540,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     // Calculate container width from grid columns
     const CELL_TOTAL = SEAT_W + SEAT_GAP // each grid cell (seat + gap)
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60 // +60 for row labels
+    const LABEL_W = 24 // w-6 = 24px row label area
 
     // Stage placement: use stagePosition from layoutData if available, otherwise default
     const stageType = parsedLayout?.stageType || 'PROSCENIUM'
@@ -548,6 +549,15 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
     const stagePosition = parsedLayout?.stagePosition
     const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
+
+    // Scale canvas pixel coords → guest view grid coords when canvasWidth is known.
+    // Canvas builder uses ~32px per grid cell; guest view uses CELL_TOTAL=31px.
+    const SNAP = 32
+    const canvasW = parsedLayout?.canvasWidth
+    const canvasH = parsedLayout?.canvasHeight
+    const hasCanvasInfo = typeof canvasW === 'number' && canvasW > 0
+    const canvasScaleX = hasCanvasInfo && cols > 0 ? CELL_TOTAL / (canvasW / cols) : 1
+    const canvasScaleY = hasCanvasInfo ? CELL_TOTAL / SNAP : 1
 
     return (
       <div className="w-full">
@@ -565,13 +575,13 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             <div className="relative mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
               {/* Stage — INSIDE scroll container */}
               {hasCustomStagePosition ? (
-                /* Custom position from admin editor (drag-and-drop) */
+                /* Custom position from admin editor (drag-and-drop) — scale from canvas coords */
                 <div
                   className="absolute"
                   style={{
-                    left: stagePosition.x,
-                    top: stagePosition.y,
-                    width: stagePosition.width,
+                    left: hasCanvasInfo ? LABEL_W + stagePosition.x * canvasScaleX : stagePosition.x,
+                    top: hasCanvasInfo ? stagePosition.y * canvasScaleY : stagePosition.y,
+                    width: hasCanvasInfo ? stagePosition.width * canvasScaleX : stagePosition.width,
                     zIndex: 5,
                   }}
                 >
@@ -662,7 +672,13 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
               })}
               {/* Objects overlay — inside grid so it scrolls with columns */}
               {parsedLayout?.objects && parsedLayout.objects.length > 0 && (
-                <ObjectsOverlay objects={parsedLayout.objects} cellSize={SEAT_W + SEAT_GAP} offsetX={24} />
+                <ObjectsOverlay
+                  objects={parsedLayout.objects}
+                  cellSize={SEAT_W + SEAT_GAP}
+                  offsetX={LABEL_W}
+                  canvasWidth={canvasW}
+                  gridCols={cols}
+                />
               )}
             </div>
           </div>

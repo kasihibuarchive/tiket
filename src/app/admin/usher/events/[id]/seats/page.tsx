@@ -413,20 +413,28 @@ export default function UsherSeatMapPage() {
 
     const CELL_TOTAL = SEAT_W + SEAT_GAP
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+    const LABEL_W = 24 // w-6 = 24px
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
     const stagePosition = parsedLayout?.stagePosition
     const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
+    // Scale canvas pixel coords → usher view grid coords
+    const SNAP = 32
+    const canvasW = parsedLayout?.canvasWidth
+    const hasCanvasInfo = typeof canvasW === 'number' && canvasW > 0
+    const canvasScaleX = hasCanvasInfo && cols > 0 ? CELL_TOTAL / (canvasW / cols) : 1
+    const canvasScaleY = hasCanvasInfo ? CELL_TOTAL / SNAP : 1
+
     seatGridContent = (
       <div className="mx-auto w-full flex flex-col items-center relative" style={{ minWidth: gridW }}>
-        {/* Custom stage position from admin editor */}
+        {/* Custom stage position from admin editor — scale from canvas coords */}
         {hasCustomStagePosition && !isInsetStage && (
           <div
             className="absolute"
             style={{
-              left: stagePosition.x,
-              top: stagePosition.y,
-              width: stagePosition.width,
+              left: hasCanvasInfo ? LABEL_W + stagePosition.x * canvasScaleX : stagePosition.x,
+              top: hasCanvasInfo ? stagePosition.y * canvasScaleY : stagePosition.y,
+              width: hasCanvasInfo ? stagePosition.width * canvasScaleX : stagePosition.width,
               zIndex: 5,
             }}
           >

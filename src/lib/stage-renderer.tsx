@@ -321,24 +321,54 @@ export function ObjectsOverlay({
   cellSize = 28,
   offsetX = 0,
   className,
+  canvasWidth,
+  gridCols,
 }: {
   objects?: Array<{ id: string; type: string; label: string; r: number; c: number; w: number; h: number; color: string; x?: number; y?: number; pixelW?: number; pixelH?: number }>
   cellSize?: number
   offsetX?: number
   className?: string
+  /** Canvas pixel width from builder (for scaling pixel positions to grid) */
+  canvasWidth?: number
+  /** Number of grid columns in the seat layout */
+  gridCols?: number
 }) {
   if (!objects || objects.length === 0) return null
+
+  // Compute scale factors when we have canvas dimensions.
+  // Canvas builder uses SNAP_GRID_SIZE=32 per cell; guest view uses cellSize.
+  // We scale pixel positions so objects align with the seat grid.
+  const hasScaleInfo = typeof canvasWidth === 'number' && typeof gridCols === 'number' && gridCols > 0
+  const canvasGridW = hasScaleInfo ? canvasWidth / gridCols : 0 // avg px per grid cell in canvas
+  const scaleX = hasScaleInfo && canvasGridW > 0 ? cellSize / canvasGridW : 1
+  const SNAP = 32
+  const scaleY = hasScaleInfo ? cellSize / SNAP : 1
 
   return (
     <div className={cn('absolute pointer-events-none', className)} style={{ top: 0, left: 0 }}>
       {objects.map((obj) => {
-        // Use pixel-based positions (from canvas drag-and-drop) when available,
-        // otherwise fall back to grid-based r,c positioning.
         const hasPixelPos = typeof obj.x === 'number' && typeof obj.y === 'number'
-        const posX = hasPixelPos ? obj.x! : offsetX + obj.c * cellSize
-        const posY = hasPixelPos ? obj.y! : obj.r * cellSize
-        const posW = hasPixelPos && obj.pixelW ? obj.pixelW! : obj.w * cellSize
-        const posH = hasPixelPos && obj.pixelH ? obj.pixelH! : obj.h * cellSize
+        let posX: number, posY: number, posW: number, posH: number
+
+        if (hasPixelPos && hasScaleInfo) {
+          // Scale canvas pixel positions to guest-view grid coordinates
+          posX = offsetX + obj.x! * scaleX
+          posY = obj.y! * scaleY
+          posW = (obj.pixelW || (obj.w * SNAP)) * scaleX
+          posH = (obj.pixelH || (obj.h * SNAP)) * scaleY
+        } else if (hasPixelPos) {
+          // No scale info — use raw pixels (fallback)
+          posX = obj.x!
+          posY = obj.y!
+          posW = obj.pixelW || obj.w * cellSize
+          posH = obj.pixelH || obj.h * cellSize
+        } else {
+          // Grid-based r,c positioning
+          posX = offsetX + obj.c * cellSize
+          posY = obj.r * cellSize
+          posW = obj.w * cellSize
+          posH = obj.h * cellSize
+        }
 
         return (
           <div

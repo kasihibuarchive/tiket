@@ -844,7 +844,9 @@ export default function SeatEditorPage() {
               {(() => {
                 const objs = (parsedLayout as any)?.objects || (layoutData as any)?.objects
                 if (objs && objs.length > 0) {
-                  return <ObjectsOverlay objects={objs} cellSize={SEAT_W + SEAT_GAP} offsetX={24} />
+                  const cvW = (parsedLayout as any)?.canvasWidth
+                  const gCols = parsedLayout?.gridSize?.cols
+                  return <ObjectsOverlay objects={objs} cellSize={SEAT_W + SEAT_GAP} offsetX={24} canvasWidth={cvW} gridCols={gCols} />
                 }
                 return null
               })()}

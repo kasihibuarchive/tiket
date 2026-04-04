@@ -94,3 +94,24 @@ Stage Summary:
 - 4 file diubah: canvas-editor.tsx, seat-layout.ts, stage-renderer.tsx, admin/events/[id]/seats/page.tsx
 - Build production OK, daemon server restarted di port 3000
 - Dedup diterapkan di 3 layer: derive time (deriveGridSeats), load time (normalizeLayoutData), render time (parseLayoutData)
+---
+Task ID: 1
+Agent: Main Agent
+Task: Analyze and fix bugs 3 & 4 - seatmap builder seats and stage/objek positions not matching after regeneration
+
+Work Log:
+- Analyzed the complete data pipeline: Canvas Editor → Save API → PostgreSQL → Generate API → Guest View
+- Confirmed server was running OLD code (PID 8152 started at 16:20, build at 16:35)
+- Identified coordinate system mismatch: Canvas editor uses SNAP_GRID_SIZE=32px, guest view uses CELL_TOTAL=31px
+- Stage/objects saved with absolute pixel positions from canvas, rendered at same pixel coords in narrower guest container
+- Fixed ObjectsOverlay to scale pixel positions from canvas coords to guest view grid coords
+- Fixed stage rendering in seat-map.tsx, usher view, and admin seats view
+- Added canvasWidth/canvasHeight to ParsedLayout interface and parseLayoutData()
+- Rebuilt project and restarted daemon server
+
+Stage Summary:
+- Root cause 1: Stale server build - server was started before source code was modified and rebuilt
+- Root cause 2: Coordinate system mismatch between canvas editor and guest/usher views
+- Fixed by: Adding scale factor calculation based on canvasWidth/gridCols in ObjectsOverlay and stage rendering
+- Files modified: src/lib/seat-layout.ts, src/lib/stage-renderer.tsx, src/components/seat-map.tsx, src/app/admin/usher/events/[id]/seats/page.tsx, src/app/admin/events/[id]/seats/page.tsx
+
