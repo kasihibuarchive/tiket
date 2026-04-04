@@ -15,6 +15,7 @@ const adminLinks = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: Drama },
   { href: '/admin/events', label: 'Kelola Events', icon: Calendar },
   { href: '/admin/seat-maps', label: 'Seat Maps', icon: Map },
+  { href: '/admin/ushers', label: 'Manajemen Usher', icon: Users },
   { href: '/admin/tickets/complimentary', label: 'Tiket Komplimen', icon: Gift },
   { href: '/admin/email-template', label: 'Email Template', icon: Mail },
   { href: '/admin/merchandise', label: 'Merchandise', icon: ShoppingBag },

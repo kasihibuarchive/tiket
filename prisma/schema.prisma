@@ -288,7 +288,31 @@ model Admin {
   username  String   @unique
   password  String   // hashed password
   name      String?
-  role      String   @default("admin")
+  role      String   @default("admin") // "admin" or "usher"
+  isActive  Boolean  @default(true)    // Admin can disable usher accounts
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // Relations
+  activityLogs ActivityLog[]
+}
+
+// =====================
+// ACTIVITY LOG MODEL
+// =====================
+model ActivityLog {
+  id        String   @id @default(cuid())
+  adminId   String   // Who performed the action
+  adminName String?  // Denormalized for quick display
+  action    String   // e.g., "LOGIN", "CHECK_IN", "UNLOCK_SEAT", "CREATE_EVENT"
+  details   String?  // JSON or text with additional context
+  ipAddress String?  // Client IP address
+  createdAt DateTime @default(now())
+
+  // Relations
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId])
+  @@index([action])
+  @@index([createdAt])
 }

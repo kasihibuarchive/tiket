@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     const admin = await db.admin.findFirst({
       where: { username },
-      select: { id: true, username: true, password: true, name: true, role: true },
+      select: { id: true, username: true, password: true, name: true, role: true, isActive: true },
     })
 
     if (!admin) {
@@ -50,12 +50,35 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Check if account is disabled
+    if (admin.isActive === false) {
+      return NextResponse.json(
+        { error: 'Akun dinonaktifkan. Hubungi admin untuk informasi lebih lanjut.' },
+        { status: 403 }
+      )
+    }
+
     if (!verifyPassword(password, admin.password)) {
       return NextResponse.json(
         { error: 'Username atau password salah' },
         { status: 401 }
       )
     }
+
+    // Log login activity
+    const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                     request.headers.get('x-real-ip') || null
+    try {
+      await db.activityLog.create({
+        data: {
+          adminId: admin.id,
+          adminName: admin.name || admin.username,
+          action: 'LOGIN',
+          details: `Login sebagai ${admin.role}`,
+          ipAddress: clientIp,
+        },
+      })
+    } catch {}
 
     const token = createSessionToken(admin.username)
 

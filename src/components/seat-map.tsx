@@ -74,6 +74,18 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
 
   const sessionId = useRef(getSessionId())
 
+  // Sync seats from props when initialSeats changes (e.g., switching show dates).
+  // Uses the "adjusting state during render" pattern recommended by React docs,
+  // because useEffect + setState is not allowed in React 19 strict mode.
+  const [prevInitialSeats, setPrevInitialSeats] = useState(initialSeats)
+  if (initialSeats !== prevInitialSeats) {
+    setPrevInitialSeats(initialSeats)
+    setSeats(initialSeats)
+    setSelectedSeatCodes(new Set())
+    setLockCountdown(null)
+    setHasPendingLock(false)
+  }
+
   const onSelectionChangeRef = useRef(onSelectionChange)
   useEffect(() => {
     onSelectionChangeRef.current = onSelectionChange

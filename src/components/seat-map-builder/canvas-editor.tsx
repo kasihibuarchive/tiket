@@ -223,10 +223,13 @@ function sortColumnsByAvgY(columns: SeatColumn[]): SeatColumn[] {
 }
 
 function deriveGridSeats(columns: SeatColumn[]): { seats: SeatPosition[]; rowLabels: string[] } {
-  // Keep columns in their original order (insertion order), NOT sorted by Y position
-  const rowLabels = columns.map(col => col.label)
+  // Sort columns by average Y position so guest view row order matches editor visual order.
+  // Without this, columns painted in non-sequential Y positions (e.g., D between A and B)
+  // would appear in insertion order in the guest view, breaking the layout.
+  const sorted = sortColumnsByAvgY(columns)
+  const rowLabels = sorted.map(col => col.label)
   const seats: SeatPosition[] = []
-  columns.forEach((col, rIdx) => {
+  sorted.forEach((col, rIdx) => {
     col.seats.forEach(seat => {
       const c = Math.round(seat.x / SNAP_GRID_SIZE)
       seats.push({ r: rIdx, c })

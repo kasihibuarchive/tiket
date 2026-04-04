@@ -1,17 +1,32 @@
+# Teateran Worklog
+
 ---
 Task ID: 1
-Agent: main
-Task: Fix 4 bugs reported by user - canvas trimming, create event button, day separation, admin data persistence
+Agent: Main
+Task: Bug fixes (canvas trimming, day separation, data persistence) + Usher management feature
 
 Work Log:
-- Analyzed uploaded images and explored codebase for all 4 bugs
-- **Bug 1 (Canvas empty area trimmed)**: Found root cause in `sanitizeLayoutData()` in seat map edit page — it was stripping `seatColumns`, `canvasWidth`, `canvasHeight` from layout data when loading from DB. Fixed by adding these fields to the sanitization output.
-- **Bug 2 (Create Event button greyed out)**: Found that `formData.showDate` was never populated from the `showDates` array inputs. The disabled condition checked `!formData.showDate` which was always true. Fixed by changing disabled condition to check `!formData.showDates.some(sd => sd.date)` and deriving `showDate` from first showDate entry in handleSave.
-- **Bug 3 (Day 1/Day 2 mixed in visitor view)**: The SeatMap component uses `useState(initialSeats)` which only takes the initial value. When switching show date tabs, the seats prop changes but the component doesn't re-initialize. Fixed by adding `key={activeShowDate?.id || 'default'}` to force remount on day change.
-- **Bug 4 (Admin/usher data disappears after kill)**: Added auto-seed mechanism in auth login route that creates default admin account if none exist. Added session re-issuance in GET auth check — when token validation fails (APP_SECRET changed), it re-issues a new valid session token if the admin account still exists.
-- Built and deployed all fixes, verified APIs work correctly
+- Killed running server processes
+- Analyzed canvas-editor.tsx save/load flow for Bug 1 (canvas trimming)
+- Found that `deriveGridSeats()` assigned row indices by insertion order, not visual Y position
+- Fixed `deriveGridSeats()` to sort columns by average Y position before assigning row indices
+- Analyzed seat-map.tsx for Bug 2 (guest view day separation)
+- Found that SeatMap internal state didn't sync from props when parent data changed after day switch
+- Added "adjusting state during render" pattern to sync seats when initialSeats reference changes
+- Updated Prisma schema: added `isActive` to Admin model, added `ActivityLog` model
+- Ran `prisma db push` to sync schema to Supabase PostgreSQL
+- Created API endpoints: `/api/admin/ushers` (GET, POST), `/api/admin/ushers/[id]` (GET, PUT, DELETE)
+- Created API endpoint: `/api/admin/activity-logs` (GET with filters)
+- Updated auth login to check `isActive` status and log login activity
+- Created usher management page at `/admin/ushers` with full CRUD UI
+- Added "Manajemen Usher" to admin sidebar
+- Investigated data persistence issue: DB is Supabase PostgreSQL (persistent), data survives restarts
+- Built and deployed successfully
 
 Stage Summary:
-- Fixed 4 files: seat map edit page, admin events page, visitor event page, auth login route
-- Server running on port 3000, all endpoints verified
-- Day 1 (46 seats) and Day 2 (46 seats) properly separated in API
+- Bug 1 (canvas layout): Fixed - columns now sorted by Y position in deriveGridSeats
+- Bug 2 (day separation): Fixed - SeatMap syncs from props when initialSeats changes
+- Usher management: Complete - CRUD, activity logs, enable/disable per account
+- Data persistence: Verified OK - Supabase PostgreSQL persists data; previous issue was likely session token invalidation
+- Files modified: canvas-editor.tsx, seat-map.tsx, prisma/schema.prisma, admin/auth/login/route.ts, admin/layout.tsx
+- Files created: api/admin/ushers/route.ts, api/admin/ushers/[id]/route.ts, api/admin/activity-logs/route.ts, admin/ushers/page.tsx
