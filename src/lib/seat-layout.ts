@@ -24,6 +24,9 @@ export interface ParsedLayout {
   displayRows: number[] // row indices to actually render (excludes embedded source rows)
   objects?: LayoutObject[]
   stageType?: string
+  stagePosition?: { x: number; y: number; width: number; height: number }
+  thrustWidth?: number
+  thrustDepth?: number
 }
 
 /**
@@ -177,8 +180,13 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
       }))
     : []
 
-  // Parse stage type
+  // Parse stage type and position
   const stageType: string = data.stageType || 'PROSCENIUM'
+  const stagePosition = (data.stagePosition && typeof data.stagePosition === 'object' && typeof data.stagePosition.x === 'number')
+    ? { x: data.stagePosition.x, y: data.stagePosition.y, width: data.stagePosition.width || 320, height: data.stagePosition.height || 60 }
+    : undefined
+  const thrustWidth = data.thrustWidth || undefined
+  const thrustDepth = data.thrustDepth || undefined
 
-  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType }
+  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType, stagePosition, thrustWidth, thrustDepth }
 }

@@ -129,7 +129,7 @@ export default function SeatMapEditPage() {
     }
 
     loadSeatMap()
-  }, [seatMapId, isNew, router, sanitizeLayoutData])
+  }, [seatMapId, isNew, router, sanitizeLayoutData, adminId])
 
   // Check lock status
   const checkLock = useCallback(async () => {

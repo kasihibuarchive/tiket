@@ -171,6 +171,7 @@ const MAX_GRID = 30
 const SNAP_GRID_SIZE = 32
 const MAX_SEATS_PER_COLUMN = 64
 const PAINTED_SEAT_SIZE = 28
+const maxColFromSeats = (s: any[]) => s.length > 0 ? Math.max(...s.map((seat: any) => seat.c)) + 1 : 1
 const DEFAULT_CANVAS_W = 640
 const DEFAULT_CANVAS_H = 480
 const MIN_CANVAS = 320
@@ -228,13 +229,20 @@ function deriveGridSeats(columns: SeatColumn[]): { seats: SeatPosition[]; rowLab
   // would appear in insertion order in the guest view, breaking the layout.
   const sorted = sortColumnsByAvgY(columns)
   const rowLabels = sorted.map(col => col.label)
-  const seats: SeatPosition[] = []
+
+  // First pass: compute raw grid positions for all seats
+  const rawSeats: { r: number; c: number }[] = []
   sorted.forEach((col, rIdx) => {
     col.seats.forEach(seat => {
-      const c = Math.round(seat.x / SNAP_GRID_SIZE)
-      seats.push({ r: rIdx, c })
+      rawSeats.push({ r: rIdx, c: Math.round(seat.x / SNAP_GRID_SIZE) })
     })
   })
+
+  // Normalize: shift all columns so the leftmost seat starts at c=0.
+  // This prevents empty columns on the left side of the guest view.
+  const minC = rawSeats.length > 0 ? Math.min(...rawSeats.map(s => s.c)) : 0
+  const seats: SeatPosition[] = rawSeats.map(s => ({ r: s.r, c: s.c - minC }))
+
   return { seats, rowLabels }
 }
 
@@ -283,13 +291,16 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
       // to avoid column-based normalization changing seat positions on reload.
       const hasExistingSeats = Array.isArray(raw.seats) && raw.seats.length > 0
       const hasExistingLabels = Array.isArray(raw.rowLabels) && raw.rowLabels.length > 0
-      const seats = hasExistingSeats ? raw.seats : deriveGridSeats(raw.seatColumns).seats
-      const rowLabels = hasExistingLabels ? raw.rowLabels : deriveGridSeats(raw.seatColumns).rowLabels
+      const derived = deriveGridSeats(raw.seatColumns)
+      const seats = hasExistingSeats ? raw.seats : derived.seats
+      const rowLabels = hasExistingLabels ? raw.rowLabels : derived.rowLabels
+      // gridSize.cols should match the actual seat spread, not canvas pixel width
+      const maxCol = seats.length > 0 ? Math.max(...seats.map(s => s.c)) + 1 : 1
       return {
         type: 'NUMBERED',
         gridSize: {
           rows: raw.seatColumns.length || 1,
-          cols: Math.max(1, Math.ceil((Number(raw.canvasWidth) || DEFAULT_CANVAS_W) / SNAP_GRID_SIZE)),
+          cols: maxCol,
         },
         aisleColumns,
         rowLabels,
@@ -848,7 +859,7 @@ export function CanvasEditor({
         rowLabels,
         gridSize: {
           rows: updatedCols.length || 1,
-          cols: Math.max(1, Math.ceil((prev.canvasWidth || DEFAULT_CANVAS_W) / SNAP_GRID_SIZE)),
+          cols: maxColFromSeats(seats),
         },
       }
     })
@@ -868,7 +879,7 @@ export function CanvasEditor({
         rowLabels,
         gridSize: {
           rows: updatedCols.length || 1,
-          cols: Math.max(1, Math.ceil((prev.canvasWidth || DEFAULT_CANVAS_W) / SNAP_GRID_SIZE)),
+          cols: maxColFromSeats(seats),
         },
       }
     })
@@ -925,7 +936,7 @@ export function CanvasEditor({
         rowLabels,
         gridSize: {
           rows: updatedCols.length || 1,
-          cols: Math.max(1, Math.ceil((prev.canvasWidth || DEFAULT_CANVAS_W) / SNAP_GRID_SIZE)),
+          cols: maxColFromSeats(seats),
         },
       }
     })
@@ -953,7 +964,7 @@ export function CanvasEditor({
         rowLabels,
         gridSize: {
           rows: updatedCols.length || 1,
-          cols: Math.max(1, Math.ceil((prev.canvasWidth || DEFAULT_CANVAS_W) / SNAP_GRID_SIZE)),
+          cols: maxColFromSeats(seats),
         },
       }
     })
@@ -1056,10 +1067,6 @@ export function CanvasEditor({
       return {
         ...prev,
         [dimension === 'width' ? 'canvasWidth' : 'canvasHeight']: clamped,
-        gridSize: {
-          ...prev.gridSize,
-          cols: Math.max(1, Math.ceil((dimension === 'width' ? clamped : (prev.canvasWidth || DEFAULT_CANVAS_W)) / SNAP_GRID_SIZE)),
-        },
       }
     })
   }, [updateLayout])

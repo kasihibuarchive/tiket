@@ -546,7 +546,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
     const stageSize = isInsetStage ? 'md' : 'lg'
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
-    const stagePosition = (parsedLayout as any)?.stagePosition
+    const stagePosition = parsedLayout?.stagePosition
     const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
     return (
@@ -578,8 +578,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                   <StageRenderer
                     stageType={stageType}
                     size={stageSize}
-                    thrustWidth={(parsedLayout as any)?.thrustWidth}
-                    thrustDepth={(parsedLayout as any)?.thrustDepth}
+                    thrustWidth={parsedLayout?.thrustWidth}
+                    thrustDepth={parsedLayout?.thrustDepth}
                     fillParent
                   />
                 </div>
@@ -588,8 +588,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                 <StageRenderer
                   stageType={stageType}
                   size={stageSize}
-                  thrustWidth={(parsedLayout as any)?.thrustWidth}
-                  thrustDepth={(parsedLayout as any)?.thrustDepth}
+                  thrustWidth={parsedLayout?.thrustWidth}
+                  thrustDepth={parsedLayout?.thrustDepth}
                 />
               ) : null}
               {displayRows.map((ri, idx) => {

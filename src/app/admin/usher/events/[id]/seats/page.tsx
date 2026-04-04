@@ -60,6 +60,7 @@ interface EventData {
   showDate: string
   location: string
   seatMapLayout?: any
+  showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
 }
 
 // Category display config
@@ -82,6 +83,7 @@ export default function UsherSeatMapPage() {
 
   const [seats, setSeats] = useState<SeatData[]>([])
   const [priceCategories, setPriceCategories] = useState<PriceCategoryData[]>([])
+  const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
   const [event, setEvent] = useState<EventData | null>(null)
   const [seatOwnerMap, setSeatOwnerMap] = useState<Record<string, SeatOwnerInfo>>({})
   const [selectedSeat, setSelectedSeat] = useState<SeatOwnerInfo | null>(null)
@@ -96,6 +98,15 @@ export default function UsherSeatMapPage() {
   // Parse layout data from event's seat map
   const parsedLayout = useMemo(() => parseLayoutData(event?.seatMapLayout), [event?.seatMapLayout]) as ParsedLayout | null
 
+  // Show dates with fallback for single-day events
+  const showDates = useMemo(() =>
+    event?.showDates && event.showDates.length > 0
+      ? event.showDates
+      : [{ id: null, date: event?.showDate, openGate: null, label: null }],
+    [event]
+  )
+  const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
+
   // Stage type from layout data
   const stageType = parsedLayout?.stageType || 'PROSCENIUM'
   const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
@@ -109,25 +120,15 @@ export default function UsherSeatMapPage() {
     return map
   }, [seats])
 
-  // Fetch seats, event, and price categories
+  // Fetch event data (once)
   useEffect(() => {
     if (!eventId) return
 
-    async function fetchData() {
+    async function fetchEvent() {
       try {
-        const [seatsRes, eventRes, infoRes] = await Promise.all([
-          fetch(`/api/events/${eventId}/seats`),
-          fetch(`/api/events/${eventId}`),
-          fetch(`/api/usher/seats-info?eventId=${eventId}`),
-        ])
-
-        if (!seatsRes.ok || !eventRes.ok) throw new Error('Failed to fetch event data')
-
-        const seatsData = await seatsRes.json()
+        const eventRes = await fetch(`/api/events/${eventId}`)
+        if (!eventRes.ok) throw new Error('Failed to fetch event data')
         const eventData = await eventRes.json()
-
-        setSeats(seatsData.seats || [])
-        setPriceCategories(seatsData.priceCategories || [])
         setEvent({
           id: eventData.id,
           title: eventData.title,
@@ -135,12 +136,8 @@ export default function UsherSeatMapPage() {
           showDate: eventData.showDate,
           location: eventData.location,
           seatMapLayout: eventData.seatMapLayout || null,
+          showDates: eventData.showDates || null,
         })
-
-        if (infoRes.ok) {
-          const infoData = await infoRes.json()
-          setSeatOwnerMap(infoData.seats || {})
-        }
       } catch (err) {
         setError('Gagal memuat data event')
       } finally {
@@ -148,27 +145,65 @@ export default function UsherSeatMapPage() {
       }
     }
 
-    fetchData()
+    fetchEvent()
+  }, [eventId])
+
+  // Fetch seats filtered by active show date, and seats-info
+  useEffect(() => {
+    if (!eventId || !event) return
+    let cancelled = false
+
+    async function fetchSeats() {
+      try {
+        const seatsUrl = activeShowDate?.id
+          ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
+          : `/api/events/${eventId}/seats`
+        const [seatsRes, infoRes] = await Promise.all([
+          fetch(seatsUrl),
+          fetch(`/api/usher/seats-info?eventId=${eventId}`),
+        ])
+
+        if (cancelled) return
+        if (seatsRes.ok) {
+          const seatsData = await seatsRes.json()
+          setSeats(seatsData.seats || [])
+          setPriceCategories(seatsData.priceCategories || [])
+        }
+        if (infoRes.ok) {
+          const infoData = await infoRes.json()
+          if (!cancelled) setSeatOwnerMap(infoData.seats || {})
+        }
+      } catch {
+        // silent
+      }
+    }
+
+    fetchSeats()
 
     // Auto-refresh every 5 seconds
     const interval = setInterval(async () => {
       try {
+        const seatsUrl = activeShowDate?.id
+          ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
+          : `/api/events/${eventId}/seats`
         const [seatsRes, infoRes] = await Promise.all([
-          fetch(`/api/events/${eventId}/seats`),
+          fetch(seatsUrl),
           fetch(`/api/usher/seats-info?eventId=${eventId}`),
         ])
 
+        if (cancelled) return
         if (seatsRes.ok) {
           const seatsData = await seatsRes.json()
-          setSeats(seatsData.seats || [])
+          if (!cancelled) setSeats(seatsData.seats || [])
         }
 
         if (infoRes.ok) {
           const infoData = await infoRes.json()
-          setSeatOwnerMap(infoData.seats || {})
-
-          if (selectedSeatCode && infoData.seats?.[selectedSeatCode]) {
-            setSelectedSeat(infoData.seats[selectedSeatCode])
+          if (!cancelled) {
+            setSeatOwnerMap(infoData.seats || {})
+            if (selectedSeatCode && infoData.seats?.[selectedSeatCode]) {
+              setSelectedSeat(infoData.seats[selectedSeatCode])
+            }
           }
         }
       } catch {
@@ -176,8 +211,8 @@ export default function UsherSeatMapPage() {
       }
     }, 5000)
 
-    return () => clearInterval(interval)
-  }, [eventId, selectedSeatCode])
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [eventId, event, activeShowDate?.id, selectedSeatCode])
 
   // Handle seat click (read-only — sold and invitation seats show info)
   const handleSeatClick = useCallback((seat: SeatData) => {
@@ -379,17 +414,40 @@ export default function UsherSeatMapPage() {
     const CELL_TOTAL = SEAT_W + SEAT_GAP
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
+    const stagePosition = parsedLayout?.stagePosition
+    const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
     seatGridContent = (
-      <div className="mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
+      <div className="mx-auto w-full flex flex-col items-center relative" style={{ minWidth: gridW }}>
+        {/* Custom stage position from admin editor */}
+        {hasCustomStagePosition && !isInsetStage && (
+          <div
+            className="absolute"
+            style={{
+              left: stagePosition.x,
+              top: stagePosition.y,
+              width: stagePosition.width,
+              zIndex: 5,
+            }}
+          >
+            <StageRenderer
+              stageType={stageType}
+              size={stageSize}
+              thrustWidth={parsedLayout?.thrustWidth}
+              thrustDepth={parsedLayout?.thrustDepth}
+              fillParent
+            />
+          </div>
+        )}
+
         {/* Top stage for PROSCENIUM, AMPHITHEATER, THRUST — inside scroll container */}
-        {!isInsetStage && (
+        {!isInsetStage && !hasCustomStagePosition && (
           <div className="flex justify-center mb-4">
             <StageRenderer
               stageType={stageType}
               size={stageSize}
-              thrustWidth={(parsedLayout as any)?.thrustWidth}
-              thrustDepth={(parsedLayout as any)?.thrustDepth}
+              thrustWidth={parsedLayout?.thrustWidth}
+              thrustDepth={parsedLayout?.thrustDepth}
             />
           </div>
         )}
@@ -402,8 +460,8 @@ export default function UsherSeatMapPage() {
                 <StageRenderer
                   stageType={stageType}
                   size={stageSize}
-                  thrustWidth={(parsedLayout as any)?.thrustWidth}
-                  thrustDepth={(parsedLayout as any)?.thrustDepth}
+                  thrustWidth={parsedLayout?.thrustWidth}
+                  thrustDepth={parsedLayout?.thrustDepth}
                 />
               </div>
             )}
@@ -505,6 +563,30 @@ export default function UsherSeatMapPage() {
           <p className="text-sm text-muted-foreground mt-0.5">
             Peta Kursi — Mode Baca Saja
           </p>
+          {/* Multi-day show date tabs */}
+          {showDates.length > 1 && (
+            <div className="flex flex-wrap gap-2 mt-3">
+              {showDates.map((sd, idx) => (
+                <button
+                  key={sd.id || idx}
+                  onClick={() => {
+                    setSelectedShowDateIdx(idx)
+                    setSelectedSeat(null)
+                    setSelectedSeatCode(null)
+                    setInfoSheetOpen(false)
+                  }}
+                  className={cn(
+                    'px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+                    idx === selectedShowDateIdx
+                      ? 'bg-gold text-charcoal'
+                      : 'bg-gray-100 text-muted-foreground hover:bg-gray-200'
+                  )}
+                >
+                  {sd.label || `Hari ${idx + 1}`}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Stage size selector */}

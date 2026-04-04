@@ -47,3 +47,21 @@ Stage Summary:
 - Bug 1 Fix: `/src/components/seat-map-builder/canvas-editor.tsx` line 280-303 - preserve existing seats/rowLabels on load
 - Bug 2 Fix: `/src/app/events/[id]/page.tsx` - eliminated race condition in seat fetching
 - Usher Feature: Confirmed fully implemented at `/admin/ushers/page.tsx`, `/api/admin/ushers/`, `/api/admin/ushers/[id]/`
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix 4 bugs — usher day tabs, edit seatmap redirect, canvas regeneration sync, stage/object position
+
+Work Log:
+- Bug 1 (Usher day tabs): Added show date tabs to usher seat map page. Split fetch into event-only + seats-per-showDate use effects. Seats filtered by showDateId, auto-refresh every 5s respects active show date.
+- Bug 2 (Edit seatmap redirect): Added `adminId` dependency to `loadSeatMap` useEffect to prevent race condition where lock check runs before admin info is loaded from localStorage.
+- Bug 3 (Canvas regeneration sync): Fixed `deriveGridSeats()` to normalize column positions — now subtracts global minC so leftmost seat always starts at c=0, preventing empty columns on the left. Also fixed `gridSize.cols` to use actual seat spread (maxCol) instead of canvas pixel width.
+- Bug 4 (Stage/object position): Added `stagePosition`, `thrustWidth`, `thrustDepth` to `ParsedLayout` interface in `seat-layout.ts`. Updated `parseLayoutData()` to extract these from layoutData. Updated guest view (seat-map.tsx) and usher view to use typed `parsedLayout.stagePosition` instead of `as any` casts. Added custom stage position support in usher view.
+
+Stage Summary:
+- Modified: canvas-editor.tsx (deriveGridSeats, gridSize calculations)
+- Modified: seat-layout.ts (ParsedLayout interface + parseLayoutData extraction)
+- Modified: seat-map.tsx (removed `as any` casts, uses typed stagePosition)
+- Modified: usher/events/[id]/seats/page.tsx (show date tabs + stage position support)
+- Modified: seat-maps/[id]/edit/page.tsx (adminId dependency fix)
+- Server: daemonized on port 3000 with credentials from .credentials
