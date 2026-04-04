@@ -852,7 +852,7 @@ export default function SeatEditorPage() {
                     offsetX={24}
                     canvasSeatBounds={csb}
                     gridCols={gCols || 0}
-                    gridRows={displayRows.length}
+                    gridRows={(parsedLayout as any)?.displayRows?.length || 0}
                   />
                 }
                 return null

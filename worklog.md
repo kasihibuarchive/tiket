@@ -163,3 +163,26 @@ Stage Summary:
 - All 7 screenshots saved to /home/z/my-project/download/screenshots/
 - Stage position, object position, and seats all visible in each view
 - Coordinate mapping working correctly across all views
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix broken app — diagnose and fix runtime errors
+
+Work Log:
+- Server was down (daemon died). Restarted with `node daemon-server.js`.
+- Identified `ReferenceError: displayRows is not defined` error on usher seats and admin seats pages.
+- Root cause: In `src/app/admin/events/[id]/seats/page.tsx` line 855, `displayRows` was referenced outside the `renderFlatGrid()` function where it was locally scoped via destructuring.
+- Fixed by changing `displayRows.length` to `(parsedLayout as any)?.displayRows?.length || 0`.
+- Rebuilt project (`next build` succeeded) and restarted daemon server.
+- Verified all 5 views work without errors:
+  1. Seat Builder (canvas editor) — renders correctly with 24 seats
+  2. Admin Seats after regen — shows TEST event with 24 seats, no errors
+  3. Usher Seats — Hamlet event shows 100 seats with correct status icons
+  4. Guest Seatmap — public event page with seat selection
+  5. Compliment Ticket — verify page shows ticket with seat codes
+
+Stage Summary:
+- Bug fixed: `displayRows is not defined` in admin seats page (line 855)
+- File modified: `src/app/admin/events/[id]/seats/page.tsx`
+- All 5 views verified working. Screenshots saved to `/home/z/my-project/download/screenshots/`.
