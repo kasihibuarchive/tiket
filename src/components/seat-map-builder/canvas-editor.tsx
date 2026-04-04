@@ -172,6 +172,7 @@ const SNAP_GRID_SIZE = 32
 const MAX_SEATS_PER_COLUMN = 64
 const PAINTED_SEAT_SIZE = 28
 const maxColFromSeats = (s: any[]) => s.length > 0 ? Math.max(...s.map((seat: any) => seat.c)) + 1 : 1
+const maxRowFromSeats = (s: any[]) => s.length > 0 ? Math.max(...s.map((seat: any) => seat.r)) + 1 : 1
 const DEFAULT_CANVAS_W = 640
 const DEFAULT_CANVAS_H = 480
 const MIN_CANVAS = 320
@@ -449,15 +450,18 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
 
       return {
         type: 'NUMBERED',
-        gridSize,
+        gridSize: {
+          rows: maxRowFromSeats(oldSeats),
+          cols: maxColFromSeats(oldSeats),
+        },
         seats: oldSeats,
         aisleColumns,
         rowLabels: derivedLabels,
         sections,
         embeddedRows,
         seatColumns,
-        canvasWidth: gridSize.cols * SNAP_GRID_SIZE,
-        canvasHeight: gridSize.rows * SNAP_GRID_SIZE,
+        canvasWidth: maxColFromSeats(oldSeats) * SNAP_GRID_SIZE,
+        canvasHeight: maxRowFromSeats(oldSeats) * SNAP_GRID_SIZE,
       }
     }
 
@@ -967,7 +971,7 @@ export function CanvasEditor({
         seats,
         rowLabels,
         gridSize: {
-          rows: updatedCols.length || 1,
+          rows: maxRowFromSeats(seats),
           cols: maxColFromSeats(seats),
         },
       }
@@ -987,7 +991,7 @@ export function CanvasEditor({
         seats,
         rowLabels,
         gridSize: {
-          rows: updatedCols.length || 1,
+          rows: maxRowFromSeats(seats),
           cols: maxColFromSeats(seats),
         },
       }
@@ -1044,7 +1048,7 @@ export function CanvasEditor({
         seats,
         rowLabels,
         gridSize: {
-          rows: updatedCols.length || 1,
+          rows: maxRowFromSeats(seats),
           cols: maxColFromSeats(seats),
         },
       }
@@ -1072,7 +1076,7 @@ export function CanvasEditor({
         seats,
         rowLabels,
         gridSize: {
-          rows: updatedCols.length || 1,
+          rows: maxRowFromSeats(seats),
           cols: maxColFromSeats(seats),
         },
       }

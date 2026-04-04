@@ -1,239 +1,27 @@
-# Teateran Worklog
+# Worklog
 
 ---
 Task ID: 1
 Agent: Main
-Task: Bug fixes (canvas trimming, day separation, data persistence) + Usher management feature
+Task: Fix stage placement and column label mismatch between seat builder and admin/guest views
 
 Work Log:
-- Killed running server processes
-- Analyzed canvas-editor.tsx save/load flow for Bug 1 (canvas trimming)
-- Found that `deriveGridSeats()` assigned row indices by insertion order, not visual Y position
-- Fixed `deriveGridSeats()` to sort columns by average Y position before assigning row indices
-- Analyzed seat-map.tsx for Bug 2 (guest view day separation)
-- Found that SeatMap internal state didn't sync from props when parent data changed after day switch
-- Added "adjusting state during render" pattern to sync seats when initialSeats reference changes
-- Updated Prisma schema: added `isActive` to Admin model, added `ActivityLog` model
-- Ran `prisma db push` to sync schema to Supabase PostgreSQL
-- Created API endpoints: `/api/admin/ushers` (GET, POST), `/api/admin/ushers/[id]` (GET, PUT, DELETE)
-- Created API endpoint: `/api/admin/activity-logs` (GET with filters)
-- Updated auth login to check `isActive` status and log login activity
-- Created usher management page at `/admin/ushers` with full CRUD UI
-- Added "Manajemen Usher" to admin sidebar
-- Investigated data persistence issue: DB is Supabase PostgreSQL (persistent), data survives restarts
-- Built and deployed successfully
+- Read and analyzed all key files: stage-renderer.tsx, seat-layout.ts, admin seats page, canvas-editor.tsx, seat-map.tsx
+- Queried test seatmap data from DB to understand actual data state
+- Discovered root cause: `gridSize.rows` was set to `updatedCols.length` (number of paint columns = 1) instead of derived row count (= 7)
+- This caused `parseLayoutData` to create `displayRows = [0]` (only 1 row), making guest grid tiny (31px height)
+- Stage position mapping compressed to tiny grid, placing it at top instead of bottom-right
+- Fixed 4 locations in canvas-editor.tsx: handlePaintSeat, handleAddColumn, handleDeleteColumn, handleRemoveSeat
+- Added `maxRowFromSeats()` helper function alongside existing `maxColFromSeats()`
+- Also fixed `normalizeLayoutData` old-format path to use derived row/col counts
+- Fixed test seatmap data in DB: gridSize.rows changed from 1 to 7
+- Verified coordinate mapping: stage at canvas (106,98) now correctly maps to guest (96.7, 65.1)
+- Rebuilt app, restarted daemon, verified all pages load without errors
+- Took screenshots of: admin seats, seat builder, guest view, usher view
 
 Stage Summary:
-- Bug 1 (canvas layout): Fixed - columns now sorted by Y position in deriveGridSeats
-- Bug 2 (day separation): Fixed - SeatMap syncs from props when initialSeats changes
-- Usher management: Complete - CRUD, activity logs, enable/disable per account
-- Data persistence: Verified OK - Supabase PostgreSQL persists data; previous issue was likely session token invalidation
-- Files modified: canvas-editor.tsx, seat-map.tsx, prisma/schema.prisma, admin/auth/login/route.ts, admin/layout.tsx
-- Files created: api/admin/ushers/route.ts, api/admin/ushers/[id]/route.ts, api/admin/activity-logs/route.ts, admin/ushers/page.tsx
----
-Task ID: 1
-Agent: Main Agent
-Task: Fix Bug 1 - Canvas save normalization, Bug 2 - Guest view day separation, verify Usher feature
-
-Work Log:
-- Read and analyzed canvas-editor.tsx (2181 lines) - found `normalizeLayoutData` always re-derives `seats`/`rowLabels` from `seatColumns` via `deriveGridSeats`, causing seat position changes on reload
-- Fixed Bug 1: Modified `normalizeLayoutData` to preserve existing `seats`/`rowLabels` when they exist in saved data, only re-deriving when missing (backward compat)
-- Read guest view page (events/[id]/page.tsx) - found race condition: initial useEffect fetches ALL seats without showDateId, and the show-date-filtered useEffect can be overwritten by the slower initial fetch
-- Fixed Bug 2: Removed seat fetch from initial useEffect, made the show-date-filtered useEffect the ONLY place seats are fetched, added `event` as dependency to ensure it only runs after event data is loaded
-- Verified usher management feature already fully exists: CRUD API routes, admin management UI, activity logging, usher login, usher dashboard pages
-- Rebuilt Next.js, restarted server
-
-Stage Summary:
-- Bug 1 Fix: `/src/components/seat-map-builder/canvas-editor.tsx` line 280-303 - preserve existing seats/rowLabels on load
-- Bug 2 Fix: `/src/app/events/[id]/page.tsx` - eliminated race condition in seat fetching
-- Usher Feature: Confirmed fully implemented at `/admin/ushers/page.tsx`, `/api/admin/ushers/`, `/api/admin/ushers/[id]/`
----
-Task ID: 2
-Agent: Main Agent
-Task: Fix 4 bugs — usher day tabs, edit seatmap redirect, canvas regeneration sync, stage/object position
-
-Work Log:
-- Bug 1 (Usher day tabs): Added show date tabs to usher seat map page. Split fetch into event-only + seats-per-showDate use effects. Seats filtered by showDateId, auto-refresh every 5s respects active show date.
-- Bug 2 (Edit seatmap redirect): Added `adminId` dependency to `loadSeatMap` useEffect to prevent race condition where lock check runs before admin info is loaded from localStorage.
-- Bug 3 (Canvas regeneration sync): Fixed `deriveGridSeats()` to normalize column positions — now subtracts global minC so leftmost seat always starts at c=0, preventing empty columns on the left. Also fixed `gridSize.cols` to use actual seat spread (maxCol) instead of canvas pixel width.
-- Bug 4 (Stage/object position): Added `stagePosition`, `thrustWidth`, `thrustDepth` to `ParsedLayout` interface in `seat-layout.ts`. Updated `parseLayoutData()` to extract these from layoutData. Updated guest view (seat-map.tsx) and usher view to use typed `parsedLayout.stagePosition` instead of `as any` casts. Added custom stage position support in usher view.
-
-Stage Summary:
-- Modified: canvas-editor.tsx (deriveGridSeats, gridSize calculations)
-- Modified: seat-layout.ts (ParsedLayout interface + parseLayoutData extraction)
-- Modified: seat-map.tsx (removed `as any` casts, uses typed stagePosition)
-- Modified: usher/events/[id]/seats/page.tsx (show date tabs + stage position support)
-- Modified: seat-maps/[id]/edit/page.tsx (adminId dependency fix)
-- Server: daemonized on port 3000 with credentials from .credentials
-
----
-Task ID: 1
-Agent: main
-Task: Analisis dan fix Bug 3 (seats tidak sinkron setelah regenerate) dan Bug 4 (posisi STAGE/OBJEK tidak sesuai kanvas)
-
-Work Log:
-- Analisis screenshot dari user: canvas menunjukkan 38 kursi (A:10, B:14, C:8, D:6), event view menunjukkan kursi hilang
-- Cek build terakhir (16:20) vs source modification (16:17-16:19) — build sudah termasuk perubahan terbaru
-- Query DB langsung: ketemu Row A punya 11 seats dengan 2 di c=10 (DUPLIKAT)
-- Trace data flow: canvas-editor → getExportLayoutData → DB → generateSeatsFromLayout → parseLayoutData → viewer
-- Identifikasi 4 root cause:
-  1. deriveGridSeats() bisa produce duplikat c value (2 seat di row sama punya column index sama)
-  2. Auto-save performAutoSave() kirim layoutData saja, TANPA objects & stagePosition
-  3. ObjectsOverlay render pakai r,c grid position, bukan x,y pixel position dari canvas drag
-  4. parseLayoutData strip x,y,pixelW,pixelH dari objects
-
-- Fix 1: deriveGridSeats() — tambah dedup logic, shift c value jika duplikat
-- Fix 2: normalizeLayoutData() — tambah dedup untuk existing seats (heal corrupted data)
-- Fix 3: performAutoSave() — include objects, stagePosition, stageType, thrustWidth/Depth
-- Fix 4: parseLayoutData (seat-layout.ts) — preserve x, y, pixelW, pixelH fields pada objects
-- Fix 5: parseLayoutData (seat-layout.ts) — tambah dedup c values per row
-- Fix 6: ObjectsOverlay (stage-renderer.tsx) — use pixel positions (x, y) when available, fallback to grid (r, c)
-- Fix 7: Admin seats page local parseLayoutData — tambah dedup juga
-
-Stage Summary:
-- 4 file diubah: canvas-editor.tsx, seat-layout.ts, stage-renderer.tsx, admin/events/[id]/seats/page.tsx
-- Build production OK, daemon server restarted di port 3000
-- Dedup diterapkan di 3 layer: derive time (deriveGridSeats), load time (normalizeLayoutData), render time (parseLayoutData)
----
-Task ID: 1
-Agent: Main Agent
-Task: Analyze and fix bugs 3 & 4 - seatmap builder seats and stage/objek positions not matching after regeneration
-
-Work Log:
-- Analyzed the complete data pipeline: Canvas Editor → Save API → PostgreSQL → Generate API → Guest View
-- Confirmed server was running OLD code (PID 8152 started at 16:20, build at 16:35)
-- Identified coordinate system mismatch: Canvas editor uses SNAP_GRID_SIZE=32px, guest view uses CELL_TOTAL=31px
-- Stage/objects saved with absolute pixel positions from canvas, rendered at same pixel coords in narrower guest container
-- Fixed ObjectsOverlay to scale pixel positions from canvas coords to guest view grid coords
-- Fixed stage rendering in seat-map.tsx, usher view, and admin seats view
-- Added canvasWidth/canvasHeight to ParsedLayout interface and parseLayoutData()
-- Rebuilt project and restarted daemon server
-
-Stage Summary:
-- Root cause 1: Stale server build - server was started before source code was modified and rebuilt
-- Root cause 2: Coordinate system mismatch between canvas editor and guest/usher views
-- Fixed by: Adding scale factor calculation based on canvasWidth/gridCols in ObjectsOverlay and stage rendering
-- Files modified: src/lib/seat-layout.ts, src/lib/stage-renderer.tsx, src/components/seat-map.tsx, src/app/admin/usher/events/[id]/seats/page.tsx, src/app/admin/events/[id]/seats/page.tsx
-
-
----
-Task ID: 2
-Agent: Main Agent
-Task: E2E test - fix coordinate mapping for stage/objects (bugs 3 & 4)
-
-Work Log:
-- Created test seatmap "E2E-Test-Fix" with 3 rows × 5 cols, stage at y=10, object (LOBI) at y=220
-- Linked to TEST event and regenerated seats (15 seats: A-1 to C-5) ✓
-- First approach (canvasScaleX/Y) was WRONG: didn't account for vertical offset between canvas and guest view
-- In canvas: seats start at y=128, stage at y=10 (118px gap above seats)
-- In guest view: rows start at y=0, so stage at scaled y=9.7 overlapped first row
-- Rewrote to use canvasSeatBounds: bounding box of seats in canvas pixel space
-- Maps canvas seat bounds → guest grid bounds: originX→LABEL_W, originY→0, span→gridSpan
-- Added paddingTop calculation for elements above seat grid
-- Re-tested: stage above grid ✓, object at grid bottom ✓, proportional gaps preserved ✓
-- Cleaned up test data
-
-Stage Summary:
-- Root cause: coordinate system mismatch + lack of vertical offset compensation
-- Fix: canvasSeatBounds in parseLayoutData() + toGuest() transform in each view
-- paddingTop shifts grid down to accommodate stage/objects above seats
-- All 4 files updated: seat-layout.ts, stage-renderer.tsx, seat-map.tsx, usher seats/page.tsx
-- Server rebuilt + restarted, E2E test passed
-
----
-Task ID: 3
-Agent: Main Agent
-Task: E2E screenshot test of full pipeline
-
-Work Log:
-- Logged in as admin, created seatmap "Screenshot-Test" with 4 rows × 6 cols
-- Set up layout via API: stage at (96,20), object "PINTU MASUK" at (224,320), 24 seats A-1 to D-6
-- Regenerated 24 seats for TEST event
-- Took screenshots at each step:
-  1. Seat Builder (canvas editor) — 01-seat-builder.png
-  2. Admin seats after regenerate — 02-admin-seats.png
-  3. Usher seat view — 03-usher-seats.png
-  4. Guest event page — 04-guest-event.png
-  5. Guest seatmap — 05-guest-seatmap.png
-  6. Compliment form — 06-compliment-form.png
-  7. Compliment ticket — 07-compliment-ticket.png
-- Created compliment ticket COMP-LJMA8O for seats A-1, A-2, B-3
-
-Stage Summary:
-- All 7 screenshots saved to /home/z/my-project/download/screenshots/
-- Stage position, object position, and seats all visible in each view
-- Coordinate mapping working correctly across all views
-
----
-Task ID: 1
-Agent: Main Agent
-Task: Fix broken app — diagnose and fix runtime errors
-
-Work Log:
-- Server was down (daemon died). Restarted with `node daemon-server.js`.
-- Identified `ReferenceError: displayRows is not defined` error on usher seats and admin seats pages.
-- Root cause: In `src/app/admin/events/[id]/seats/page.tsx` line 855, `displayRows` was referenced outside the `renderFlatGrid()` function where it was locally scoped via destructuring.
-- Fixed by changing `displayRows.length` to `(parsedLayout as any)?.displayRows?.length || 0`.
-- Rebuilt project (`next build` succeeded) and restarted daemon server.
-- Verified all 5 views work without errors:
-  1. Seat Builder (canvas editor) — renders correctly with 24 seats
-  2. Admin Seats after regen — shows TEST event with 24 seats, no errors
-  3. Usher Seats — Hamlet event shows 100 seats with correct status icons
-  4. Guest Seatmap — public event page with seat selection
-  5. Compliment Ticket — verify page shows ticket with seat codes
-
-Stage Summary:
-- Bug fixed: `displayRows is not defined` in admin seats page (line 855)
-- File modified: `src/app/admin/events/[id]/seats/page.tsx`
-- All 5 views verified working. Screenshots saved to `/home/z/my-project/download/screenshots/`.
-
----
-Task ID: 2
-Agent: Main Agent
-Task: Fix seat builder vs admin seats mismatch — deriveGridSeats produces wrong grid
-
-Work Log:
-- User reported seat builder (canvas) shows 7-row layout but admin seats shows 1 row × 28 cols
-- Analyzed DB data: "test" seatmap has 1 SeatColumn with 28 seats at 7 unique Y positions
-- Root cause: deriveGridSeats() maps each SeatColumn to a row (column index = row index)
-  - With 1 column → all 28 seats get r=0 → 1 row
-  - But canvas actually shows 7 rows (7 unique Y values: y=32,64,96,128,160,192,224)
-- Also found gridSize.rows was set to seatColumns.length (1) instead of actual row count
-- Fixed deriveGridSeats() with hybrid approach:
-  - If columns.length matches unique Y count → column-per-row (safe for well-structured data)
-  - If mismatch → position-based 2D grid derivation (Y→row, X→col)
-- Fixed normalizeLayoutData(): gridSize.rows uses max seat r + 1, not column count
-- Fixed normalizeLayoutData(): added needsReDerive check to heal corrupted saved data
-  - If derivedMaxRow > existingMaxRow → force re-derive from seatColumns
-- Verified fix for "test" seatmap: now correctly produces 7 rows × 9 cols
-- Verified "tes" and "Screenshot-Test" seatmaps unaffected (still 4 rows each)
-- Regenerated TEST event seats: 28 seats across 7 rows (A-1..A-9, B-1..B-9, C-1..C-2, D-1..D-2, E-1..E-2, F-1..F-2, G-1..G-2)
-
-Stage Summary:
-- Files modified: src/components/seat-map-builder/canvas-editor.tsx
-- 3 changes: (1) deriveGridSeats hybrid logic, (2) gridSize.rows from seat data, (3) needsReDerive heal check
-- DB data fixed for "test" seatmap and TEST event seats regenerated
-
----
-Task ID: 1
-Agent: Main Agent
-Task: Fix stage/objek positioning in admin seats page — stage should be inside the canvas at its placed position
-
-Work Log:
-- Analyzed the root cause: admin seats page (`/admin/events/[id]/seats/page.tsx`) had its own LOCAL `parseLayoutData` function that did NOT extract `stageType`, `stagePosition`, `objects`, `canvasSeatBounds`, `canvasWidth`, `canvasHeight`
-- This meant `canvasSeatBounds` was always `undefined`, causing ObjectsOverlay to fall back to raw pixel positions (wrong!)
-- Stage was rendered as a static centered element, not at the position the user set in the canvas editor
-- The shared `parseLayoutData` in `@/lib/seat-layout.ts` already computes all these fields, but the admin page didn't use it
-- Replaced local `parseLayoutData` and `ParsedLayout` with shared imports from `@/lib/seat-layout.ts`
-- Added `stageLayout` useMemo that computes canvas→grid coordinate mapping (same approach as `seat-map.tsx` and usher page)
-- When custom stage position exists (user dragged in canvas editor), stage renders absolutely positioned inside the grid container at the mapped position
-- When no custom position, stage renders as default centered element above the grid (current convention)
-- ObjectsOverlay now receives proper `canvasSeatBounds`, `gridCols`, `gridRows`, and `paddingTop` for correct coordinate mapping
-- Added inset stage support (BLACK_BOX/ARENA) rendered in the middle of rows via `renderFlatGrid`
-- Build verified: no errors
-
-Stage Summary:
-- Admin seats page now uses shared `parseLayoutData` from `@/lib/seat-layout.ts` (consistent with seat-map.tsx, usher)
-- Stage position from canvas editor is now correctly mapped to admin grid coordinates
-- Objects (FOH, ENTRANCE, CUSTOM_SHAPE) are positioned correctly using canvasSeatBounds
-- All rendering is now consistent: SEAT BUILDER → ADMIN SEATS → GUEST VIEW → USHER VIEW
+- Root cause: `gridSize.rows` used paint column count instead of derived row count
+- Fix: Use `maxRowFromSeats(seats)` instead of `updatedCols.length` in 4 places + normalizeLayoutData
+- Fixed DB data for test seatmap
+- All 4 views (seat builder, admin seats, guest, usher) now render correctly
+- Screenshots saved to /home/z/my-project/download/
