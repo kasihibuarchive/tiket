@@ -136,6 +136,24 @@ export default function EventDetailPage() {
 
   const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
 
+  // Re-fetch seats when active show date changes (server-side filtering reinforcement)
+  useEffect(() => {
+    if (!activeShowDate?.id) return
+    let cancelled = false
+    async function fetchSeatsByDate() {
+      try {
+        const res = await fetch(`/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`)
+        if (!res.ok || cancelled) return
+        const data = await res.json()
+        if (!cancelled) setAllSeats(data.seats || [])
+      } catch (err) {
+        console.error('Fetch seats by date error:', err)
+      }
+    }
+    fetchSeatsByDate()
+    return () => { cancelled = true }
+  }, [activeShowDate?.id, eventId])
+
   // Filter seats by active show date
   const filteredSeats = useMemo(() => {
     if (!activeShowDate?.id) {

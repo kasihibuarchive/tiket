@@ -79,7 +79,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
     // Fallback: check localStorage (for proxy environments)
     try {
-      const stored = localStorage.getItem('teater_rendra_admin')
+      const stored = localStorage.getItem('teateran_admin')
       if (stored) {
         const admin = JSON.parse(stored)
         setIsAuthenticated(true)
@@ -147,8 +147,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Handle logout
   async function handleLogout() {
     try {
-      localStorage.removeItem('teater_rendra_role')
-      localStorage.removeItem('teater_rendra_admin')
+      localStorage.removeItem('teateran_role')
+      localStorage.removeItem('teateran_admin')
     } catch {
       // ignore
     }

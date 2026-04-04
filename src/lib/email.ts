@@ -96,7 +96,7 @@ export async function sendETicketEmail(data: EmailTicketData) {
     <body>
       <div class="container">
         <div class="header">
-          <h1>TEATER RENDRA</h1>
+          <h1>TEATERAN</h1>
           <p>E-Tiket Resmi</p>
         </div>
         <div class="content">
@@ -104,7 +104,7 @@ export async function sendETicketEmail(data: EmailTicketData) {
             Halo <strong>${data.customerName}</strong>,
           </p>
           <p class="greeting">
-            Ini adalah e-tiket kamu untuk pertunjukan di Teater Rendra.
+            Ini adalah e-tiket kamu untuk pertunjukan di Teateran.
             Tunjukkan e-tiket ini (file PDF terlampir) ke meja registrasi saat hari H.
           </p>
           <div class="highlight">
@@ -138,7 +138,7 @@ export async function sendETicketEmail(data: EmailTicketData) {
           </div>
         </div>
         <div class="footer">
-          <p>Terima kasih telah memilih Teater Rendra.</p>
+          <p>Terima kasih telah memilih Teateran.</p>
           <p style="margin-top: 5px; color: #bbb;">E-Tiket ini digenerate secara otomatis dan sah sebagai bukti pembayaran.</p>
         </div>
       </div>
@@ -150,9 +150,9 @@ export async function sendETicketEmail(data: EmailTicketData) {
 
   try {
     const info = await transporter.sendMail({
-      from: `"Teater Rendra" <${emailUser}>`,
+      from: `"Teateran" <${emailUser}>`,
       to: data.customerEmail,
-      subject: 'E-TIKET TEATER RENDRA',
+      subject: 'E-TIKET TEATERAN',
       html,
       attachments: [
         {

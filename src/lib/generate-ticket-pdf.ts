@@ -36,7 +36,7 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(22)
   doc.setTextColor(GOLD)
-  doc.text('TEATER RENDRA', pageW / 2, 22, { align: 'center' })
+  doc.text('TEATERAN', pageW / 2, 22, { align: 'center' })
 
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(9)
@@ -179,10 +179,10 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
 
   doc.setFontSize(7)
   doc.setTextColor(GOLD)
-  doc.text('TEATER RENDRA', pageW / 2, footerY + 5, { align: 'center' })
+  doc.text('TEATERAN', pageW / 2, footerY + 5, { align: 'center' })
   doc.setFontSize(6)
   doc.setTextColor('#666666')
-  doc.text('www.teaterrendra.com  |  E-Tiket ini digenerate secara otomatis dan sah sebagai bukti pembayaran.', pageW / 2, footerY + 11, { align: 'center' })
+  doc.text('www.teateran.com  |  E-Tiket ini digenerate secara otomatis dan sah sebagai bukti pembayaran.', pageW / 2, footerY + 11, { align: 'center' })
 
   return Buffer.from(doc.output('arraybuffer'))
 }

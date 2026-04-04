@@ -14,7 +14,7 @@ export async function GET() {
         greeting: 'Dear {customerName},',
         rules: 'Please arrive 30 minutes before show time. No outside food or drinks allowed.',
         notes: 'Present this e-ticket at the entrance.',
-        footer: 'Thank you for choosing Teater Rendra.',
+        footer: 'Thank you for choosing Teateran.',
         isActive: true,
       }
 
@@ -68,7 +68,7 @@ export async function PUT(request: NextRequest) {
           greeting: greeting || 'Dear {customerName},',
           rules: rules || 'Please arrive 30 minutes before show time.',
           notes: notes || 'Present this e-ticket at the entrance.',
-          footer: footer || 'Thank you for choosing Teater Rendra.',
+          footer: footer || 'Thank you for choosing Teateran.',
           isActive: true,
         },
       })

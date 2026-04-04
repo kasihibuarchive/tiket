@@ -7,7 +7,7 @@ const CHECKOUT_PREFIX = 'CK:'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { eventId, seatCodes, sessionId } = body
+    const { eventId, seatCodes, sessionId, showDateId } = body
 
     if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
@@ -17,7 +17,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
     }
 
-    const seats = await db.seat.findMany({ where: { eventId, seatCode: { in: seatCodes } } })
+    const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+    if (showDateId) seatWhere.eventShowDateId = showDateId
+
+    const seats = await db.seat.findMany({ where: seatWhere })
     if (seats.length !== seatCodes.length) {
       return NextResponse.json({ error: 'Seats not found' }, { status: 404 })
     }
@@ -55,22 +58,27 @@ export async function POST(request: NextRequest) {
 
     // 4. Lock: only seats that are AVAILABLE or locked by THIS session
     const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+    const lockWhere: any = {
+      eventId,
+      seatCode: { in: seatCodes },
+      OR: [
+        { status: 'AVAILABLE' },
+        { status: 'LOCKED_TEMPORARY', lockedBy: sessionId },
+      ],
+    }
+    if (showDateId) lockWhere.eventShowDateId = showDateId
+
     const result = await db.seat.updateMany({
-      where: {
-        eventId,
-        seatCode: { in: seatCodes },
-        OR: [
-          { status: 'AVAILABLE' },
-          { status: 'LOCKED_TEMPORARY', lockedBy: sessionId },
-        ],
-      },
+      where: lockWhere,
       data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: sessionId },
     })
 
     // Race condition check
     if (result.count !== seatCodes.length) {
+      const raceWhere: any = { eventId, seatCode: { in: seatCodes }, lockedBy: sessionId }
+      if (showDateId) raceWhere.eventShowDateId = showDateId
       const updated = await db.seat.findMany({
-        where: { eventId, seatCode: { in: seatCodes }, lockedBy: sessionId },
+        where: raceWhere,
         select: { seatCode: true },
       })
       const updatedCodes = new Set(updated.map((s) => s.seatCode))

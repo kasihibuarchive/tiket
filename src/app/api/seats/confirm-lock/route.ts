@@ -9,7 +9,7 @@ const CHECKOUT_PREFIX = 'CK:'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { eventId, seatCodes, sessionId } = body
+    const { eventId, seatCodes, sessionId, showDateId } = body
 
     if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0) {
       return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
@@ -23,8 +23,11 @@ export async function POST(request: NextRequest) {
     const checkoutId = CHECKOUT_PREFIX + sessionId
 
     // 1. Find all requested seats
+    const findWhere: any = { eventId, seatCode: { in: seatCodes } }
+    if (showDateId) findWhere.eventShowDateId = showDateId
+
     const seats = await db.seat.findMany({
-      where: { eventId, seatCode: { in: seatCodes } },
+      where: findWhere,
       select: { seatCode: true, status: true, lockedBy: true },
     })
 
@@ -54,41 +57,48 @@ export async function POST(request: NextRequest) {
     if (alreadyOurs.length === seatCodes.length) {
       // Extend lock time and return success (idempotent retry)
       const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+      const idempWhere: any = { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId }
+      if (showDateId) idempWhere.eventShowDateId = showDateId
       await db.seat.updateMany({
-        where: { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId },
+        where: idempWhere,
         data: { lockedUntil },
       })
       return NextResponse.json({ ok: true, confirmedSeats: seatCodes })
     }
 
     // 4. ATOMIC LOCK — whoever executes this updateMany FIRST wins the seats.
-    // 
+    //
     // Lock seats that are:
     //   - NOT SOLD (already checked above)
     //   - NOT locked by another CHECKOUT session (CK: prefix)
-    // 
+    //
     // This means checkout locks OVERRIDE seat-map locks.
     // If another user is ALSO in checkout (has CK: lock), they win and we lose.
     const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+    const atomicWhere: any = {
+      eventId,
+      seatCode: { in: seatCodes },
+      NOT: [
+        {
+          status: 'LOCKED_TEMPORARY',
+          lockedBy: { startsWith: CHECKOUT_PREFIX },
+        },
+      ],
+    }
+    if (showDateId) atomicWhere.eventShowDateId = showDateId
+
     const result = await db.seat.updateMany({
-      where: {
-        eventId,
-        seatCode: { in: seatCodes },
-        NOT: [
-          {
-            status: 'LOCKED_TEMPORARY',
-            lockedBy: { startsWith: CHECKOUT_PREFIX },
-          },
-        ],
-      },
+      where: atomicWhere,
       data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
     })
 
     // 4. Race condition check: if we couldn't lock all seats, someone else won
     if (result.count < seatCodes.length) {
       // Find which seats we managed to lock
+      const raceWhere: any = { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId }
+      if (showDateId) raceWhere.eventShowDateId = showDateId
       const updated = await db.seat.findMany({
-        where: { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId },
+        where: raceWhere,
         select: { seatCode: true },
       })
       const updatedCodes = new Set(updated.map((s) => s.seatCode))

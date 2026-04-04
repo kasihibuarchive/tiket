@@ -29,7 +29,7 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
         S T A G E
       </p>
       <p className={cn('font-serif text-gold/60 tracking-[0.2em] mt-0.5', sz.sub)}>
-        T E A T E R &nbsp; R E N D R A
+        T E A T E R A N
       </p>
     </div>
   )

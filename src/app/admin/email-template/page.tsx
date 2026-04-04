@@ -96,7 +96,7 @@ export default function EmailTemplatePage() {
     greeting: 'Dear {customerName},',
     rules: 'Silakan datang 30 menit sebelum pertunjukan dimulai. Makanan dan minuman dari luar tidak diperkenankan masuk. Mohon menjaga ketenangan selama pertunjukan berlangsung.',
     notes: 'Perlihatkan e-ticket ini di pintu masuk sebagai bukti pembayaran.',
-    footer: 'Terima kasih telah memilih Teater Rendra. Selamat menikmati pertunjukan!',
+    footer: 'Terima kasih telah memilih Teateran. Selamat menikmati pertunjukan!',
     isActive: true,
   }
 
@@ -228,7 +228,7 @@ export default function EmailTemplatePage() {
               <div className="bg-white rounded-xl overflow-hidden shadow-lg">
                 {/* Header */}
                 <div className="bg-gradient-to-r from-charcoal to-charcoal/90 p-6 text-center">
-                  <h1 className="text-gold font-serif text-xl">TEATER RENDRA</h1>
+                  <h1 className="text-gold font-serif text-xl">TEATERAN</h1>
                   <p className="text-white/50 text-xs mt-1">E-Ticket Electronic Ticketing</p>
                 </div>
 
@@ -242,7 +242,7 @@ export default function EmailTemplatePage() {
                   <div className="bg-warm-white rounded-lg p-4 border-l-4 border-gold">
                     <h3 className="font-serif text-lg font-bold text-charcoal">Hamlet - Pertunjukan Spesial</h3>
                     <p className="text-sm text-muted-foreground mt-1">Sabtu, 15 Mei 2026 • 19:00 WIB</p>
-                    <p className="text-sm text-muted-foreground">Teater Rendra, Jakarta</p>
+                    <p className="text-sm text-muted-foreground">Teateran, Jakarta</p>
                   </div>
 
                   {/* Seats */}

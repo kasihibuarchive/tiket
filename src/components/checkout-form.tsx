@@ -575,7 +575,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-serif text-lg">{liveMerchItem?.name}</DialogTitle>
-            <DialogDescription>{liveMerchItem?.description || 'Merchandise eksklusif Teater Rendra'}</DialogDescription>
+            <DialogDescription>{liveMerchItem?.description || 'Merchandise eksklusif Teateran'}</DialogDescription>
           </DialogHeader>
           {liveMerchItem && (
             <div className="space-y-4">

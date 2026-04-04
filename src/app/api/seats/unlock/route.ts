@@ -6,7 +6,7 @@ const CHECKOUT_PREFIX = 'CK:'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { eventId, seatCodes, sessionId } = body
+    const { eventId, seatCodes, sessionId, showDateId } = body
 
     if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0) {
       return NextResponse.json(
@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       seatCode: { in: seatCodes },
       status: 'LOCKED_TEMPORARY',
     }
+    if (showDateId) whereClause.eventShowDateId = showDateId
 
     if (sessionId) {
       whereClause.OR = [

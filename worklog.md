@@ -1,20 +1,30 @@
 ---
 Task ID: 1
-Agent: Main
-Task: Fix UI not loading and ObjectsOverlay scrolling on mobile
+Agent: Main + Subagents
+Task: Fix 4 bugs - Stage positioning, verify ticket space, multi-day seats, rename Rendra→Teateran
 
 Work Log:
-- Diagnosed UI loading issue: static files (JS, CSS) returning 404
-- Root cause: Next.js standalone build does NOT include `.next/static/` or `public/` — they must be manually copied to `.next/standalone/.next/static/` and `.next/standalone/public/`
-- Fixed by copying static files to standalone directory
-- Updated daemon-server.js Step 3.5 to auto-copy static files on every daemon restart (with mtime check)
-- Fixed ObjectsOverlay scrolling: removed `inset-0` and `offsetX/offsetY` props; instead wrapped overlay in a positioned div inside the scroll container with explicit width/minWidth and marginLeft to align with grid cells
-- Rebuilt project (BUILD_ID: _zUSy_4oqy4CN4jQG1rGE)
-- Restarted daemon — all static assets return 200, new BUILD_ID confirmed
+- Killed server daemon
+- BUG 4 (Rename): Global rename "Rendra" → "Teateran" across 19 files. Preserved "Auditorium Rendra" and "Stage Rendra". Updated footer with PH: YC Media, Owner: Yuncha.
+- BUG 3 (Multi-day seats): 
+  - Confirmed DB schema already has eventShowDateId/showDateId columns
+  - Root cause: APIs didn't filter by showDateId
+  - Updated 5 API routes: seats GET, lock, unlock, confirm-lock, events page
+  - Updated seat-map.tsx to pass showDateId in all API calls
+  - Fixed Jizo existing data: assigned 170 seats to Hari 1, created 170 fresh seats for Hari 2
+- BUG 1 (Stage positioning): 
+  - Black Box & Arena stages now render IN THE MIDDLE of seat rows
+  - Proscenium, Amphitheater, Thrust remain at top
+  - Stage scrolls with grid content (inside overflow-x-auto)
+- BUG 2 (Public seat map):
+  - Reduced max-w from 5xl to 3xl to eliminate right-side empty space
+  - Stage now inside scrollable container
+- Downgraded Prisma from v7 to v6 (compatibility with schema format)
+- Rebuilt project, copied static, restarted daemon
+- Verified: new BUILD_ID served, TEATERAN branding in HTML, seat API returns 170 seats per show date
 
 Stage Summary:
-- UI loading issue fixed: static files now auto-copied to standalone dir
-- daemon-server.js updated with auto-copy logic (Step 3.5)
-- ObjectsOverlay no longer uses inset-0; positioned inline with scrollable grid content
-- Objects should now scroll horizontally with columns on mobile
-- Server running: daemon PID 18947, next-server PID 18954
+- All 4 bugs fixed
+- Server running: daemon PID 4112, next-server PID 4119
+- Jizo: Hari 1 = 170 seats (3 sold), Hari 2 = 170 seats (0 sold, fresh)
+- Brand: "Teateran" with PH: YC Media

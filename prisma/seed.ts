@@ -28,7 +28,7 @@ async function seed() {
         greeting: 'Dear {customerName},',
         rules: 'Silakan datang 30 menit sebelum pertunjukan dimulai. Makanan dan minuman dari luar tidak diperkenankan masuk. Mohon menjaga ketenangan selama pertunjukan berlangsung. Dilarang merekam atau memotret selama pertunjukan.',
         notes: 'Perlihatkan e-ticket ini di pintu masuk sebagai bukti pembayaran. E-ticket ini hanya berlaku untuk satu kali masuk.',
-        footer: 'Terima kasih telah memilih Teater Rendra. Selamat menikmati pertunjukan!',
+        footer: 'Terima kasih telah memilih Teateran. Selamat menikmati pertunjukan!',
         isActive: true,
       },
     })
@@ -44,7 +44,7 @@ async function seed() {
         category: 'Teater',
         showDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days from now
         openGate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 - 30 * 60 * 1000),
-        location: 'Teater Rendra, Jl. Rendra No. 1, Jakarta Selatan',
+        location: 'Teateran, Jl. Rendra No. 1, Jakarta Selatan',
         posterUrl: '',
         synopsis: 'Hamlet adalah sebuah tragedi karya William Shakespeare yang menceritakan kisah Pangeran Hamlet dari Kerajaan Denmark yang berusaha membalas kematian ayahnya yang dibunuh oleh pamannya, Claudius.\n\nPertunjukan ini akan menampilkan interpretasi modern dari karya klasik ini, dengan arahan sutradara terkemuka Indonesia dan pemeran utama yang telah berpengalaman di dunia teater selama puluhan tahun.\n\nDurasi pertunjukan: 2 jam 30 menit (dengan jeda 15 menit)',
         isPublished: true,
@@ -110,7 +110,7 @@ async function seed() {
         title: 'Romeo & Juliet - A Modern Love',
         category: 'Teater',
         showDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days from now
-        location: 'Teater Rendra, Jl. Rendra No. 1, Jakarta Selatan',
+        location: 'Teateran, Jl. Rendra No. 1, Jakarta Selatan',
         posterUrl: '',
         synopsis: 'Adaptasi modern dari kisah klasik Romeo dan Juliet karya Shakespeare. Pertunjukan ini mengeksplorasi tema cinta, konflik keluarga, dan pilihan hidup dalam konteks Indonesia kontemporer.\n\nDengan musik orisinal dan tata panggung yang memukau, pertunjukan ini akan membawa penonton dalam perjalanan emosional yang tak terlupakan.',
         isPublished: true,

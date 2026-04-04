@@ -7,6 +7,8 @@ export async function GET(
 ) {
   try {
     const { id } = await params
+    const { searchParams } = new URL(request.url)
+    const showDateId = searchParams.get('showDateId') || undefined
 
     const event = await db.event.findUnique({
       where: { id },
@@ -18,8 +20,16 @@ export async function GET(
     }
 
     // Separate queries — NO include (crashes Next.js 16)
+    // Build where clause — filter by showDateId if provided, otherwise return null-eventShowDateId seats for backward compat
+    const seatWhere: any = { eventId: id }
+    if (showDateId) {
+      seatWhere.eventShowDateId = showDateId
+    } else {
+      seatWhere.eventShowDateId = null
+    }
+
     const seats = await db.seat.findMany({
-      where: { eventId: id },
+      where: seatWhere,
       select: {
         id: true,
         seatCode: true,
@@ -28,6 +38,7 @@ export async function GET(
         col: true,
         lockedUntil: true,
         priceCategoryId: true,
+        eventShowDateId: true,
       },
       orderBy: [{ row: 'asc' }, { col: 'asc' }],
     })
@@ -53,6 +64,7 @@ export async function GET(
         col: seat.col,
         lockedUntil: seat.lockedUntil,
         priceCategory: cat,
+        eventShowDateId: seat.eventShowDateId,
       }
     })
 

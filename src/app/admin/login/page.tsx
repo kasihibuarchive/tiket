@@ -23,7 +23,7 @@ export default function AdminLoginPage() {
   // Restore role from localStorage on mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem('teater_rendra_role')
+      const saved = localStorage.getItem('teateran_role')
       if (saved === 'admin' || saved === 'usher') {
         setSelectedRole(saved)
       }
@@ -39,8 +39,8 @@ export default function AdminLoginPage() {
 
     // Clear ALL stale session data first (prevents role-switch flicker)
     try {
-      localStorage.removeItem('teater_rendra_role')
-      localStorage.removeItem('teater_rendra_admin')
+      localStorage.removeItem('teateran_role')
+      localStorage.removeItem('teateran_admin')
     } catch { /* ignore */ }
 
     try {
@@ -55,7 +55,7 @@ export default function AdminLoginPage() {
       if (res.ok && data.admin) {
         // Store fresh session in localStorage (for proxy where cookies may be stripped)
         try {
-          localStorage.setItem('teater_rendra_admin', JSON.stringify(data.admin))
+          localStorage.setItem('teateran_admin', JSON.stringify(data.admin))
         } catch { /* ignore */ }
 
         // Redirect based on ACTUAL role from server (not UI selector)
@@ -99,7 +99,7 @@ export default function AdminLoginPage() {
             <Drama className="w-8 h-8 text-gold" />
           </div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">
-            Teater <span className="text-gold">Rendra</span>
+            Teateran
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
             Ticketing Management System
@@ -236,7 +236,7 @@ export default function AdminLoginPage() {
         </Card>
 
         <p className="text-center text-xs text-muted-foreground/50 mt-6">
-          Teater Rendra Ticketing Platform &copy; {new Date().getFullYear()}
+          Teateran Ticketing Platform &copy; {new Date().getFullYear()}
         </p>
       </div>
     </div>

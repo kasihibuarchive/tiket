@@ -48,7 +48,7 @@ export default function SeatMapEditPage() {
   // Load admin info from localStorage
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('teater_rendra_admin')
+      const stored = localStorage.getItem('teateran_admin')
       if (stored) {
         const admin = JSON.parse(stored)
         setAdminId(admin.id || admin.username || 'unknown')

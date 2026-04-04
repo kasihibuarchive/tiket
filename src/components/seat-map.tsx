@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { DoorOpen, Lock, Check, X, Crown, User, GraduationCap, Loader2, AlertTriangle } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
@@ -226,7 +226,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     let cancelled = false
     const pollSeats = async () => {
       try {
-        const res = await fetch('/api/events/' + eventId + '/seats')
+        const url = '/api/events/' + eventId + '/seats' + (showDateId ? '?showDateId=' + showDateId : '')
+        const res = await fetch(url)
         if (!res.ok || cancelled) return
         const json = await res.json()
         if (cancelled) return
@@ -254,7 +255,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const timeout = setTimeout(() => { pollSeats() }, 3000)
     const interval = setInterval(pollSeats, 4000)
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
-  }, [eventId, selectedSeatCodes])
+  }, [eventId, selectedSeatCodes, showDateId])
 
   // Cleanup expired locks locally
   useEffect(() => {
@@ -308,7 +309,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       fetch('/api/seats/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes: [seat.seatCode], sessionId: sessionId.current }),
+        body: JSON.stringify({ eventId, seatCodes: [seat.seatCode], sessionId: sessionId.current, showDateId: showDateId || undefined }),
       }).catch(() => {})
       notifyParentWithCodes(newCodes)
     } else {
@@ -322,7 +323,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       fetch('/api/seats/lock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes: allCodes, sessionId: sessionId.current }),
+        body: JSON.stringify({ eventId, seatCodes: allCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
       }).then((res) => {
         for (const c of allCodes) pendingLockRef.current.delete(c)
         updatePendingState(newCodes)
@@ -350,7 +351,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       }
       notifyParentWithCodes(newCodes)
     }
-  }, [selectedSeatCodes, eventId, lockSeats, unlockSeats, notifyParentWithCodes, updatePendingState])
+  }, [selectedSeatCodes, eventId, lockSeats, unlockSeats, notifyParentWithCodes, updatePendingState, showDateId])
 
   const handleClearSelection = useCallback(async () => {
     const codes = Array.from(selectedSeatCodes)
@@ -359,7 +360,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       await fetch('/api/seats/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes: codes, sessionId: sessionId.current }),
+        body: JSON.stringify({ eventId, seatCodes: codes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
       })
     } catch (err) {
       console.error('Failed to unlock seats via API:', err)
@@ -369,7 +370,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     setHasPendingLock(false)
     setLockCountdown(null)
     notifyParentWithCodes(new Set())
-  }, [selectedSeatCodes, eventId, unlockSeats, notifyParentWithCodes])
+  }, [selectedSeatCodes, eventId, unlockSeats, notifyParentWithCodes, showDateId])
 
   // Countdown timer
   useEffect(() => {
@@ -528,15 +529,23 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const CELL_TOTAL = SEAT_W + SEAT_GAP // each grid cell (seat + gap)
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60 // +60 for row labels
 
+    // Stage placement: inset (middle of rows) for BLACK_BOX & ARENA, top for others
+    const stageType = parsedLayout?.stageType || 'PROSCENIUM'
+    const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
+    const stageSize = isInsetStage ? 'md' : 'lg'
+    const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
+
     return (
-      <div className="w-full max-w-5xl mx-auto">
-        {/* Stage */}
-        <StageRenderer
-          stageType={parsedLayout?.stageType}
-          size="lg"
-          thrustWidth={(parsedLayout as any)?.thrustWidth}
-          thrustDepth={(parsedLayout as any)?.thrustDepth}
-        />
+      <div className="w-full max-w-3xl mx-auto">
+        {/* Stage — top position for PROSCENIUM, AMPHITHEATER, THRUST */}
+        {!isInsetStage && (
+          <StageRenderer
+            stageType={stageType}
+            size={stageSize}
+            thrustWidth={(parsedLayout as any)?.thrustWidth}
+            thrustDepth={(parsedLayout as any)?.thrustDepth}
+          />
+        )}
 
         {/* Lock rejection notice */}
         {lockRejectionMsg && (
@@ -550,14 +559,25 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
             <div className="mx-auto relative" style={{ minWidth: gridW }}>
-              {displayRows.map((ri) => {
+              {displayRows.map((ri, idx) => {
                 const label = lLabels[ri] || String.fromCharCode(65 + ri)
                 const colMap = gridLookup.get(ri) || new Map()
                 const rowColor = getRowColorFromSections(ri)
 
                 return (
+                  <React.Fragment key={ri}>
+                    {/* Inset stage (BLACK_BOX / ARENA) rendered in the middle of rows */}
+                    {isInsetStage && idx === middleRowIndex && (
+                      <div className="flex justify-center my-2">
+                        <StageRenderer
+                          stageType={stageType}
+                          size={stageSize}
+                          thrustWidth={(parsedLayout as any)?.thrustWidth}
+                          thrustDepth={(parsedLayout as any)?.thrustDepth}
+                        />
+                      </div>
+                    )}
                   <div
-                    key={ri}
                     className="flex items-center mb-[3px]"
                     style={{ height: SEAT_W }}
                   >
@@ -604,6 +624,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                       {label}
                     </div>
                   </div>
+                  </React.Fragment>
                 )
               })}
               {/* Objects overlay — inside grid so it scrolls with columns */}

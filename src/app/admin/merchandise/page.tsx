@@ -372,7 +372,7 @@ export default function MerchandiseAdminPage() {
               <Input
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                placeholder="Contoh: T-Shirt Teater Rendra"
+                placeholder="Contoh: T-Shirt Teateran"
               />
             </div>
 

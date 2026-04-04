@@ -11,7 +11,7 @@ export function Footer() {
             <div className="flex items-center gap-2 mb-4">
               <Drama className="w-6 h-6 text-gold" />
               <span className="font-serif text-lg font-semibold text-white">
-                TEATER <span className="text-gold">RENDA</span>
+                TEATERAN
               </span>
             </div>
             <p className="text-sm leading-relaxed text-white/50">
@@ -45,9 +45,11 @@ export function Footer() {
             </h4>
             <div className="flex flex-col gap-2 text-sm">
               <p>📧 yunchaaruna@gmail.com</p>
-              <p>📍 Teater Rendra, Jakarta</p>
+              <p>📍 Teateran, Jakarta</p>
+              <p>🏢 PH: YC Media</p>
+              <p>👤 Owner: Yuncha</p>
               <p className="text-white/40 text-xs mt-4">
-                © {new Date().getFullYear()} Teater Rendra. All rights reserved.
+                © {new Date().getFullYear()} Teateran. All rights reserved.
               </p>
             </div>
           </div>

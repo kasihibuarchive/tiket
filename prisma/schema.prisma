@@ -274,7 +274,7 @@ model EmailTemplate {
   greeting  String   @default("Dear {customerName},")
   rules     String   @default("Please arrive 30 minutes before show time. No outside food or drinks allowed.")
   notes     String   @default("Present this e-ticket at the entrance.")
-  footer    String   @default("Thank you for choosing Teater Rendra.")
+  footer    String   @default("Thank you for choosing Teateran.")
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

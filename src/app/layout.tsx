@@ -22,14 +22,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Teater Rendra - Ticketing Platform",
-  description: "Official ticketing platform for Teater Rendra. Book your seats for the finest theatrical productions.",
-  keywords: ["Teater Rendra", "Theater", "Ticketing", "Tiket Teater", "Pertunjukan"],
+  title: "Teateran - Ticketing Platform",
+  description: "Official ticketing platform for Teateran. Book your seats for the finest theatrical productions.",
+  keywords: ["Teateran", "Theater", "Ticketing", "Tiket Teater", "Pertunjukan"],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "Teater Rendra - Ticketing Platform",
+    title: "Teateran - Ticketing Platform",
     description: "Book your seats for the finest theatrical productions.",
     type: "website",
   },

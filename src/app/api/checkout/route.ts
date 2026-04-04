@@ -290,7 +290,7 @@ export async function POST(request: NextRequest) {
           price: totalAmount,
           quantity: 1,
           name: seatCodes.length + ' Tiket' + (merchDataToSave ? ' + Merchandise' : ''),
-          category: 'Tiket Teater Rendra',
+          category: 'Tiket Teateran',
         },
       ]
     }

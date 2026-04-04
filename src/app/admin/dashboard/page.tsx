@@ -84,7 +84,7 @@ export default function AdminDashboard() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-1">Selamat datang di Admin Panel Teater Rendra</p>
+          <p className="text-sm text-muted-foreground mt-1">Selamat datang di Admin Panel Teateran</p>
         </div>
         <Link href="/admin/events">
           <Button className="bg-charcoal hover:bg-charcoal/90 text-gold">

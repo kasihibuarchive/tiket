@@ -1,6 +1,6 @@
 import crypto from 'crypto'
 
-const APP_SECRET = process.env.APP_SECRET || 'teater-rendra-secret-key'
+const APP_SECRET = process.env.APP_SECRET || 'teateran-secret-key'
 
 // Hash password with SHA-256 + salt
 export function hashPassword(password: string): string {
