@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useParams } from 'next/navigation'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -14,19 +14,7 @@ import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
-
-// =====================
-// Layout Data Types & Parser (shared with seat-map.tsx)
-// =====================
-interface ParsedLayout {
-  gridSize: { rows: number; cols: number }
-  rowLabels: string[]
-  sections: Array<{ name: string; fromRow: number; toRow: number; colorCode: string }>
-  aisleColumns: number[]
-  embeddedRows: Record<string, number> // source row index → target row index
-  displayRows: number[] // row indices to actually render (excludes embedded source rows)
-  rowSeatMap: Map<number, Array<{ c: number; seatNum: number }>>
-}
+import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
 
 const CATEGORY_CONFIG: Record<string, { icon: typeof Crown; label: string; defaultColor: string }> = {
   VIP: { icon: Crown, label: 'VIP', defaultColor: '#C8A951' },
@@ -36,61 +24,7 @@ const CATEGORY_CONFIG: Record<string, { icon: typeof Crown; label: string; defau
 
 const SEAT_W = 28
 const SEAT_GAP = 3
-
-function parseLayoutData(layoutData: any): ParsedLayout | null {
-  if (!layoutData) return null
-  const data = typeof layoutData === 'string' ? JSON.parse(layoutData) : layoutData
-  if (!data || data.type !== 'NUMBERED' || !data.gridSize) return null
-
-  const rawSeats: any[] = data.seats || []
-  const rowLabels: string[] = data.rowLabels || []
-  const sections = data.sections || []
-  const aisleColumns: number[] = Array.isArray(data.aisleColumns) ? data.aisleColumns : []
-  const { rows, cols } = data.gridSize
-
-  // Group by row and assign seat numbers
-  const rowGroups: Record<number, any[]> = {}
-  for (const s of rawSeats) {
-    const r = s.r ?? s.row ?? 0
-    if (!rowGroups[r]) rowGroups[r] = []
-    rowGroups[r].push(s)
-  }
-
-  const rowSeatMap = new Map<number, Array<{ c: number; seatNum: number }>>()
-  for (const [rStr, rowSeats] of Object.entries(rowGroups)) {
-    const r = parseInt(rStr)
-    const sorted = [...rowSeats].sort((a: any, b: any) => (a.c ?? a.col ?? 0) - (b.c ?? b.col ?? 0))
-
-    // Deduplicate c values within each row
-    const deduped: typeof sorted = []
-    const usedC = new Set<number>()
-    for (const s of sorted) {
-      let c = s.c ?? s.col ?? 0
-      while (usedC.has(c)) c++
-      usedC.add(c)
-      deduped.push({ ...s, c })
-    }
-
-    rowSeatMap.set(r, deduped.map((s: any, idx: number) => ({
-      c: s.c,
-      seatNum: idx + 1,
-    })))
-  }
-
-  // Use provided embeddedRows, or leave empty
-  let embeddedRows: Record<string, number> = data.embeddedRows || {}
-
-  // Determine which rows to display: skip source rows that are embedded elsewhere
-  const embeddedSourceRows = new Set(Object.keys(embeddedRows).map(Number))
-  const displayRows: number[] = []
-  for (let r = 0; r < rows; r++) {
-    if (!embeddedSourceRows.has(r)) {
-      displayRows.push(r)
-    }
-  }
-
-  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows }
-}
+const LABEL_W = 24 // w-6 = 24px row label area
 
 interface SeatData {
   id: string
@@ -233,7 +167,67 @@ export default function SeatEditorPage() {
   }, [activeShowDate?.id, eventId])
 
   // ─── Parse layoutData for flat grid rendering (1:1 with seat map editor) ──
-  const parsedLayout = useMemo(() => parseLayoutData(layoutData), [layoutData])
+  const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
+
+  // ─── Stage & Objects coordinate mapping (canvas → admin grid) ──
+  const stageLayout = useMemo(() => {
+    if (!parsedLayout) return null
+    const { gridSize, displayRows, stagePosition, canvasSeatBounds: csb } = parsedLayout
+    const cols = gridSize.cols
+    const CELL_TOTAL = SEAT_W + SEAT_GAP
+    const guestGridW = cols * CELL_TOTAL
+    const guestGridH = displayRows.length * CELL_TOTAL
+    const hasBounds = !!csb && cols > 0 && displayRows.length > 0
+    const hasCustomStagePos = stagePosition && typeof stagePosition.x === 'number'
+    const stageType = parsedLayout.stageType || 'PROSCENIUM'
+    const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
+    const stageSize = isInsetStage ? 'md' : 'lg'
+
+    // Helper: transform canvas (cx, cy, cw, ch) → guest (gx, gy, gw, gh)
+    function toGuest(cx: number, cy: number, cw: number, ch: number) {
+      if (!csb) return { x: cx, y: cy, w: cw, h: ch }
+      return {
+        x: LABEL_W + ((cx - csb.originX) / csb.spanX) * guestGridW,
+        y: ((cy - csb.originY) / csb.spanY) * guestGridH,
+        w: (cw / csb.spanX) * guestGridW,
+        h: (ch / csb.spanY) * guestGridH,
+      }
+    }
+
+    // Calculate paddingTop for elements above the seat grid
+    let stageGuest = hasCustomStagePos && hasBounds
+      ? toGuest(stagePosition.x, stagePosition.y, stagePosition.width, stagePosition.height)
+      : null
+    const allGuestYs: number[] = []
+    if (stageGuest) allGuestYs.push(stageGuest.y)
+    if (parsedLayout.objects) {
+      for (const obj of parsedLayout.objects) {
+        if (typeof obj.x === 'number' && typeof obj.y === 'number' && hasBounds) {
+          const g = toGuest(obj.x, obj.y, obj.pixelW || 60, obj.pixelH || 30)
+          allGuestYs.push(g.y)
+        }
+      }
+    }
+    const minGuestY = allGuestYs.length > 0 ? Math.min(...allGuestYs) : 0
+    const paddingTop = minGuestY < 0 ? Math.ceil(-minGuestY) + 4 : 0
+
+    // Re-calculate stage guest position with paddingTop offset
+    if (stageGuest && paddingTop > 0) {
+      stageGuest = { ...stageGuest, y: stageGuest.y + paddingTop }
+    }
+
+    return {
+      stageType,
+      isInsetStage,
+      stageSize,
+      hasCustomStagePos: !!hasCustomStagePos && hasBounds,
+      stageGuest,
+      paddingTop,
+      canvasSeatBounds: csb,
+      cols,
+      displayRowsCount: displayRows.length,
+    }
+  }, [parsedLayout])
 
   // Build seat lookup by seatCode
   const seatLookup = useMemo(() => {
@@ -482,6 +476,8 @@ export default function SeatEditorPage() {
 
     const CELL_TOTAL = SEAT_W + SEAT_GAP
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+    const middleRowIndex = stageLayout?.isInsetStage && !stageLayout?.hasCustomStagePos
+      ? Math.floor(displayRows.length / 2) : -1
 
     const getRowColor = (rowIdx: number) => {
       const section = sections.find(s => rowIdx >= s.fromRow && rowIdx <= s.toRow)
@@ -491,39 +487,51 @@ export default function SeatEditorPage() {
 
     return (
       <div className="mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
-        {displayRows.map((ri) => {
+        {displayRows.map((ri, idx) => {
           const label = lLabels[ri] || String.fromCharCode(65 + ri)
           const colMap = gridLookup.get(ri) || new Map()
           const rowColor = getRowColor(ri)
 
           return (
-            <div
-              key={ri}
-              className="flex items-center mb-[3px]"
-              style={{ height: SEAT_W }}
-            >
-              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
-                {label}
+            <React.Fragment key={ri}>
+              {/* Inset stage (BLACK_BOX / ARENA) in middle of rows — only if no custom position */}
+              {stageLayout?.isInsetStage && !stageLayout?.hasCustomStagePos && idx === middleRowIndex && (
+                <div className="flex justify-center my-2">
+                  <StageRenderer
+                    stageType={stageLayout.stageType}
+                    size={stageLayout.stageSize}
+                    thrustWidth={parsedLayout.thrustWidth}
+                    thrustDepth={parsedLayout.thrustDepth}
+                  />
+                </div>
+              )}
+              <div
+                className="flex items-center mb-[3px]"
+                style={{ height: SEAT_W }}
+              >
+                <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                  {label}
+                </div>
+                <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
+                  {Array.from({ length: cols }, (_, c) => {
+                    if (aisleColumns.includes(c)) {
+                      return (
+                        <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5" style={{ width: 2, height: SEAT_W * 0.6 }} />
+                      )
+                    }
+                    const seatInfo = colMap.get(c)
+                    if (seatInfo) {
+                      const seatData = lookup.get(seatInfo.seatCode)
+                      return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum)
+                    }
+                    return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+                  })}
+                </div>
+                <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                  {label}
+                </div>
               </div>
-              <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
-                {Array.from({ length: cols }, (_, c) => {
-                  if (aisleColumns.includes(c)) {
-                    return (
-                      <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5" style={{ width: 2, height: SEAT_W * 0.6 }} />
-                    )
-                  }
-                  const seatInfo = colMap.get(c)
-                  if (seatInfo) {
-                    const seatData = lookup.get(seatInfo.seatCode)
-                    return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum)
-                  }
-                  return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
-                })}
-              </div>
-              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
-                {label}
-              </div>
-            </div>
+            </React.Fragment>
           )
         })}
       </div>
@@ -733,13 +741,15 @@ export default function SeatEditorPage() {
       {/* Seat Grid — Dynamic Layout from actual data */}
       <div className="bg-white rounded-xl p-6 border border-border/50">
         <div className="max-w-4xl mx-auto">
-          {/* Stage */}
-          <StageRenderer
-            stageType={(parsedLayout as any)?.stageType || (layoutData as any)?.stageType}
-            size="md"
-            thrustWidth={(parsedLayout as any)?.thrustWidth || (layoutData as any)?.thrustWidth}
-            thrustDepth={(parsedLayout as any)?.thrustDepth || (layoutData as any)?.thrustDepth}
-          />
+          {/* Stage — rendered inline (no custom position) or inside grid container (custom position) */}
+          {stageLayout && !stageLayout.hasCustomStagePos && !stageLayout.isInsetStage && (
+            <StageRenderer
+              stageType={stageLayout.stageType}
+              size={stageLayout.stageSize}
+              thrustWidth={parsedLayout?.thrustWidth}
+              thrustDepth={parsedLayout?.thrustDepth}
+            />
+          )}
 
           {/* ─── Multi-Day Divider View (Semua Hari) ─── */}
           {seatsByDate && showDates.length > 1 && !activeShowDate ? (
@@ -803,7 +813,32 @@ export default function SeatEditorPage() {
 
           {/* Grid */}
           <div className="overflow-x-auto pb-4">
-            <div className="min-w-[320px] relative" id="admin-grid-wrapper">
+            <div
+              className="min-w-[320px] relative"
+              id="admin-grid-wrapper"
+              style={stageLayout && stageLayout.hasCustomStagePos ? { paddingTop: stageLayout.paddingTop } : undefined}
+            >
+              {/* Custom stage position — inside the grid container, absolutely positioned */}
+              {stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
+                <div
+                  className="absolute"
+                  style={{
+                    left: stageLayout.stageGuest.x,
+                    top: stageLayout.stageGuest.y,
+                    width: stageLayout.stageGuest.w,
+                    zIndex: 5,
+                  }}
+                >
+                  <StageRenderer
+                    stageType={stageLayout.stageType}
+                    size={stageLayout.stageSize}
+                    thrustWidth={parsedLayout?.thrustWidth}
+                    thrustDepth={parsedLayout?.thrustDepth}
+                    fillParent
+                  />
+                </div>
+              )}
+
               {parsedLayout ? (
                 renderFlatGrid(seatLookup)
               ) : isGA ? (
@@ -840,23 +875,19 @@ export default function SeatEditorPage() {
                   ))}
                 </>
               )}
+
               {/* Objects overlay — inside grid wrapper so it scrolls with columns */}
-              {(() => {
-                const objs = (parsedLayout as any)?.objects || (layoutData as any)?.objects
-                if (objs && objs.length > 0) {
-                  const csb = (parsedLayout as any)?.canvasSeatBounds
-                  const gCols = parsedLayout?.gridSize?.cols
-                  return <ObjectsOverlay
-                    objects={objs}
-                    cellSize={SEAT_W + SEAT_GAP}
-                    offsetX={24}
-                    canvasSeatBounds={csb}
-                    gridCols={gCols || 0}
-                    gridRows={(parsedLayout as any)?.displayRows?.length || 0}
-                  />
-                }
-                return null
-              })()}
+              {parsedLayout?.objects && parsedLayout.objects.length > 0 && stageLayout && (
+                <ObjectsOverlay
+                  objects={parsedLayout.objects}
+                  cellSize={SEAT_W + SEAT_GAP}
+                  offsetX={LABEL_W}
+                  canvasSeatBounds={stageLayout.canvasSeatBounds}
+                  gridCols={stageLayout.cols}
+                  gridRows={stageLayout.displayRowsCount}
+                  paddingTop={stageLayout.paddingTop}
+                />
+              )}
             </div>
           </div>
           </>

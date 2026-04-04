@@ -213,3 +213,27 @@ Stage Summary:
 - Files modified: src/components/seat-map-builder/canvas-editor.tsx
 - 3 changes: (1) deriveGridSeats hybrid logic, (2) gridSize.rows from seat data, (3) needsReDerive heal check
 - DB data fixed for "test" seatmap and TEST event seats regenerated
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix stage/objek positioning in admin seats page — stage should be inside the canvas at its placed position
+
+Work Log:
+- Analyzed the root cause: admin seats page (`/admin/events/[id]/seats/page.tsx`) had its own LOCAL `parseLayoutData` function that did NOT extract `stageType`, `stagePosition`, `objects`, `canvasSeatBounds`, `canvasWidth`, `canvasHeight`
+- This meant `canvasSeatBounds` was always `undefined`, causing ObjectsOverlay to fall back to raw pixel positions (wrong!)
+- Stage was rendered as a static centered element, not at the position the user set in the canvas editor
+- The shared `parseLayoutData` in `@/lib/seat-layout.ts` already computes all these fields, but the admin page didn't use it
+- Replaced local `parseLayoutData` and `ParsedLayout` with shared imports from `@/lib/seat-layout.ts`
+- Added `stageLayout` useMemo that computes canvas→grid coordinate mapping (same approach as `seat-map.tsx` and usher page)
+- When custom stage position exists (user dragged in canvas editor), stage renders absolutely positioned inside the grid container at the mapped position
+- When no custom position, stage renders as default centered element above the grid (current convention)
+- ObjectsOverlay now receives proper `canvasSeatBounds`, `gridCols`, `gridRows`, and `paddingTop` for correct coordinate mapping
+- Added inset stage support (BLACK_BOX/ARENA) rendered in the middle of rows via `renderFlatGrid`
+- Build verified: no errors
+
+Stage Summary:
+- Admin seats page now uses shared `parseLayoutData` from `@/lib/seat-layout.ts` (consistent with seat-map.tsx, usher)
+- Stage position from canvas editor is now correctly mapped to admin grid coordinates
+- Objects (FOH, ENTRANCE, CUSTOM_SHAPE) are positioned correctly using canvasSeatBounds
+- All rendering is now consistent: SEAT BUILDER → ADMIN SEATS → GUEST VIEW → USHER VIEW
