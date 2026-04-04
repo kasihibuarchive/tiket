@@ -479,7 +479,7 @@ export default function SeatEditorPage() {
     }
 
     return (
-      <div className="mx-auto" style={{ minWidth: gridW }}>
+      <div className="mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
         {displayRows.map((ri) => {
           const label = lLabels[ri] || String.fromCharCode(65 + ri)
           const colMap = gridLookup.get(ri) || new Map()

@@ -381,7 +381,7 @@ export default function UsherSeatMapPage() {
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
 
     seatGridContent = (
-      <div className="mx-auto" style={{ minWidth: gridW }}>
+      <div className="mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
         {/* Top stage for PROSCENIUM, AMPHITHEATER, THRUST — inside scroll container */}
         {!isInsetStage && (
           <div className="flex justify-center mb-4">
@@ -453,7 +453,7 @@ export default function UsherSeatMapPage() {
     const sortedRowKeys = Object.keys(groups).sort()
 
     seatGridContent = (
-      <div className="min-w-[320px]">
+      <div className="mx-auto w-full flex flex-col items-center">
         {/* Top stage — inside scroll container */}
         <div className="flex justify-center mb-4">
           <StageRenderer stageType={stageType} size={stageSize} />

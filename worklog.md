@@ -239,3 +239,62 @@ Bug 3 - Overhaul Seat Map Builder with "Paint" Concept: Complete redesign of how
 **Build**: Passes successfully. **Lint**: 0 new errors (5 pre-existing in non-project JS files).
 **File size**: 2149 lines (well under 4000 limit).
 **All UI labels**: Indonesian (Bahasa Indonesia).
+
+---
+## Task ID: 6 - main-agent
+### Work Task
+Fix 6 bugs: (1) Neutral Cursor button, (2) Left-alignment in seat grids, (3) Canvas stripped on save, (4) Remove T E A T E R A N label, (5) Complimentary tickets multi-day fix, (6) Paint collision detection.
+
+### Work Summary
+
+#### BUG 1: Add Neutral Cursor / Deselect Button in Canvas Editor
+**File modified**: `src/components/seat-map-builder/canvas-editor.tsx`
+
+**Changes**: Added a "Neutral Cursor" button (MousePointer2 icon) after the Lock Elements button in the sidebar. When clicked, it calls `handleDeselectAll()` to clear `selectedElementType`, returning to paint mode. The button is visually highlighted (gold) when already in paint mode (no element selected), with tooltip "Kursor Netral (Paint Mode)" / "Klik untuk Deselect".
+
+#### BUG 2: Fix Left-alignment / Empty Space on Right
+**Files modified**:
+1. `src/app/admin/events/[id]/seats/page.tsx` — Changed `renderFlatGrid` container from `className="mx-auto"` to `className="mx-auto w-full flex flex-col items-center"` (line 482)
+2. `src/components/seat-map.tsx` — Changed seat grid container from `className="relative"` to `className="relative mx-auto w-full flex flex-col items-center"` (line 553), keeping `relative` for absolute-positioned stage
+3. `src/app/admin/tickets/complimentary/page.tsx` — Changed mini seat map from `className="min-w-[400px]"` to `className="mx-auto w-full flex flex-col items-center"` (line 617)
+4. `src/app/admin/usher/events/[id]/seats/page.tsx` — Applied same centering fix to both the flat grid layout (line 384) and the fallback dynamic layout (line 456): `className="mx-auto w-full flex flex-col items-center"` with preserved `minWidth` style
+
+#### BUG 3: Canvas Without Columns Gets Stripped on Save
+**File modified**: `src/components/seat-map-builder/canvas-editor.tsx`
+
+**Changes**: In `normalizeLayoutData()` (empty layout path, ~line 346-359):
+- Changed `seatColumns: []` to `seatColumns: raw.seatColumns || []` to preserve any empty-column data
+- Changed `canvasWidth: DEFAULT_CANVAS_W` to `canvasWidth: Number(raw.canvasWidth) || DEFAULT_CANVAS_W`
+- Changed `canvasHeight: DEFAULT_CANVAS_H` to `canvasHeight: Number(raw.canvasHeight) || DEFAULT_CANVAS_H`
+This ensures canvas dimensions are ALWAYS preserved even when seatColumns is empty (e.g., stage-only layouts).
+
+#### BUG 4: Remove "T E A T E R A N" Sub-label from Stage
+**Files modified**:
+1. `src/lib/stage-renderer.tsx` — Removed the `<p>` element containing "T E A T E R A N" from the `label` variable. Now only shows "S T A G E".
+2. `src/components/seat-map-builder/canvas-editor.tsx` — Changed draggable stage label from `` `Stage (${stageType})` `` to just `"Stage"` (line 1307).
+
+#### BUG 5: Complimentary Tickets Multi-day Event Fix
+**Files modified**:
+1. `src/app/admin/tickets/complimentary/page.tsx`:
+   - Added `showDates` and `selectedShowDateId` state
+   - Modified `fetchSeatsForEvent` to accept optional `showDateFilter` parameter and pass `showDateId` query param to the seats API
+   - After fetching event detail, extract and populate `showDates` state
+   - Added `useEffect` that re-fetches seats when `selectedShowDateId` changes
+   - Added show date tab pills in the UI (only shown when >1 show date)
+   - Pass `showDateId` in the POST body to the complimentary API
+   - Added `Calendar` icon import and `cn` utility import
+
+2. `src/app/api/admin/tickets/complimentary/route.ts`:
+   - Accept `showDateId` from request body
+   - When finding/updating seats for numbered events, add `eventShowDateId: showDateId` filter conditionally
+   - Set `showDateId` on the transaction record when creating it
+
+#### BUG 6: Non-magnetic Paint Collision Detection
+**File modified**: `src/components/seat-map-builder/canvas-editor.tsx`
+
+**Changes**:
+1. **Collision detection in `handlePaintSeat`** (line 873): Before placing a seat, checks overlap with ALL existing seats across ALL columns (not just same column). Uses `Math.abs(s.x - snapX) < PAINTED_SEAT_SIZE && Math.abs(s.y - snapY) < PAINTED_SEAT_SIZE` as the collision threshold. Also added canvas bounds clamping (`Math.max/min` with `PAINTED_SEAT_SIZE / 2`) and `Math.round()` for non-magnetic positions.
+
+2. **`deriveGridSeats` column ordering** (line 225): Changed from sorting columns by average Y position (`sortColumnsByAvgY`) to keeping columns in their original insertion order. This prevents layout issues when columns are interleaved spatially.
+
+**Build**: Passes successfully with 0 errors and 0 warnings.

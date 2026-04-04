@@ -79,7 +79,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { eventId, seatCodes, guestName, guestEmail, guestPhone } = body
+    const { eventId, seatCodes, guestName, guestEmail, guestPhone, showDateId } = body
 
     // Validate required fields
     if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0 || !guestName || !guestEmail) {
@@ -107,6 +107,7 @@ export async function POST(request: NextRequest) {
         where: {
           eventId,
           seatCode: { in: seatCodes },
+          ...(showDateId ? { eventShowDateId: showDateId } : {}),
         },
       })
 
@@ -132,6 +133,7 @@ export async function POST(request: NextRequest) {
         where: {
           eventId,
           seatCode: { in: seatCodes },
+          ...(showDateId ? { eventShowDateId: showDateId } : {}),
         },
         data: { status: 'INVITATION', lockedUntil: null, lockedBy: null },
       })
@@ -186,6 +188,7 @@ export async function POST(request: NextRequest) {
         paymentStatus: 'PAID',
         paidAt: new Date(),
         qrCodeUrl: transactionId, // placeholder, will be updated after QR generation
+        ...(showDateId ? { showDateId } : {}),
       },
     })
 

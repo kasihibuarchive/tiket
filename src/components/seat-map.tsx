@@ -550,7 +550,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         {/* Seat Grid — Flat grid, 1:1 with editor. Stage inside so it scrolls on mobile. */}
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
-            <div className="relative" style={{ minWidth: gridW }}>
+            <div className="relative mx-auto w-full flex flex-col items-center" style={{ minWidth: gridW }}>
               {/* Stage — INSIDE scroll container */}
               {hasCustomStagePosition ? (
                 /* Custom position from admin editor (drag-and-drop) */

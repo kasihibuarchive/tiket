@@ -223,10 +223,10 @@ function sortColumnsByAvgY(columns: SeatColumn[]): SeatColumn[] {
 }
 
 function deriveGridSeats(columns: SeatColumn[]): { seats: SeatPosition[]; rowLabels: string[] } {
-  const sorted = sortColumnsByAvgY(columns)
-  const rowLabels = sorted.map(col => col.label)
+  // Keep columns in their original order (insertion order), NOT sorted by Y position
+  const rowLabels = columns.map(col => col.label)
   const seats: SeatPosition[] = []
-  sorted.forEach((col, rIdx) => {
+  columns.forEach((col, rIdx) => {
     col.seats.forEach(seat => {
       const c = Math.round(seat.x / SNAP_GRID_SIZE)
       seats.push({ r: rIdx, c })
@@ -343,7 +343,7 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
       }
     }
 
-    // Empty layout
+    // Empty layout — preserve canvasWidth/canvasHeight even without seat columns
     const rowLabels = Array.isArray(raw.rowLabels) ? raw.rowLabels : []
     return {
       type: 'NUMBERED',
@@ -353,9 +353,9 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
       rowLabels,
       sections,
       embeddedRows,
-      seatColumns: [],
-      canvasWidth: DEFAULT_CANVAS_W,
-      canvasHeight: DEFAULT_CANVAS_H,
+      seatColumns: raw.seatColumns || [],
+      canvasWidth: Number(raw.canvasWidth) || DEFAULT_CANVAS_W,
+      canvasHeight: Number(raw.canvasHeight) || DEFAULT_CANVAS_H,
     }
   }
 
@@ -879,8 +879,21 @@ export function CanvasEditor({
       const col = cols[colIdx]
       if (col.seats.length >= MAX_SEATS_PER_COLUMN) return prev
 
-      const snapX = magneticMode ? Math.round(x / SNAP_GRID_SIZE) * SNAP_GRID_SIZE : x
-      const snapY = magneticMode ? Math.round(y / SNAP_GRID_SIZE) * SNAP_GRID_SIZE : y
+      let snapX = magneticMode ? Math.round(x / SNAP_GRID_SIZE) * SNAP_GRID_SIZE : Math.round(x)
+      let snapY = magneticMode ? Math.round(y / SNAP_GRID_SIZE) * SNAP_GRID_SIZE : Math.round(y)
+
+      // Clamp to canvas bounds
+      snapX = Math.max(PAINTED_SEAT_SIZE / 2, Math.min(snapX, (prev.canvasWidth || DEFAULT_CANVAS_W) - PAINTED_SEAT_SIZE / 2))
+      snapY = Math.max(PAINTED_SEAT_SIZE / 2, Math.min(snapY, (prev.canvasHeight || DEFAULT_CANVAS_H) - PAINTED_SEAT_SIZE / 2))
+
+      // COLLISION DETECTION: Check overlap with ALL existing seats across ALL columns
+      const hasCollision = cols.some(c =>
+        c.seats.some(s =>
+          Math.abs(s.x - snapX) < PAINTED_SEAT_SIZE &&
+          Math.abs(s.y - snapY) < PAINTED_SEAT_SIZE
+        )
+      )
+      if (hasCollision) return prev
 
       // Check for duplicate position in this column
       const posKey = `${snapX},${snapY}`
@@ -1304,7 +1317,7 @@ export function CanvasEditor({
         minWidth={120} minHeight={40}
         isSelected={selectedElementType === 'stage'} isOverlapping={stageIsOverlapping}
         onSelect={handleSelectStage} onPositionChange={setStagePosition}
-        label={`Stage (${stageType})`} disabled={elementsLocked}
+        label="Stage" disabled={elementsLocked}
       >
         <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} fillParent />
       </DraggableObject>
@@ -1648,6 +1661,17 @@ export function CanvasEditor({
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="right">{elementsLocked ? 'Unlock Elements' : 'Lock Elements'}</TooltipContent>
+            </Tooltip>
+
+            {/* Neutral Cursor / Deselect — return to paint mode */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={handleDeselectAll}
+                  className={cn('h-8 w-8 p-0', !selectedElementType ? 'text-gold bg-gold/15' : 'text-warm-white/70 hover:text-gold hover:bg-white/10')}>
+                  <MousePointer2 className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">{!selectedElementType ? 'Kursor Netral (Paint Mode)' : 'Klik untuk Deselect'}</TooltipContent>
             </Tooltip>
             {elementsLocked && (
               <div className="bg-amber-400/10 border border-amber-400/20 rounded-lg p-2">

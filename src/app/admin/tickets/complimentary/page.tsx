@@ -15,8 +15,9 @@ import {
 } from '@/components/ui/select'
 import {
   Gift, Send, Loader2, Ticket, Users, X, MapPin, Clock, Mail, Phone,
-  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp, RotateCcw,
+  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp, RotateCcw, Calendar,
 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { formatShortDate, formatEventDateTime } from '@/lib/date'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -73,6 +74,10 @@ export default function ComplimentaryTicketsPage() {
   // Events
   const [events, setEvents] = useState<EventOption[]>([])
   const [isLoadingEvents, setIsLoadingEvents] = useState(true)
+
+  // Show dates for multi-day events
+  const [showDates, setShowDates] = useState<any[]>([])
+  const [selectedShowDateId, setSelectedShowDateId] = useState<string>('')
 
   // Seats
   const [seats, setSeats] = useState<SeatData[]>([])
@@ -190,7 +195,7 @@ export default function ComplimentaryTicketsPage() {
 
   // ─── Fetch seats when event is selected ─────────────────────────────────
 
-  const fetchSeatsForEvent = useCallback(async (eventId: string) => {
+  const fetchSeatsForEvent = useCallback(async (eventId: string, showDateFilter?: string) => {
     setIsLoadingSeats(true)
     setSelectedSeats([])
     setSeatMapInfo(null)
@@ -198,15 +203,16 @@ export default function ComplimentaryTicketsPage() {
     setGaZone('')
 
     try {
-      // Fetch seats
-      const seatsRes = await fetch(`/api/events/${eventId}/seats`)
+      // Fetch seats with optional showDateId filter
+      const seatsUrl = `/api/events/${eventId}/seats${showDateFilter ? `?showDateId=${showDateFilter}` : ''}`
+      const seatsRes = await fetch(seatsUrl)
       if (seatsRes.ok) {
         const data = await seatsRes.json()
         setSeats(data.seats || [])
         setPriceCategories(data.priceCategories || [])
       }
 
-      // Fetch event detail to get seatMapId
+      // Fetch event detail to get seatMapId and showDates
       const eventRes = await fetch(`/api/events/${eventId}`)
       if (eventRes.ok) {
         const eventData = await eventRes.json()
@@ -220,6 +226,16 @@ export default function ComplimentaryTicketsPage() {
               setSeatMapInfo({ id: map.id, name: map.name, seatType: map.seatType })
             }
           }
+        }
+        // Populate show dates for multi-day events
+        if (eventData.showDates && eventData.showDates.length > 0) {
+          setShowDates(eventData.showDates)
+          if (!showDateFilter) {
+            setSelectedShowDateId(eventData.showDates[0].id)
+          }
+        } else {
+          setShowDates([])
+          setSelectedShowDateId('')
         }
       }
     } catch (err) {
@@ -236,8 +252,17 @@ export default function ComplimentaryTicketsPage() {
       setSeats([])
       setSelectedSeats([])
       setSeatMapInfo(null)
+      setShowDates([])
+      setSelectedShowDateId('')
     }
   }, [selectedEventId, fetchSeatsForEvent])
+
+  // Re-fetch seats when show date changes
+  useEffect(() => {
+    if (selectedEventId && selectedShowDateId) {
+      fetchSeatsForEvent(selectedEventId, selectedShowDateId)
+    }
+  }, [selectedShowDateId])
 
   // ─── Seat selection ─────────────────────────────────────────────────────
 
@@ -330,6 +355,7 @@ export default function ComplimentaryTicketsPage() {
           guestName,
           guestEmail,
           guestPhone,
+          showDateId: selectedShowDateId || undefined,
         }),
       })
 
@@ -583,6 +609,31 @@ export default function ComplimentaryTicketsPage() {
               Pemilihan Kursi
             </Label>
 
+            {/* Show Date Tabs for multi-day events */}
+            {showDates.length > 1 && (
+              <div className="flex items-center gap-2 flex-wrap">
+                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                {showDates.map((sd: any, idx: number) => {
+                  const sdLabel = sd.label || `Hari ${idx + 1}`
+                  const sdDate = new Date(sd.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+                  return (
+                    <button
+                      key={sd.id}
+                      onClick={() => setSelectedShowDateId(sd.id)}
+                      className={cn(
+                        'px-3 py-1 rounded-full text-xs font-medium transition-all border',
+                        selectedShowDateId === sd.id
+                          ? 'bg-gold text-white border-gold'
+                          : 'bg-white text-muted-foreground border-border hover:border-gold/50'
+                      )}
+                    >
+                      {sdLabel} ({sdDate})
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
             {!selectedEventId ? (
               <div className="text-sm text-muted-foreground py-6 text-center bg-muted/30 rounded-lg">
                 Pilih event terlebih dahulu untuk melihat pilihan kursi.
@@ -614,7 +665,7 @@ export default function ComplimentaryTicketsPage() {
                     </div>
                   </div>
 
-                  <div className="min-w-[400px]">
+                  <div className="mx-auto w-full flex flex-col items-center">
                     {sortedRowKeys.map((row) => (
                       <div key={row} className="flex items-center gap-2 mb-1.5">
                         <span className="w-6 text-xs font-mono font-semibold text-charcoal/60 text-right">

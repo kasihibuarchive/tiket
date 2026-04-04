@@ -30,9 +30,6 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
       <p className={cn('font-serif text-gold tracking-[0.3em] font-semibold', fillParent ? 'text-[10px] sm:text-xs' : sz.main)}>
         S T A G E
       </p>
-      <p className={cn('font-serif text-gold/60 tracking-[0.2em] mt-0.5', fillParent ? 'text-[8px] sm:text-[10px]' : sz.sub)}>
-        T E A T E R A N
-      </p>
     </div>
   )
 
