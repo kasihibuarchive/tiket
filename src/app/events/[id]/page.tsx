@@ -136,13 +136,17 @@ export default function EventDetailPage() {
 
   const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
 
-  // Re-fetch seats when active show date changes (server-side filtering reinforcement)
+  // Re-fetch seats when active show date changes — server filters by showDateId
   useEffect(() => {
-    if (!activeShowDate?.id) return
+    if (!eventId) return
     let cancelled = false
     async function fetchSeatsByDate() {
+      setAllSeats([]) // Clear immediately so stale data never shows
       try {
-        const res = await fetch(`/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`)
+        const url = activeShowDate?.id 
+          ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
+          : `/api/events/${eventId}/seats`
+        const res = await fetch(url)
         if (!res.ok || cancelled) return
         const data = await res.json()
         if (!cancelled) setAllSeats(data.seats || [])
@@ -154,17 +158,8 @@ export default function EventDetailPage() {
     return () => { cancelled = true }
   }, [activeShowDate?.id, eventId])
 
-  // Filter seats by active show date
-  const filteredSeats = useMemo(() => {
-    if (!activeShowDate?.id) {
-      // No show date (single day event or legacy data) — show all seats
-      return allSeats
-    }
-    // Filter seats belonging to this show date
-    const dateSeats = allSeats.filter(s => s.eventShowDateId === activeShowDate.id)
-    // If no seats have showDateId (old data), fall back to all seats
-    return dateSeats.length > 0 ? dateSeats : allSeats.filter(s => !s.eventShowDateId)
-  }, [allSeats, activeShowDate])
+  // Seats are already filtered server-side by showDateId — use directly
+  const filteredSeats = allSeats
 
   // Seat summary for the active show date
   const seatSummary = useMemo(() => {

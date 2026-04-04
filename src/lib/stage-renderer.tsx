@@ -260,10 +260,12 @@ export function StageRenderer({ stageType = 'PROSCENIUM', size = 'md', className
 export function ObjectsOverlay({
   objects,
   cellSize = 28,
+  offsetX = 0,
   className,
 }: {
   objects?: Array<{ id: string; type: string; label: string; r: number; c: number; w: number; h: number; color: string }>
   cellSize?: number
+  offsetX?: number
   className?: string
 }) {
   if (!objects || objects.length === 0) return null
@@ -275,7 +277,7 @@ export function ObjectsOverlay({
           key={obj.id}
           className="absolute flex items-center justify-center overflow-hidden"
           style={{
-            left: obj.c * cellSize,
+            left: offsetX + obj.c * cellSize,
             top: obj.r * cellSize,
             width: obj.w * cellSize,
             height: obj.h * cellSize,

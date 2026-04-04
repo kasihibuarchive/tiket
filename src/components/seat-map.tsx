@@ -529,24 +529,16 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const CELL_TOTAL = SEAT_W + SEAT_GAP // each grid cell (seat + gap)
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60 // +60 for row labels
 
-    // Stage placement: inset (middle of rows) for BLACK_BOX & ARENA, top for others
+    // Stage placement: use stagePosition from layoutData if available, otherwise default
     const stageType = parsedLayout?.stageType || 'PROSCENIUM'
     const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
     const stageSize = isInsetStage ? 'md' : 'lg'
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
+    const stagePosition = (parsedLayout as any)?.stagePosition
+    const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
     return (
-      <div className="w-full max-w-3xl mx-auto">
-        {/* Stage — top position for PROSCENIUM, AMPHITHEATER, THRUST */}
-        {!isInsetStage && (
-          <StageRenderer
-            stageType={stageType}
-            size={stageSize}
-            thrustWidth={(parsedLayout as any)?.thrustWidth}
-            thrustDepth={(parsedLayout as any)?.thrustDepth}
-          />
-        )}
-
+      <div className="w-full">
         {/* Lock rejection notice */}
         {lockRejectionMsg && (
           <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
@@ -555,10 +547,38 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           </div>
         )}
 
-        {/* Seat Grid — Flat grid, 1:1 with editor */}
+        {/* Seat Grid — Flat grid, 1:1 with editor. Stage inside so it scrolls on mobile. */}
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
             <div className="mx-auto relative" style={{ minWidth: gridW }}>
+              {/* Stage — INSIDE scroll container */}
+              {hasCustomStagePosition ? (
+                /* Custom position from admin editor (drag-and-drop) */
+                <div
+                  className="absolute"
+                  style={{
+                    left: stagePosition.x,
+                    top: stagePosition.y,
+                    width: stagePosition.width,
+                    zIndex: 5,
+                  }}
+                >
+                  <StageRenderer
+                    stageType={stageType}
+                    size={stageSize}
+                    thrustWidth={(parsedLayout as any)?.thrustWidth}
+                    thrustDepth={(parsedLayout as any)?.thrustDepth}
+                  />
+                </div>
+              ) : !isInsetStage ? (
+                /* Default inline rendering for PROSCENIUM, AMPHITHEATER, THRUST */
+                <StageRenderer
+                  stageType={stageType}
+                  size={stageSize}
+                  thrustWidth={(parsedLayout as any)?.thrustWidth}
+                  thrustDepth={(parsedLayout as any)?.thrustDepth}
+                />
+              ) : null}
               {displayRows.map((ri, idx) => {
                 const label = lLabels[ri] || String.fromCharCode(65 + ri)
                 const colMap = gridLookup.get(ri) || new Map()
@@ -566,8 +586,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
 
                 return (
                   <React.Fragment key={ri}>
-                    {/* Inset stage (BLACK_BOX / ARENA) rendered in the middle of rows */}
-                    {isInsetStage && idx === middleRowIndex && (
+                    {/* Inset stage (BLACK_BOX / ARENA) in middle of rows — only if no custom position */}
+                    {isInsetStage && !hasCustomStagePosition && idx === middleRowIndex && (
                       <div className="flex justify-center my-2">
                         <StageRenderer
                           stageType={stageType}
@@ -755,10 +775,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   }
 
   return (
-    <div className="w-full max-w-3xl mx-auto">
-      {/* Stage */}
-      <StageRenderer stageType="PROSCENIUM" size="lg" />
-
+    <div className="w-full">
       {/* Lock rejection notice */}
       {lockRejectionMsg && (
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
@@ -767,9 +784,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         </div>
       )}
 
-      {/* Seat Grid */}
+      {/* Seat Grid — Stage inside so it scrolls on mobile */}
       <div className="overflow-x-auto pb-4">
         <div className="min-w-[320px]">
+          {/* Stage — inside scroll container */}
+          <StageRenderer stageType="PROSCENIUM" size="lg" />
           {ROW_CONFIG.map((rowConfig) => (
             <div key={rowConfig.row} className="flex items-center gap-1 mb-1">
               <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: getRowColor(rowConfig.row) }}>

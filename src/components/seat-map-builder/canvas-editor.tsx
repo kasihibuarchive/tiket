@@ -58,6 +58,7 @@ import {
   Shapes,
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay, type StageType } from '@/lib/stage-renderer'
+import { DraggableObject, boundsOverlap, type Bounds } from '@/lib/draggable-object'
 
 // ═══════════════════════════════════════════
 // Types
@@ -72,6 +73,11 @@ interface LayoutObject {
   w: number
   h: number
   color: string
+  // Free-form pixel position (used by draggable editor)
+  x?: number
+  y?: number
+  pixelW?: number
+  pixelH?: number
 }
 
 interface CanvasEditorProps {
@@ -328,6 +334,18 @@ export function CanvasEditor({
     return []
   })
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null)
+  const [selectedElementType, setSelectedElementType] = useState<'stage' | 'object' | null>(null)
+
+  // Stage position state (free-form pixel positioning for draggable stage)
+  const [stagePosition, setStagePosition] = useState<Bounds>(() => {
+    try {
+      const sp = (initialLayoutData as any)?.stagePosition
+      if (sp && typeof sp === 'object' && typeof sp.x === 'number') {
+        return sp as Bounds
+      }
+    } catch { /* ignore */ }
+    return { x: 0, y: 0, width: 320, height: 60 }
+  })
 
   const [isPreview, setIsPreview] = useState(false)
   const [aisleMode, setAisleMode] = useState(false)
@@ -450,6 +468,7 @@ export function CanvasEditor({
       CUSTOM_SHAPE: { label: 'Objek Baru', color: '#6B7280', w: 2, h: 2 },
     }[type]
 
+    const cellPx = CELL_SIZE + 2
     const newObject: LayoutObject = {
       id: generateId(),
       type,
@@ -459,9 +478,15 @@ export function CanvasEditor({
       w: defaults?.w || 2,
       h: defaults?.h || 1,
       color: defaults?.color || '#6B7280',
+      // Initialize pixel position from grid position
+      x: 0,
+      y: 0,
+      pixelW: (defaults?.w || 2) * cellPx,
+      pixelH: (defaults?.h || 1) * cellPx,
     }
     setObjects((prev) => [...prev, newObject])
     setSelectedObjectId(newObject.id)
+    setSelectedElementType('object')
   }, [])
 
   const updateObject = useCallback((id: string, updates: Partial<LayoutObject>) => {
@@ -496,6 +521,55 @@ export function CanvasEditor({
   const selectedObject = useMemo(() => {
     return objects.find((o) => o.id === selectedObjectId) || null
   }, [objects, selectedObjectId])
+
+  // ─── Stage/Object Selection ──────────
+  const handleSelectStage = useCallback(() => {
+    setSelectedElementType('stage')
+    setSelectedObjectId(null)
+  }, [])
+
+  const handleSelectObject = useCallback((id: string) => {
+    setSelectedElementType('object')
+    setSelectedObjectId(id)
+  }, [])
+
+  const handleDeselectAll = useCallback(() => {
+    setSelectedElementType(null)
+    setSelectedObjectId(null)
+  }, [])
+
+  // ─── Overlap Detection ───────────────
+  const stageIsOverlapping = useMemo(() => {
+    if (selectedElementType !== 'stage' || objects.length === 0) return false
+    const stageBounds = stagePosition
+    return objects.some((obj) => {
+      if (obj.x === undefined || obj.y === undefined) return false
+      const objBounds = { x: obj.x, y: obj.y, width: obj.pixelW || obj.w * (CELL_SIZE + 2), height: obj.pixelH || obj.h * (CELL_SIZE + 2) }
+      return boundsOverlap(stageBounds, objBounds)
+    })
+  }, [selectedElementType, stagePosition, objects])
+
+  const objectOverlapIds = useMemo(() => {
+    if (selectedElementType !== 'object' || !selectedObjectId) return new Set<string>()
+    const selObj = objects.find((o) => o.id === selectedObjectId)
+    if (!selObj || selObj.x === undefined || selObj.y === undefined) return new Set<string>()
+    const selBounds: Bounds = { x: selObj.x, y: selObj.y, width: selObj.pixelW || selObj.w * (CELL_SIZE + 2), height: selObj.pixelH || selObj.h * (CELL_SIZE + 2) }
+
+    const overlaps = new Set<string>()
+    // Check against stage
+    if (boundsOverlap(selBounds, stagePosition)) {
+      overlaps.add('__stage__')
+    }
+    // Check against other objects
+    for (const obj of objects) {
+      if (obj.id === selectedObjectId || obj.x === undefined || obj.y === undefined) continue
+      const objBounds: Bounds = { x: obj.x, y: obj.y, width: obj.pixelW || obj.w * (CELL_SIZE + 2), height: obj.pixelH || obj.h * (CELL_SIZE + 2) }
+      if (boundsOverlap(selBounds, objBounds)) {
+        overlaps.add(obj.id)
+      }
+    }
+    return overlaps
+  }, [selectedElementType, selectedObjectId, objects, stagePosition])
 
   // ─── History (Undo/Redo) ───────────────
   const pushHistory = useCallback((newData: LayoutData) => {
@@ -1194,14 +1268,14 @@ export function CanvasEditor({
 
   const getExportLayoutData = useCallback(() => {
     const data = deepClone(layoutData)
-    const exportData: any = { ...data, objects: deepClone(objects), stageType }
+    const exportData: any = { ...data, objects: deepClone(objects), stageType, stagePosition }
     // Save thrust customization
     if (stageType === 'THRUST') {
       exportData.thrustWidth = thrustWidth
       exportData.thrustDepth = thrustDepth
     }
     return exportData
-  }, [layoutData, objects, stageType, thrustWidth, thrustDepth])
+  }, [layoutData, objects, stageType, thrustWidth, thrustDepth, stagePosition])
 
   // ═════════════════════════════════════════
   // Render helpers
@@ -1210,6 +1284,122 @@ export function CanvasEditor({
   const renderStageBar = () => (
     <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
   )
+
+  // ─── Draggable Stage Renderer ─────────
+  const renderDraggableStage = () => {
+    if (isPreview) {
+      // In preview mode, render at stored position without drag handles
+      return (
+        <div
+          className="absolute"
+          style={{
+            left: stagePosition.x,
+            top: stagePosition.y,
+            width: stagePosition.width,
+            zIndex: 5,
+          }}
+        >
+          <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
+        </div>
+      )
+    }
+
+    return (
+      <DraggableObject
+        id="draggable-stage"
+        x={stagePosition.x}
+        y={stagePosition.y}
+        width={stagePosition.width}
+        height={stagePosition.height}
+        minWidth={120}
+        minHeight={40}
+        isSelected={selectedElementType === 'stage'}
+        isOverlapping={stageIsOverlapping}
+        onSelect={handleSelectStage}
+        onPositionChange={setStagePosition}
+        label={`Stage (${stageType})`}
+      >
+        <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
+      </DraggableObject>
+    )
+  }
+
+  // ─── Draggable Objects Renderer ───────
+  const renderDraggableObjects = () => {
+    if (isPreview) {
+      // In preview mode, render objects as static overlays
+      return objects.map((obj) => (
+        <div
+          key={obj.id}
+          className="absolute flex items-center justify-center overflow-hidden pointer-events-none"
+          style={{
+            left: obj.x ?? 0,
+            top: obj.y ?? 0,
+            width: obj.pixelW || obj.w * (CELL_SIZE + 2),
+            height: obj.pixelH || obj.h * (CELL_SIZE + 2),
+            backgroundColor: obj.color + '25',
+            border: `2px dashed ${obj.color}80`,
+            borderRadius: 4,
+            zIndex: 5,
+          }}
+        >
+          <div className="text-center px-1">
+            <span className="text-[8px] sm:text-[9px] font-bold leading-tight block truncate max-w-full" style={{ color: obj.color }}>
+              {obj.type === 'ENTRANCE' ? '🚪 ' : ''}
+              {obj.label || obj.type}
+            </span>
+          </div>
+        </div>
+      ))
+    }
+
+    const cellPx = CELL_SIZE + 2
+
+    return objects.map((obj) => {
+      const isObjSelected = selectedElementType === 'object' && selectedObjectId === obj.id
+      const isObjOverlapping = isObjSelected && objectOverlapIds.size > 0
+      const objX = obj.x ?? obj.c * cellPx
+      const objY = obj.y ?? obj.r * cellPx
+      const objW = obj.pixelW ?? obj.w * cellPx
+      const objH = obj.pixelH ?? obj.h * cellPx
+
+      return (
+        <DraggableObject
+          key={obj.id}
+          id={obj.id}
+          x={objX}
+          y={objY}
+          width={objW}
+          height={objH}
+          minWidth={30}
+          minHeight={30}
+          isSelected={isObjSelected}
+          isOverlapping={isObjOverlapping}
+          onSelect={() => handleSelectObject(obj.id)}
+          onPositionChange={(pos) => {
+            updateObject(obj.id, { x: pos.x, y: pos.y, pixelW: pos.width, pixelH: pos.height })
+          }}
+          label={obj.label || obj.type}
+        >
+          <div
+            className="w-full h-full flex items-center justify-center overflow-hidden"
+            style={{
+              backgroundColor: obj.color + '25',
+              border: `2px dashed ${obj.color}80`,
+              borderRadius: 4,
+            }}
+          >
+            <div className="text-center px-1">
+              <span className="text-[8px] sm:text-[9px] font-bold leading-tight block truncate max-w-full" style={{ color: obj.color }}>
+                {obj.type === 'ENTRANCE' ? '🚪 ' : ''}
+                {obj.label || obj.type}
+              </span>
+            </div>
+          </div>
+        </DraggableObject>
+      )
+    })
+  }
 
   // ─── NUMBERED Grid Render ──────────────
   const renderNumberedGrid = () => {
@@ -1227,28 +1417,17 @@ export function CanvasEditor({
       const rowIndices = Array.from({ length: rows }, (_, i) => i)
       const colIndices = Array.from({ length: cols }, (_, i) => i)
 
-    // Stage injection: BLACK_BOX & ARENA in middle of rows, THRUST at top inside grid
-    const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
-    const middleRowIndex = isInsetStage ? Math.floor(rowIndices.length / 2) : -1
-
     return (
-      <div className="overflow-x-auto">
-        <div className="inline-block min-w-full relative">
-          {/* THRUST stage rendered inside grid, before rows, so extension flows into seating */}
-          {stageType === 'THRUST' && (
-            <div className="flex justify-center mb-2">
-              <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
-            </div>
-          )}
+      <div className="overflow-x-auto" onClick={handleDeselectAll}>
+        <div className="inline-block min-w-full relative" style={{ minHeight: 200 }}>
+          {/* Draggable stage — floats freely within the grid container */}
+          {renderDraggableStage()}
+
+          {/* Draggable objects — float freely within the grid container */}
+          {renderDraggableObjects()}
 
           {rowIndices.map((r, idx) => (
             <React.Fragment key={r}>
-              {/* Inset stage (BLACK_BOX / ARENA) in the middle of rows */}
-              {isInsetStage && idx === middleRowIndex && (
-                <div className="flex justify-center my-2">
-                  <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
-                </div>
-              )}
             <div className="flex items-center gap-0.5 mb-0.5">
               {/* Row label */}
               <div className="w-6 text-center text-[10px] font-semibold font-serif text-muted-foreground shrink-0">
@@ -1358,19 +1537,6 @@ export function CanvasEditor({
                 ))}
               </div>
               <div className="w-6 shrink-0" />
-            </div>
-          )}
-          {/* Non-clickable objects overlay — inside scroll container so it scrolls with columns on mobile */}
-          {objects.length > 0 && (
-            <div
-              className="relative pointer-events-none"
-              style={{
-                height: 0,
-                marginLeft: 24, // w-6 = 24px, align with cells column
-                minWidth: cols * (CELL_SIZE + 2),
-              }}
-            >
-              <ObjectsOverlay objects={objects} cellSize={CELL_SIZE + 2} />
             </div>
           )}
         </div>
@@ -1516,10 +1682,8 @@ export function CanvasEditor({
           />
         )}
 
-        {/* Non-clickable objects overlay */}
-        {objects.length > 0 && (
-          <ObjectsOverlay objects={objects} cellSize={CELL_SIZE} />
-        )}
+        {/* Draggable objects — float freely within the GA grid container */}
+        {renderDraggableObjects()}
       </div>
     )
     } catch (err) {
@@ -2292,9 +2456,6 @@ export function CanvasEditor({
               )}
             >
               <div className="p-4 sm:p-6">
-                {/* Stage at top: only for PROSCENIUM and AMPHITHEATER */}
-                {(stageType === 'PROSCENIUM' || stageType === 'AMPHITHEATER') && renderStageBar()}
-
                 {/* Grid container */}
                 <div
                   className="overflow-auto max-h-[60vh] rounded-lg p-4"
@@ -2304,6 +2465,12 @@ export function CanvasEditor({
                       ? undefined
                       : 'radial-gradient(circle, rgba(200,169,81,0.03) 1px, transparent 1px)',
                     backgroundSize: '20px 20px',
+                  }}
+                  onClick={(e) => {
+                    // Only deselect if clicking directly on the container
+                    if (e.target === e.currentTarget || e.target === e.currentTarget.firstElementChild) {
+                      handleDeselectAll()
+                    }
                   }}
                 >
                   <div className="flex justify-center">

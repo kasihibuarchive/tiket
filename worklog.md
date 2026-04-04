@@ -70,3 +70,61 @@ Fix BUG 1 (Canvas Editor Stage Variant Positioning) and BUG 2 (Usher Seat Map Vi
 6. **Imports added**: `Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription` from shadcn/ui, `StageRenderer` from `@/lib/stage-renderer`, `Maximize2, Minimize2` from lucide-react.
 
 **Lint**: All changes pass lint (0 new errors). Pre-existing errors are in non-project JS files (check-db.js, daemon-server.js).
+
+---
+## Task ID: 3 - main-agent
+### Work Task
+Fix 3 bugs: (1) Draggable/resizable stage in admin editor, (2) Guest view empty space + mobile stage scroll, (3) Multi-day seats sharing data.
+
+### Work Summary
+
+#### Bug 1: Draggable & Resizable Stage (PowerPoint-style)
+**Files created**: `src/lib/draggable-object.tsx`
+**Files modified**: `src/components/seat-map-builder/canvas-editor.tsx`, `src/components/seat-map.tsx`, `src/lib/stage-renderer.tsx`
+
+**Changes**:
+1. **Created `DraggableObject` component** (`src/lib/draggable-object.tsx`):
+   - Generic wrapper that makes any child element draggable (free-form pixel positioning) and resizable (8 handles: corners + edges)
+   - Supports selection state (blue border), overlap warning (orange pulsing border)
+   - Label badge showing element name when selected
+   - Constrains movement within parent bounds
+   - Exports `Bounds` type and `boundsOverlap()` utility for AABB collision detection
+
+2. **Canvas Editor** (`canvas-editor.tsx`):
+   - Added `stagePosition` state (`{ x, y, width, height }`) initialized from layoutData or defaults to `{ x: 0, y: 0, width: 320, height: 60 }`
+   - Added `selectedElementType` state to track whether stage or object is selected
+   - Added `renderDraggableStage()` — renders stage in a `DraggableObject` wrapper in edit mode, static positioned div in preview mode
+   - Added `renderDraggableObjects()` — renders each object (FOH, ENTRANCE, CUSTOM_SHAPE) in individual `DraggableObject` wrappers
+   - Added overlap detection: `stageIsOverlapping` checks stage against all objects, `objectOverlapIds` checks selected object against stage + other objects
+   - Removed old inline stage rendering (PROSCENIUM/AMPHITHEATER at top, THRUST/BLACK_BOX/ARENA injected between rows)
+   - Removed ObjectsOverlay from both `renderNumberedGrid()` and `renderGAGrid()` — replaced with draggable objects
+   - `LayoutObject` interface extended with optional `x, y, pixelW, pixelH` fields for free-form positioning
+   - `getExportLayoutData()` now saves `stagePosition` in the exported layoutData
+   - Added `handleSelectStage`, `handleSelectObject`, `handleDeselectAll` callbacks
+   - Click on canvas background deselects all elements
+
+3. **Guest Seat Map** (`seat-map.tsx`):
+   - Reads `stagePosition` from layoutData; if available, renders stage at absolute position within the scrollable container
+   - Falls back to default inline rendering when no custom position is set
+   - Inset stage (BLACK_BOX/ARENA in middle of rows) is skipped when custom position exists
+
+4. **ObjectsOverlay** (`stage-renderer.tsx`):
+   - Added `offsetX` prop to align objects with grid cells (accounting for row label width)
+   - Objects now correctly position at `left: offsetX + obj.c * cellSize`
+
+#### Bug 2: Guest View Empty Space + Mobile Stage Sticking
+**Files modified**: `src/components/seat-map.tsx`
+
+**Changes**:
+1. **Removed `max-w-3xl mx-auto`** from both LayoutData mode and Legacy mode outer wrappers — changed to `w-full` to fill available width
+2. **Moved StageRenderer INSIDE the `overflow-x-auto` scroll container** in both rendering modes, so the stage scrolls horizontally with the seat grid on mobile
+3. **ObjectsOverlay** already inside scroll container, now also uses proper `offsetX` for correct alignment
+
+#### Bug 3: Multi-day Seats Sharing Data
+**Files modified**: `src/app/events/[id]/page.tsx`
+
+**Changes**:
+1. **Seat fetch on date switch**: Changed the `useEffect` to run on both `activeShowDate?.id` AND `eventId` (previously only ran when `activeShowDate?.id` was truthy). Now also clears `allSeats` immediately on date switch (`setAllSeats([])`) to prevent stale data from showing.
+2. **Removed fallback filtering**: Changed `filteredSeats` from a complex `useMemo` with fallback logic (`dateSeats.length > 0 ? dateSeats : allSeats.filter(s => !s.eventShowDateId)`) to simply `const filteredSeats = allSeats` — since the server already filters by showDateId, no client-side filtering is needed. The old fallback was returning wrong data when seats didn't have showDateId set.
+
+**Lint**: All changes pass lint (0 new errors). TypeScript compiles without errors in modified files. Pre-existing errors remain in unrelated files.
