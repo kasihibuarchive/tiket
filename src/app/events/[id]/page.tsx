@@ -392,6 +392,7 @@ export default function EventDetailPage() {
 
             {!showCheckout ? (
               <SeatMap
+                key={activeShowDate?.id || 'default'}
                 eventId={eventId}
                 showDateId={activeShowDate?.id || null}
                 seats={filteredSeats}

@@ -79,6 +79,12 @@ export default function SeatMapEditPage() {
         ...(raw.thrustWidth && { thrustWidth: raw.thrustWidth }),
         ...(raw.thrustDepth && { thrustDepth: raw.thrustDepth }),
         ...(raw.embeddedRows && typeof raw.embeddedRows === 'object' && { embeddedRows: raw.embeddedRows }),
+        // CRITICAL: Preserve paint mode data — seatColumns, canvasWidth, canvasHeight
+        // Without these, the canvas layout is destroyed on reload (empty areas trimmed, positions lost)
+        ...(Array.isArray(raw.seatColumns) && { seatColumns: raw.seatColumns }),
+        ...(raw.canvasWidth && { canvasWidth: Number(raw.canvasWidth) }),
+        ...(raw.canvasHeight && { canvasHeight: Number(raw.canvasHeight) }),
+        ...(raw.stageType && { stageType: raw.stageType }),
       }
     }
     return {

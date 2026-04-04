@@ -204,8 +204,13 @@ export default function AdminEventsPage() {
 
       const payload = {
         ...formData,
-        showDate: new Date(formData.showDate).toISOString(),
-        openGate: formData.openGate ? new Date(formData.openGate).toISOString() : null,
+        // Use first showDate entry as the primary showDate (backward compat)
+        showDate: formData.showDates[0]?.date
+          ? new Date(formData.showDates[0].date).toISOString()
+          : new Date().toISOString(),
+        openGate: formData.showDates[0]?.openGate
+          ? new Date(formData.showDates[0].openGate).toISOString()
+          : null,
         showDates: formData.showDates.filter((sd) => sd.date),
       }
 
@@ -688,7 +693,7 @@ export default function AdminEventsPage() {
             </DialogClose>
             <Button
               onClick={handleSave}
-              disabled={isSaving || !formData.title || !formData.location || !formData.showDate}
+              disabled={isSaving || !formData.title || !formData.location || !formData.showDates.some(sd => sd.date)}
               className="bg-charcoal hover:bg-charcoal/90 text-gold text-sm"
             >
               {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
