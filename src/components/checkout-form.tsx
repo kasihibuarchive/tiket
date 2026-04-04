@@ -253,7 +253,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
       fetch('/api/seats/unlock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes, sessionId }),
+        body: JSON.stringify({ eventId, seatCodes, sessionId, showDateId: showDateId || undefined }),
       }).catch(() => {})
     }
 
@@ -300,7 +300,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
       const confirmRes = await fetch('/api/seats/confirm-lock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes, sessionId }),
+        body: JSON.stringify({ eventId, seatCodes, sessionId, showDateId: showDateId || undefined }),
       })
 
       if (!confirmRes.ok) {

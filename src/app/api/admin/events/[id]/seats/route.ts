@@ -8,7 +8,7 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await request.json()
-    const { seats } = body
+    const { seats, showDateId } = body
 
     if (!seats || !Array.isArray(seats) || seats.length === 0) {
       return NextResponse.json({ error: 'seats array is required' }, { status: 400 })
@@ -37,8 +37,11 @@ export async function PUT(
       if (sample.priceCategoryId !== undefined && sample.priceCategoryId !== null) {
         data.priceCategoryId = sample.priceCategoryId
       }
+      // CRITICAL: Filter by showDateId to prevent cross-day data corruption
+      const whereClause: any = { eventId: id, seatCode: { in: codes } }
+      if (showDateId) whereClause.eventShowDateId = showDateId
       await db.seat.updateMany({
-        where: { eventId: id, seatCode: { in: codes } },
+        where: whereClause,
         data,
       })
     }

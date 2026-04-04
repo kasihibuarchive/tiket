@@ -116,18 +116,59 @@ export async function PUT(
       })
     }
 
-    // Update show dates if provided — delete all old, create new
-    if (showDates && Array.isArray(showDates)) {
-      await db.eventShowDate.deleteMany({ where: { eventId: id } })
-      if (showDates.length > 0) {
-        await db.eventShowDate.createMany({
-          data: showDates.map((sd: { date: string; openGate?: string; label?: string }) => ({
-            eventId: id,
-            date: new Date(sd.date),
-            openGate: sd.openGate ? new Date(sd.openGate) : null,
-            label: sd.label || null,
-          })),
-        })
+    // Update show dates if provided — UPSERT strategy (never cascade-delete existing seats!)
+    // 1. Fetch existing show dates
+    const existingShowDates = await db.eventShowDate.findMany({ where: { eventId: id } })
+    const existingIds = new Set(existingShowDates.map((sd) => sd.id))
+    const incomingIds = new Set(
+      (showDates as Array<{ id?: string; date: string; openGate?: string; label?: string }>)
+        ?.filter((sd) => sd.id)
+        .map((sd) => sd.id!)
+    )
+
+    // 2. Delete only removed show dates (ones that exist in DB but not in incoming)
+    const toDelete = existingShowDates.filter((sd) => !incomingIds.has(sd.id))
+    for (const sd of toDelete) {
+      // Check if this show date has sold seats — prevent deletion if so
+      const soldCount = await db.seat.count({
+        where: { eventShowDateId: sd.id, status: 'SOLD' },
+      })
+      if (soldCount > 0) {
+        return NextResponse.json({
+          error: `Tidak bisa menghapus tanggal "${sd.label || new Date(sd.date).toLocaleDateString('id-ID')}". Masih ada ${soldCount} kursi terjual.`,
+        }, { status: 409 })
+      }
+    }
+    if (toDelete.length > 0) {
+      await db.eventShowDate.deleteMany({
+        where: { id: { in: toDelete.map((sd) => sd.id) } },
+      })
+    }
+
+    // 3. Update existing + create new
+    if (showDates && Array.isArray(showDates) && showDates.length > 0) {
+      for (const sd of showDates as Array<{ id?: string; date: string; openGate?: string; label?: string }>) {
+        if (sd.id && existingIds.has(sd.id)) {
+          // Update existing
+          await db.eventShowDate.update({
+            where: { id: sd.id },
+            data: {
+              date: new Date(sd.date),
+              openGate: sd.openGate ? new Date(sd.openGate) : null,
+              label: sd.label || null,
+            },
+          })
+        } else {
+          // Create new
+          await db.eventShowDate.create({
+            data: {
+              eventId: id,
+              date: new Date(sd.date),
+              openGate: sd.openGate ? new Date(sd.openGate) : null,
+              label: sd.label || null,
+            },
+          })
+        }
       }
     }
 

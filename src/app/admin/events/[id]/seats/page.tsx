@@ -151,10 +151,10 @@ export default function SeatEditorPage() {
     return groups
   }, [allSeats, activeShowDate, showDates.length])
 
-  // Filter seats based on selected day
+  // Filter seats based on selected day — ONLY match explicit showDateId, no orphan fallback
   const seats = useMemo(() => {
     if (!activeShowDate) return allSeats
-    return allSeats.filter(s => s.eventShowDateId === activeShowDate.id || !s.eventShowDateId)
+    return allSeats.filter(s => s.eventShowDateId === activeShowDate.id)
   }, [allSeats, activeShowDate])
 
   useEffect(() => {
@@ -347,6 +347,7 @@ export default function SeatEditorPage() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          showDateId: activeShowDate?.id || undefined,
           seats: seats.map((s) => ({
             seatCode: s.seatCode,
             status: s.status,
