@@ -65,3 +65,32 @@ Stage Summary:
 - Modified: usher/events/[id]/seats/page.tsx (show date tabs + stage position support)
 - Modified: seat-maps/[id]/edit/page.tsx (adminId dependency fix)
 - Server: daemonized on port 3000 with credentials from .credentials
+
+---
+Task ID: 1
+Agent: main
+Task: Analisis dan fix Bug 3 (seats tidak sinkron setelah regenerate) dan Bug 4 (posisi STAGE/OBJEK tidak sesuai kanvas)
+
+Work Log:
+- Analisis screenshot dari user: canvas menunjukkan 38 kursi (A:10, B:14, C:8, D:6), event view menunjukkan kursi hilang
+- Cek build terakhir (16:20) vs source modification (16:17-16:19) — build sudah termasuk perubahan terbaru
+- Query DB langsung: ketemu Row A punya 11 seats dengan 2 di c=10 (DUPLIKAT)
+- Trace data flow: canvas-editor → getExportLayoutData → DB → generateSeatsFromLayout → parseLayoutData → viewer
+- Identifikasi 4 root cause:
+  1. deriveGridSeats() bisa produce duplikat c value (2 seat di row sama punya column index sama)
+  2. Auto-save performAutoSave() kirim layoutData saja, TANPA objects & stagePosition
+  3. ObjectsOverlay render pakai r,c grid position, bukan x,y pixel position dari canvas drag
+  4. parseLayoutData strip x,y,pixelW,pixelH dari objects
+
+- Fix 1: deriveGridSeats() — tambah dedup logic, shift c value jika duplikat
+- Fix 2: normalizeLayoutData() — tambah dedup untuk existing seats (heal corrupted data)
+- Fix 3: performAutoSave() — include objects, stagePosition, stageType, thrustWidth/Depth
+- Fix 4: parseLayoutData (seat-layout.ts) — preserve x, y, pixelW, pixelH fields pada objects
+- Fix 5: parseLayoutData (seat-layout.ts) — tambah dedup c values per row
+- Fix 6: ObjectsOverlay (stage-renderer.tsx) — use pixel positions (x, y) when available, fallback to grid (r, c)
+- Fix 7: Admin seats page local parseLayoutData — tambah dedup juga
+
+Stage Summary:
+- 4 file diubah: canvas-editor.tsx, seat-layout.ts, stage-renderer.tsx, admin/events/[id]/seats/page.tsx
+- Build production OK, daemon server restarted di port 3000
+- Dedup diterapkan di 3 layer: derive time (deriveGridSeats), load time (normalizeLayoutData), render time (parseLayoutData)

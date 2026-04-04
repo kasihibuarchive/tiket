@@ -12,6 +12,11 @@ export interface LayoutObject {
   w: number
   h: number
   color: string
+  // Pixel-based positions from canvas drag-and-drop (preferred for rendering)
+  x?: number
+  y?: number
+  pixelW?: number
+  pixelH?: number
 }
 
 export interface ParsedLayout {
@@ -140,14 +145,27 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
     const r = parseInt(rStr)
     const sorted = [...rowSeats].sort((a: any, b: any) => (a.c ?? a.col ?? 0) - (b.c ?? b.col ?? 0))
 
-    const allHaveBlock = sorted.every((s: any) => s.block)
-    let inferredBlocks: string[] | null = null
-    if (!allHaveBlock) {
-      inferredBlocks = inferBlocksForRow(sorted.map((s: any) => ({ c: s.c ?? s.col ?? 0 })))
+    // Deduplicate c values within each row: if two seats share the same c,
+    // shift the later one(s) right. This prevents Map.set from silently
+    // overwriting duplicates in the grid renderer.
+    const deduped: typeof sorted = []
+    const usedC = new Set<number>()
+    for (const s of sorted) {
+      let c = s.c ?? s.col ?? 0
+      while (usedC.has(c)) c++
+      usedC.add(c)
+      deduped.push({ ...s, c })
     }
 
-    rowSeatMap.set(r, sorted.map((s: any, idx: number) => ({
-      c: s.c ?? s.col ?? 0,
+    // Infer blocks AFTER dedup so positions are accurate
+    const allHaveBlock = deduped.every((s: any) => s.block)
+    let inferredBlocks: string[] | null = null
+    if (!allHaveBlock) {
+      inferredBlocks = inferBlocksForRow(deduped.map((s: any) => ({ c: s.c })))
+    }
+
+    rowSeatMap.set(r, deduped.map((s: any, idx: number) => ({
+      c: s.c,
       seatNum: idx + 1,
       block: s.block || (inferredBlocks ? inferredBlocks[idx] : undefined),
     })))
@@ -166,7 +184,7 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
     }
   }
 
-  // Parse non-clickable objects
+  // Parse non-clickable objects (preserve pixel positions from canvas editor)
   const objects: LayoutObject[] = Array.isArray(data.objects)
     ? data.objects.map((o: any) => ({
         id: o.id || `obj-${Math.random().toString(36).slice(2, 8)}`,
@@ -177,6 +195,11 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
         w: o.w ?? 1,
         h: o.h ?? 1,
         color: o.color || '#6B7280',
+        // Preserve pixel-based positions from canvas drag-and-drop
+        ...(typeof o.x === 'number' && { x: o.x }),
+        ...(typeof o.y === 'number' && { y: o.y }),
+        ...(typeof o.pixelW === 'number' && { pixelW: o.pixelW }),
+        ...(typeof o.pixelH === 'number' && { pixelH: o.pixelH }),
       }))
     : []
 

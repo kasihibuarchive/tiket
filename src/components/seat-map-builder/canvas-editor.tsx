@@ -241,7 +241,22 @@ function deriveGridSeats(columns: SeatColumn[]): { seats: SeatPosition[]; rowLab
   // Normalize: shift all columns so the leftmost seat starts at c=0.
   // This prevents empty columns on the left side of the guest view.
   const minC = rawSeats.length > 0 ? Math.min(...rawSeats.map(s => s.c)) : 0
-  const seats: SeatPosition[] = rawSeats.map(s => ({ r: s.r, c: s.c - minC }))
+  const shifted: { r: number; c: number }[] = rawSeats.map(s => ({ r: s.r, c: s.c - minC }))
+
+  // Deduplicate: if two seats in the same row share the same c value,
+  // shift the later ones right so every seat gets a unique column.
+  // Without this, the viewer's colMap (Map.set) silently overwrites duplicates,
+  // making seats vanish in the guest/usher view after regeneration.
+  const seats: SeatPosition[] = []
+  const usedCPerRow = new Map<number, Set<number>>()
+  for (const s of shifted) {
+    const used = usedCPerRow.get(s.r) || new Set<number>()
+    let c = s.c
+    while (used.has(c)) c++
+    used.add(c)
+    seats.push({ r: s.r, c })
+    usedCPerRow.set(s.r, used)
+  }
 
   return { seats, rowLabels }
 }
@@ -292,8 +307,26 @@ function normalizeLayoutData(raw: any, fallbackType: 'NUMBERED' | 'GENERAL_ADMIS
       const hasExistingSeats = Array.isArray(raw.seats) && raw.seats.length > 0
       const hasExistingLabels = Array.isArray(raw.rowLabels) && raw.rowLabels.length > 0
       const derived = deriveGridSeats(raw.seatColumns)
-      const seats = hasExistingSeats ? raw.seats : derived.seats
+      let seats = hasExistingSeats ? raw.seats : derived.seats
       const rowLabels = hasExistingLabels ? raw.rowLabels : derived.rowLabels
+
+      // Deduplicate existing seats: if two seats in the same row share the
+      // same c value, shift the later ones right.  This heals data that was
+      // saved before the dedup fix in deriveGridSeats.
+      if (hasExistingSeats) {
+        const deduped: typeof seats = []
+        const usedCPerRow = new Map<number, Set<number>>()
+        for (const s of seats) {
+          const used = usedCPerRow.get(s.r) || new Set<number>()
+          let c = s.c
+          while (used.has(c)) c++
+          used.add(c)
+          deduped.push({ r: s.r, c })
+          usedCPerRow.set(s.r, used)
+        }
+        seats = deduped
+      }
+
       // gridSize.cols should match the actual seat spread, not canvas pixel width
       const maxCol = seats.length > 0 ? Math.max(...seats.map(s => s.c)) + 1 : 1
       return {
@@ -788,14 +821,25 @@ export function CanvasEditor({
   const performAutoSave = useCallback(async () => {
     setIsAutoSaving(true)
     try {
+      // CRITICAL: Include objects and stagePosition in auto-save.
+      // Without these, auto-save overwrites the DB with layoutData that
+      // lacks object/stage position data, causing positions to reset on reload.
+      const autoSaveData = deepClone(layoutData)
+      autoSaveData.objects = deepClone(objects)
+      autoSaveData.stageType = stageType
+      autoSaveData.stagePosition = stagePosition
+      if (stageType === 'THRUST') {
+        autoSaveData.thrustWidth = thrustWidth
+        autoSaveData.thrustDepth = thrustDepth
+      }
       const res = await fetch(`/api/admin/seat-maps/${seatMapId}/autosave`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ layoutData, adminId }),
+        body: JSON.stringify({ layoutData: autoSaveData, adminId }),
       })
       if (res.ok) setAutoSaveTime(new Date())
     } catch { /* silent */ } finally { setIsAutoSaving(false) }
-  }, [seatMapId, layoutData, adminId])
+  }, [seatMapId, layoutData, objects, stageType, stagePosition, thrustWidth, thrustDepth, adminId])
 
   useEffect(() => {
     autoSaveTimerRef.current = setInterval(() => { performAutoSave() }, AUTOSAVE_INTERVAL)

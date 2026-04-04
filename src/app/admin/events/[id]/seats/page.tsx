@@ -60,8 +60,19 @@ function parseLayoutData(layoutData: any): ParsedLayout | null {
   for (const [rStr, rowSeats] of Object.entries(rowGroups)) {
     const r = parseInt(rStr)
     const sorted = [...rowSeats].sort((a: any, b: any) => (a.c ?? a.col ?? 0) - (b.c ?? b.col ?? 0))
-    rowSeatMap.set(r, sorted.map((s: any, idx: number) => ({
-      c: s.c ?? s.col ?? 0,
+
+    // Deduplicate c values within each row
+    const deduped: typeof sorted = []
+    const usedC = new Set<number>()
+    for (const s of sorted) {
+      let c = s.c ?? s.col ?? 0
+      while (usedC.has(c)) c++
+      usedC.add(c)
+      deduped.push({ ...s, c })
+    }
+
+    rowSeatMap.set(r, deduped.map((s: any, idx: number) => ({
+      c: s.c,
       seatNum: idx + 1,
     })))
   }

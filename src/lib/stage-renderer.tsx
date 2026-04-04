@@ -322,7 +322,7 @@ export function ObjectsOverlay({
   offsetX = 0,
   className,
 }: {
-  objects?: Array<{ id: string; type: string; label: string; r: number; c: number; w: number; h: number; color: string }>
+  objects?: Array<{ id: string; type: string; label: string; r: number; c: number; w: number; h: number; color: string; x?: number; y?: number; pixelW?: number; pixelH?: number }>
   cellSize?: number
   offsetX?: number
   className?: string
@@ -331,31 +331,41 @@ export function ObjectsOverlay({
 
   return (
     <div className={cn('absolute pointer-events-none', className)} style={{ top: 0, left: 0 }}>
-      {objects.map((obj) => (
-        <div
-          key={obj.id}
-          className="absolute flex items-center justify-center overflow-hidden"
-          style={{
-            left: offsetX + obj.c * cellSize,
-            top: obj.r * cellSize,
-            width: obj.w * cellSize,
-            height: obj.h * cellSize,
-            backgroundColor: obj.color + '25',
-            border: `2px dashed ${obj.color}80`,
-            borderRadius: 4,
-          }}
-        >
-          <div className="text-center px-1">
-            <span
-              className="text-[8px] sm:text-[9px] font-bold leading-tight block truncate max-w-full"
-              style={{ color: obj.color }}
-            >
-              {obj.type === 'ENTRANCE' ? '🚪 ' : ''}
-              {obj.label || obj.type}
-            </span>
+      {objects.map((obj) => {
+        // Use pixel-based positions (from canvas drag-and-drop) when available,
+        // otherwise fall back to grid-based r,c positioning.
+        const hasPixelPos = typeof obj.x === 'number' && typeof obj.y === 'number'
+        const posX = hasPixelPos ? obj.x! : offsetX + obj.c * cellSize
+        const posY = hasPixelPos ? obj.y! : obj.r * cellSize
+        const posW = hasPixelPos && obj.pixelW ? obj.pixelW! : obj.w * cellSize
+        const posH = hasPixelPos && obj.pixelH ? obj.pixelH! : obj.h * cellSize
+
+        return (
+          <div
+            key={obj.id}
+            className="absolute flex items-center justify-center overflow-hidden"
+            style={{
+              left: posX,
+              top: posY,
+              width: posW,
+              height: posH,
+              backgroundColor: obj.color + '25',
+              border: `2px dashed ${obj.color}80`,
+              borderRadius: 4,
+            }}
+          >
+            <div className="text-center px-1">
+              <span
+                className="text-[8px] sm:text-[9px] font-bold leading-tight block truncate max-w-full"
+                style={{ color: obj.color }}
+              >
+                {obj.type === 'ENTRANCE' ? '🚪 ' : ''}
+                {obj.label || obj.type}
+              </span>
+            </div>
           </div>
-        </div>
-      ))}
+        )
+      })}
     </div>
   )
 }
