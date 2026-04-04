@@ -139,3 +139,27 @@ Stage Summary:
 - paddingTop shifts grid down to accommodate stage/objects above seats
 - All 4 files updated: seat-layout.ts, stage-renderer.tsx, seat-map.tsx, usher seats/page.tsx
 - Server rebuilt + restarted, E2E test passed
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: E2E screenshot test of full pipeline
+
+Work Log:
+- Logged in as admin, created seatmap "Screenshot-Test" with 4 rows × 6 cols
+- Set up layout via API: stage at (96,20), object "PINTU MASUK" at (224,320), 24 seats A-1 to D-6
+- Regenerated 24 seats for TEST event
+- Took screenshots at each step:
+  1. Seat Builder (canvas editor) — 01-seat-builder.png
+  2. Admin seats after regenerate — 02-admin-seats.png
+  3. Usher seat view — 03-usher-seats.png
+  4. Guest event page — 04-guest-event.png
+  5. Guest seatmap — 05-guest-seatmap.png
+  6. Compliment form — 06-compliment-form.png
+  7. Compliment ticket — 07-compliment-ticket.png
+- Created compliment ticket COMP-LJMA8O for seats A-1, A-2, B-3
+
+Stage Summary:
+- All 7 screenshots saved to /home/z/my-project/download/screenshots/
+- Stage position, object position, and seats all visible in each view
+- Coordinate mapping working correctly across all views
