@@ -17,7 +17,7 @@ export function Navbar() {
           <Link href="/" className="flex items-center gap-2 group">
             <Drama className="w-7 h-7 text-gold" />
             <span className="font-serif text-xl font-semibold tracking-wide text-charcoal">
-              TEATER <span className="text-gold">RENDA</span>
+              TEATERAN
             </span>
           </Link>
 

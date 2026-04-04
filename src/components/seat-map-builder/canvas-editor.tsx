@@ -1227,11 +1227,29 @@ export function CanvasEditor({
       const rowIndices = Array.from({ length: rows }, (_, i) => i)
       const colIndices = Array.from({ length: cols }, (_, i) => i)
 
+    // Stage injection: BLACK_BOX & ARENA in middle of rows, THRUST at top inside grid
+    const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
+    const middleRowIndex = isInsetStage ? Math.floor(rowIndices.length / 2) : -1
+
     return (
       <div className="overflow-x-auto">
         <div className="inline-block min-w-full relative">
-          {rowIndices.map((r) => (
-            <div key={r} className="flex items-center gap-0.5 mb-0.5">
+          {/* THRUST stage rendered inside grid, before rows, so extension flows into seating */}
+          {stageType === 'THRUST' && (
+            <div className="flex justify-center mb-2">
+              <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
+            </div>
+          )}
+
+          {rowIndices.map((r, idx) => (
+            <React.Fragment key={r}>
+              {/* Inset stage (BLACK_BOX / ARENA) in the middle of rows */}
+              {isInsetStage && idx === middleRowIndex && (
+                <div className="flex justify-center my-2">
+                  <StageRenderer stageType={stageType} size="sm" thrustWidth={thrustWidth} thrustDepth={thrustDepth} />
+                </div>
+              )}
+            <div className="flex items-center gap-0.5 mb-0.5">
               {/* Row label */}
               <div className="w-6 text-center text-[10px] font-semibold font-serif text-muted-foreground shrink-0">
                 {rowLabels[r] || String.fromCharCode(65 + (r % 26))}
@@ -1321,6 +1339,7 @@ export function CanvasEditor({
                 {rowLabels[r] || String.fromCharCode(65 + (r % 26))}
               </div>
             </div>
+            </React.Fragment>
           ))}
 
           {/* Column numbers for aisle mode */}
@@ -2273,7 +2292,8 @@ export function CanvasEditor({
               )}
             >
               <div className="p-4 sm:p-6">
-                {renderStageBar()}
+                {/* Stage at top: only for PROSCENIUM and AMPHITHEATER */}
+                {(stageType === 'PROSCENIUM' || stageType === 'AMPHITHEATER') && renderStageBar()}
 
                 {/* Grid container */}
                 <div

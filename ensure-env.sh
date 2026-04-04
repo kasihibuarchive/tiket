@@ -19,11 +19,13 @@ CLIENT_KEY=$(rg '^MIDTRANS_CLIENT_KEY=' "$CRED" | cut -d= -f2-)
 SERVER_KEY=$(rg '^MIDTRANS_SERVER_KEY=' "$CRED" | cut -d= -f2-)
 EMAIL_USER=$(rg '^EMAIL_USER=' "$CRED" | cut -d= -f2-)
 EMAIL_PASS=$(rg '^EMAIL_PASS=' "$CRED" | cut -d= -f2-)
+APP_SECRET=$(rg '^APP_SECRET=' "$CRED" | cut -d= -f2-)
 DB_URL=$(rg '^SUPABASE_POOLER_URL=' "$CRED" | cut -d= -f2-)
 
 # Write .env
 cat > "$ENV" << ENVEOF
 DATABASE_URL=${DB_URL}
+APP_SECRET=${APP_SECRET}
 MIDTRANS_SERVER_KEY=${SERVER_KEY}
 MIDTRANS_CLIENT_KEY=${CLIENT_KEY}
 NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=${CLIENT_KEY}
@@ -39,6 +41,7 @@ echo "✅ .env regenerated from .credentials"
 if [ -d "/home/z/my-project/.next/standalone" ]; then
   cat > "$STANDALONE_ENV" << ENVEOF
 DATABASE_URL=${DB_URL}
+APP_SECRET=${APP_SECRET}
 MIDTRANS_SERVER_KEY=${SERVER_KEY}
 MIDTRANS_CLIENT_KEY=${CLIENT_KEY}
 NEXT_PUBLIC_MIDTRANS_CLIENT_KEY=${CLIENT_KEY}

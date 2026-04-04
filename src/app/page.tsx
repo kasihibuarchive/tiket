@@ -64,7 +64,7 @@ export default async function HomePage() {
               Official Ticketing Platform
             </p>
             <h1 className="font-serif text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold text-white mb-4">
-              TEATER <span className="text-gold">RENDA</span>
+              TEATERAN
             </h1>
             <div className="zen-divider w-24 mb-6" />
             <p className="text-white/50 text-sm sm:text-base max-w-md leading-relaxed">

@@ -20,12 +20,11 @@ export async function GET(
     }
 
     // Separate queries — NO include (crashes Next.js 16)
-    // Build where clause — filter by showDateId if provided, otherwise return null-eventShowDateId seats for backward compat
+    // Build where clause — filter by showDateId if provided
+    // If no showDateId, return ALL seats for the event (used by admin/usher views)
     const seatWhere: any = { eventId: id }
     if (showDateId) {
       seatWhere.eventShowDateId = showDateId
-    } else {
-      seatWhere.eventShowDateId = null
     }
 
     const seats = await db.seat.findMany({

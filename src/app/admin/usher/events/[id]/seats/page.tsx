@@ -1,15 +1,20 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+import { StageRenderer } from '@/lib/stage-renderer'
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
+} from '@/components/ui/sheet'
 import {
   Check, X, Crown, User, GraduationCap, Loader2,
-  ArrowLeft, Mail, Phone, Hash, Clock, CreditCard, Users, Send
+  ArrowLeft, Mail, Phone, Hash, Clock, CreditCard, Users, Send,
+  Maximize2, Minimize2
 } from 'lucide-react'
 
 // =====================
@@ -85,9 +90,15 @@ export default function UsherSeatMapPage() {
   const [error, setError] = useState<string | null>(null)
   const [isResending, setIsResending] = useState(false)
   const [resendResult, setResendResult] = useState<{ success: boolean; message: string } | null>(null)
+  const [stageSize, setStageSize] = useState<'sm' | 'md' | 'lg'>('md')
+  const [infoSheetOpen, setInfoSheetOpen] = useState(false)
 
   // Parse layout data from event's seat map
   const parsedLayout = useMemo(() => parseLayoutData(event?.seatMapLayout), [event?.seatMapLayout]) as ParsedLayout | null
+
+  // Stage type from layout data
+  const stageType = parsedLayout?.stageType || 'PROSCENIUM'
+  const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
 
   // Seat lookup by seatCode
   const seatLookup = useMemo(() => {
@@ -176,11 +187,13 @@ export default function UsherSeatMapPage() {
         setSelectedSeatCode(seat.seatCode)
         setSelectedSeat(ownerInfo)
         setResendResult(null)
+        setInfoSheetOpen(true)
       }
     } else {
       setSelectedSeatCode(null)
       setSelectedSeat(null)
       setResendResult(null)
+      setInfoSheetOpen(false)
     }
   }, [seatOwnerMap])
 
@@ -365,18 +378,39 @@ export default function UsherSeatMapPage() {
 
     const CELL_TOTAL = SEAT_W + SEAT_GAP
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+    const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
 
     seatGridContent = (
       <div className="mx-auto" style={{ minWidth: gridW }}>
-        {displayRows.map((ri) => {
-          const label = lLabels[ri] || String.fromCharCode(65 + ri)
-          const colMap = gridLookup.get(ri) || new Map()
-          const rowColor = getRowColorFromSections(ri)
+        {/* Top stage for PROSCENIUM, AMPHITHEATER, THRUST — inside scroll container */}
+        {!isInsetStage && (
+          <div className="flex justify-center mb-4">
+            <StageRenderer
+              stageType={stageType}
+              size={stageSize}
+              thrustWidth={(parsedLayout as any)?.thrustWidth}
+              thrustDepth={(parsedLayout as any)?.thrustDepth}
+            />
+          </div>
+        )}
 
-          return (
-            <div key={ri} className="flex items-center mb-[3px]" style={{ height: SEAT_W }}>
-              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
-                {label}
+        {displayRows.map((ri, idx) => (
+          <React.Fragment key={ri}>
+            {/* Inset stage (BLACK_BOX / ARENA) in the middle of rows */}
+            {isInsetStage && idx === middleRowIndex && (
+              <div className="flex justify-center my-3">
+                <StageRenderer
+                  stageType={stageType}
+                  size={stageSize}
+                  thrustWidth={(parsedLayout as any)?.thrustWidth}
+                  thrustDepth={(parsedLayout as any)?.thrustDepth}
+                />
+              </div>
+            )}
+
+            <div className="flex items-center mb-[3px]" style={{ height: SEAT_W }}>
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: getRowColorFromSections(ri) }}>
+                {lLabels[ri] || String.fromCharCode(65 + ri)}
               </div>
               <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
                 {Array.from({ length: cols }, (_, c) => {
@@ -387,7 +421,7 @@ export default function UsherSeatMapPage() {
                     )
                   }
 
-                  const seatInfo = colMap.get(c)
+                  const seatInfo = (gridLookup.get(ri) || new Map()).get(c)
                   if (seatInfo) {
                     const seatData = seatLookup.get(seatInfo.seatCode)
                     return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum, `${ri}-${c}`)
@@ -396,12 +430,12 @@ export default function UsherSeatMapPage() {
                   return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
                 })}
               </div>
-              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
-                {label}
+              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: getRowColorFromSections(ri) }}>
+                {lLabels[ri] || String.fromCharCode(65 + ri)}
               </div>
             </div>
-          )
-        })}
+          </React.Fragment>
+        ))}
       </div>
     )
   } else {
@@ -420,6 +454,11 @@ export default function UsherSeatMapPage() {
 
     seatGridContent = (
       <div className="min-w-[320px]">
+        {/* Top stage — inside scroll container */}
+        <div className="flex justify-center mb-4">
+          <StageRenderer stageType={stageType} size={stageSize} />
+        </div>
+
         {sortedRowKeys.map((row) => {
           const rowSeats = groups[row]
           const catName = rowSeats[0]?.priceCategory?.name
@@ -467,6 +506,46 @@ export default function UsherSeatMapPage() {
             Peta Kursi — Mode Baca Saja
           </p>
         </div>
+
+        {/* Stage size selector */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground hidden sm:inline">Ukuran Panggung:</span>
+          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+            <button
+              onClick={() => setStageSize('sm')}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+                stageSize === 'sm'
+                  ? 'bg-white shadow-sm text-charcoal'
+                  : 'text-muted-foreground hover:text-charcoal'
+              )}
+            >
+              <Minimize2 className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => setStageSize('md')}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+                stageSize === 'md'
+                  ? 'bg-white shadow-sm text-charcoal'
+                  : 'text-muted-foreground hover:text-charcoal'
+              )}
+            >
+              S
+            </button>
+            <button
+              onClick={() => setStageSize('lg')}
+              className={cn(
+                'px-2.5 py-1 rounded-md text-xs font-medium transition-all',
+                stageSize === 'lg'
+                  ? 'bg-white shadow-sm text-charcoal'
+                  : 'text-muted-foreground hover:text-charcoal'
+              )}
+            >
+              <Maximize2 className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -509,239 +588,219 @@ export default function UsherSeatMapPage() {
         </Card>
       </div>
 
-      {/* Main Content: Seat Map + Info Panel */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Seat Map */}
-        <div className="lg:col-span-2">
-          <Card className="border-border/50">
-            <CardContent className="p-4 sm:p-6">
-              <div className="w-full max-w-5xl mx-auto">
-                {/* Stage */}
-                <div className="relative mb-6">
-                  <div className="bg-charcoal rounded-xl py-5 px-8 text-center stage-glow border border-gold/20">
-                    <p className="font-serif text-gold text-lg sm:text-xl tracking-[0.3em] font-semibold">
-                      S T A G E
-                    </p>
-                    <p className="font-serif text-gold/60 text-xs sm:text-sm tracking-[0.2em] mt-1">
-                      T E A T E R &nbsp; R E N D R A
-                    </p>
-                  </div>
-                </div>
-
-                {/* Seat Grid */}
-                <div className="overflow-x-auto pb-4">
-                  <div className="min-w-[320px] px-2">
-                    {seatGridContent}
-                  </div>
-                </div>
-
-                {/* Legend */}
-                <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-5 h-5 rounded border-2 bg-white" style={{ borderColor: '#C8A951' }} />
-                    <span>Tersedia</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-5 h-5 rounded bg-seat-sold" />
-                    <span>Terjual</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-5 h-5 rounded bg-success" />
-                    <span>Sudah Check-In</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-5 h-5 rounded bg-seat-locked" />
-                    <span>Dikunci</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-5 h-5 rounded bg-seat-invitation" />
-                    <span>Undangan</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-5 h-5 rounded bg-gray-200 opacity-30" />
-                    <span>Tidak Tersedia</span>
-                  </div>
-                </div>
-
-                {/* Price Category Legend */}
-                {priceCategories.length > 0 && (
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
-                    {priceCategories.map((cat) => {
-                      const catConfig = CATEGORY_CONFIG[cat.name]
-                      const Icon = catConfig?.icon || User
-                      return (
-                        <div key={cat.id} className="flex items-center gap-1.5">
-                          <Icon className="w-4 h-4" style={{ color: cat.colorCode || catConfig?.defaultColor }} />
-                          <span className="text-muted-foreground">{cat.name}</span>
-                          <span className="font-medium text-charcoal">Rp {cat.price.toLocaleString('id-ID')}</span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
+      {/* Seat Map — Full Width */}
+      <Card className="border-border/50">
+        <CardContent className="p-4 sm:p-6">
+          <div className="w-full">
+            {/* Seat Grid — scrollable, with stage INSIDE */}
+            <div className="overflow-x-auto pb-4">
+              <div className="min-w-[320px] px-2">
+                {seatGridContent}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+
+            {/* Legend */}
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground">
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded border-2 bg-white" style={{ borderColor: '#C8A951' }} />
+                <span>Tersedia</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded bg-seat-sold" />
+                <span>Terjual</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded bg-success" />
+                <span>Sudah Check-In</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded bg-seat-locked" />
+                <span>Dikunci</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded bg-seat-invitation" />
+                <span>Undangan</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <div className="w-5 h-5 rounded bg-gray-200 opacity-30" />
+                <span>Tidak Tersedia</span>
+              </div>
+            </div>
+
+            {/* Price Category Legend */}
+            {priceCategories.length > 0 && (
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
+                {priceCategories.map((cat) => {
+                  const catConfig = CATEGORY_CONFIG[cat.name]
+                  const Icon = catConfig?.icon || User
+                  return (
+                    <div key={cat.id} className="flex items-center gap-1.5">
+                      <Icon className="w-4 h-4" style={{ color: cat.colorCode || catConfig?.defaultColor }} />
+                      <span className="text-muted-foreground">{cat.name}</span>
+                      <span className="font-medium text-charcoal">Rp {cat.price.toLocaleString('id-ID')}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Info hint when no seat selected */}
+      {!selectedSeat && !selectedSeatCode && (
+        <div className="text-center py-2">
+          <p className="text-xs text-muted-foreground/60">
+            <Users className="w-4 h-4 inline-block mr-1 -mt-0.5 opacity-40" />
+            Klik kursi yang <span className="font-semibold text-muted-foreground/80">terjual</span> atau <span className="font-semibold text-muted-foreground/80">undangan</span> untuk melihat detail penonton
+          </p>
         </div>
+      )}
 
-        {/* Seat Info Panel */}
-        <div className="lg:col-span-1">
-          {selectedSeat && selectedSeatCode ? (
-            <Card className="border-gold/30 animate-fade-in sticky top-4">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="font-serif text-base text-charcoal flex items-center gap-2">
-                    <Hash className="w-4 h-4 text-gold" />
-                    {selectedSeatCode}
-                  </CardTitle>
-                  <button
-                    onClick={() => { setSelectedSeat(null); setSelectedSeatCode(null); setResendResult(null) }}
-                    className="text-muted-foreground hover:text-charcoal text-xs"
-                  >
-                    Tutup
-                  </button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Owner Info */}
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Nama Pemesan</p>
-                    <p className="text-sm font-semibold text-charcoal">{selectedSeat.owner}</p>
-                  </div>
+      {/* Seat Info Sheet (Side Drawer) */}
+      <Sheet open={infoSheetOpen} onOpenChange={(open) => {
+        setInfoSheetOpen(open)
+        if (!open) {
+          setSelectedSeat(null)
+          setSelectedSeatCode(null)
+          setResendResult(null)
+        }
+      }}>
+        <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
+          <SheetHeader className="pb-3">
+            <SheetTitle className="font-serif text-base text-charcoal flex items-center gap-2">
+              <Hash className="w-4 h-4 text-gold" />
+              {selectedSeatCode}
+            </SheetTitle>
+            <SheetDescription className="text-xs text-muted-foreground">
+              Detail penonton kursi {selectedSeatCode}
+            </SheetDescription>
+          </SheetHeader>
 
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                      <Mail className="w-3 h-3" /> Email
-                    </p>
-                    <p className="text-sm text-charcoal break-all">{selectedSeat.email}</p>
-                  </div>
-
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                      <Phone className="w-3 h-3" /> WhatsApp
-                    </p>
-                    <p className="text-sm text-charcoal">{selectedSeat.phone}</p>
-                  </div>
+          {selectedSeat && (
+            <div className="space-y-4 px-4 pb-6">
+              {/* Owner Info */}
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Nama Pemesan</p>
+                  <p className="text-sm font-semibold text-charcoal">{selectedSeat.owner}</p>
                 </div>
 
-                <div className="zen-divider" />
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Mail className="w-3 h-3" /> Email
+                  </p>
+                  <p className="text-sm text-charcoal break-all">{selectedSeat.email}</p>
+                </div>
 
-                {/* Transaction Details */}
-                <div className="space-y-3">
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                      <Hash className="w-3 h-3" /> Transaction ID
-                    </p>
-                    <p className="text-xs font-mono text-charcoal bg-gray-50 px-2 py-1 rounded break-all">
-                      {selectedSeat.transactionId}
-                    </p>
-                  </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Phone className="w-3 h-3" /> WhatsApp
+                  </p>
+                  <p className="text-sm text-charcoal">{selectedSeat.phone}</p>
+                </div>
+              </div>
 
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                      <CreditCard className="w-3 h-3" /> Total Pembayaran
-                    </p>
-                    <p className="text-sm font-semibold text-charcoal">
-                      {selectedSeat.totalAmount === 0 ? (
-                        <Badge className="bg-seat-invitation/20 text-seat-invitation border-seat-invitation/30 text-xs">
-                          Tiket Komplimen
-                        </Badge>
-                      ) : (
-                        `Rp ${selectedSeat.totalAmount.toLocaleString('id-ID')}`
-                      )}
-                    </p>
-                  </div>
+              <div className="zen-divider" />
 
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Status Pembayaran</p>
-                    <Badge className="bg-success/10 text-success border-success/20 text-xs">
-                      {selectedSeat.paymentStatus}
-                    </Badge>
-                  </div>
+              {/* Transaction Details */}
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Hash className="w-3 h-3" /> Transaction ID
+                  </p>
+                  <p className="text-xs font-mono text-charcoal bg-gray-50 px-2 py-1 rounded break-all">
+                    {selectedSeat.transactionId}
+                  </p>
+                </div>
 
-                  <div className="space-y-1">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                      <Clock className="w-3 h-3" /> Status Check-In
-                    </p>
-                    {selectedSeat.checkInTime ? (
-                      <div className="space-y-1">
-                        <Badge className="bg-success/10 text-success border-success/20 text-xs">
-                          Sudah Check-In
-                        </Badge>
-                        <p className="text-[10px] text-muted-foreground">
-                          {new Date(selectedSeat.checkInTime).toLocaleString('id-ID', {
-                            day: 'numeric', month: 'short', year: 'numeric',
-                            hour: '2-digit', minute: '2-digit',
-                          })}
-                        </p>
-                      </div>
-                    ) : (
-                      <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
-                        Belum Check-In
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <CreditCard className="w-3 h-3" /> Total Pembayaran
+                  </p>
+                  <p className="text-sm font-semibold text-charcoal">
+                    {selectedSeat.totalAmount === 0 ? (
+                      <Badge className="bg-seat-invitation/20 text-seat-invitation border-seat-invitation/30 text-xs">
+                        Tiket Komplimen
                       </Badge>
+                    ) : (
+                      `Rp ${selectedSeat.totalAmount.toLocaleString('id-ID')}`
                     )}
-                  </div>
+                  </p>
+                </div>
 
-                  {selectedSeat.paidAt && (
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Status Pembayaran</p>
+                  <Badge className="bg-success/10 text-success border-success/20 text-xs">
+                    {selectedSeat.paymentStatus}
+                  </Badge>
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> Status Check-In
+                  </p>
+                  {selectedSeat.checkInTime ? (
                     <div className="space-y-1">
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Waktu Bayar</p>
-                      <p className="text-xs text-muted-foreground">
-                        {new Date(selectedSeat.paidAt).toLocaleString('id-ID', {
+                      <Badge className="bg-success/10 text-success border-success/20 text-xs">
+                        Sudah Check-In
+                      </Badge>
+                      <p className="text-[10px] text-muted-foreground">
+                        {new Date(selectedSeat.checkInTime).toLocaleString('id-ID', {
                           day: 'numeric', month: 'short', year: 'numeric',
                           hour: '2-digit', minute: '2-digit',
                         })}
                       </p>
                     </div>
+                  ) : (
+                    <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                      Belum Check-In
+                    </Badge>
                   )}
                 </div>
 
-                {/* Resend Email */}
-                <div className="pt-2 space-y-3">
-                  <Button
-                    onClick={handleResendEmail}
-                    disabled={isResending}
-                    className="w-full bg-gold hover:bg-gold-dark text-charcoal text-sm"
-                    size="sm"
-                  >
-                    {isResending ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengirim...</>
-                    ) : (
-                      <><Send className="w-4 h-4 mr-2" />Kirim Ulang E-Tiket</>
-                    )}
-                  </Button>
-                  {resendResult && (
-                    <p className={cn(
-                      'text-xs text-center py-1.5 px-3 rounded-md',
-                      resendResult.success
-                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                        : 'bg-red-50 text-red-700 border border-red-200'
-                    )}>
-                      {resendResult.message}
+                {selectedSeat.paidAt && (
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Waktu Bayar</p>
+                    <p className="text-xs text-muted-foreground">
+                      {new Date(selectedSeat.paidAt).toLocaleString('id-ID', {
+                        day: 'numeric', month: 'short', year: 'numeric',
+                        hour: '2-digit', minute: '2-digit',
+                      })}
                     </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Resend Email */}
+              <div className="pt-2 space-y-3">
+                <Button
+                  onClick={handleResendEmail}
+                  disabled={isResending}
+                  className="w-full bg-gold hover:bg-gold-dark text-charcoal text-sm"
+                  size="sm"
+                >
+                  {isResending ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengirim...</>
+                  ) : (
+                    <><Send className="w-4 h-4 mr-2" />Kirim Ulang E-Tiket</>
                   )}
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="border-border/30">
-              <CardContent className="p-6 text-center">
-                <div className="space-y-3">
-                  <div className="w-12 h-12 rounded-xl bg-charcoal/5 flex items-center justify-center mx-auto">
-                    <Users className="w-6 h-6 text-muted-foreground/40" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-muted-foreground">Detail Penonton</p>
-                    <p className="text-xs text-muted-foreground/60 mt-1">
-                      Klik kursi yang <span className="font-semibold">terjual</span> atau <span className="font-semibold">undangan</span> untuk melihat informasi
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </Button>
+                {resendResult && (
+                  <p className={cn(
+                    'text-xs text-center py-1.5 px-3 rounded-md',
+                    resendResult.success
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-red-50 text-red-700 border border-red-200'
+                  )}>
+                    {resendResult.message}
+                  </p>
+                )}
+              </div>
+            </div>
           )}
-        </div>
-      </div>
+        </SheetContent>
+      </Sheet>
     </div>
   )
 }
