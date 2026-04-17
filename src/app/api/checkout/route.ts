@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const {
       eventId, showDateId, customerName, customerEmail, customerWa, seatCodes, sessionId,
-      promoCodeId, merchandise,
+      promoCodeId, merchandise, paymentMethod,
     } = body
 
     if (!eventId || !customerName || !customerEmail || !customerWa || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0) {
@@ -48,7 +48,8 @@ export async function POST(request: NextRequest) {
     })
 
     // Get event for admin fee
-    const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true } })
+    const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true, adminFeeQris: true, adminFeeNonQris: true } })
+    const resolvedPaymentMethod = paymentMethod || 'NON_QRIS'
 
     // Calculate seat prices
     const priceCats = await db.priceCategory.findMany({ where: { eventId } })
@@ -63,8 +64,15 @@ export async function POST(request: NextRequest) {
       items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket' })
     }
 
-    // Admin fee
-    const adminFeePerTicket = event?.adminFee || 0
+    // Admin fee — dynamic based on payment method
+    let adminFeePerTicket: number
+    if (event?.adminFeeQris && event?.adminFeeNonQris) {
+      adminFeePerTicket = resolvedPaymentMethod === 'QRIS' ? event.adminFeeQris : event.adminFeeNonQris
+    } else if (event?.adminFee) {
+      adminFeePerTicket = event.adminFee
+    } else {
+      adminFeePerTicket = resolvedPaymentMethod === 'QRIS' ? 2000 : 3500
+    }
     const adminFeeTotal = adminFeePerTicket * seatCodes.length
 
     // Add admin fee as item if > 0
@@ -271,6 +279,13 @@ export async function POST(request: NextRequest) {
       transaction_details: { order_id: tid, gross_amount: totalAmount },
       customer_details: { first_name: customerName, email: customerEmail, phone: customerWa },
       callbacks: { finish: appUrl + '/verify/' + tid },
+    }
+
+    // Restrict payment methods based on user selection
+    if (resolvedPaymentMethod === 'QRIS') {
+      snapPayload.enabled_payments = ['qris']
+    } else {
+      snapPayload.enabled_payments = ['bca_va', 'bni_va', 'bri_va', 'permata_va', 'bank_transfer', 'gopay', 'shopeepay', 'indomaret', 'alfamart']
     }
 
     // Only include item_details when there's no discount (items sum matches gross_amount)

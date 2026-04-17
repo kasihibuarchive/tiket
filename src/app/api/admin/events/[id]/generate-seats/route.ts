@@ -39,9 +39,22 @@ function generateSeatsFromLayout(
       return (a.c ?? a.col ?? 0) - (b.c ?? b.col ?? 0)
     })
 
+    // Deduplicate by (row, col) — if two seats share the same r,c,
+    // keep only the first occurrence to prevent duplicate seatCodes.
+    const deduped: any[] = []
+    const seenRC = new Set<string>()
+    for (const seat of sorted) {
+      const r = seat.r ?? seat.row ?? 0
+      const c = seat.c ?? seat.col ?? 0
+      const key = `${r},${c}`
+      if (seenRC.has(key)) continue
+      seenRC.add(key)
+      deduped.push(seat)
+    }
+
     // Group by row and compute column numbers (skip aisles)
     const rowGroups: Record<number, any[]> = {}
-    for (const seat of sorted) {
+    for (const seat of deduped) {
       const rowIdx = seat.r ?? seat.row ?? 0
       if (!rowGroups[rowIdx]) rowGroups[rowIdx] = []
       rowGroups[rowIdx].push(seat)
@@ -161,6 +174,14 @@ export async function POST(
       )
     }
 
+    // Final dedup: ensure no duplicate seatCodes (safety net)
+    const seenCodes = new Set<string>()
+    const uniqueSeatData = seatData.filter(s => {
+      if (seenCodes.has(s.seatCode)) return false
+      seenCodes.add(s.seatCode)
+      return true
+    })
+
     // ─── Multi-day: duplicate seats per show date ─────────────────────
     // If event has multiple show dates, create separate seat inventories per date.
     // If event has only 1 show date (or none), create seats without showDateId (backward compat).
@@ -170,7 +191,7 @@ export async function POST(
       // Multi-day event: create seats for EACH show date
       for (const sd of showDates) {
         const result = await db.seat.createMany({
-          data: seatData.map((s) => ({
+          data: uniqueSeatData.map((s) => ({
             eventId: id,
             eventShowDateId: sd.id,
             seatCode: s.seatCode,
@@ -186,15 +207,15 @@ export async function POST(
     } else {
       // Single-day event: create seats without showDateId
       const result = await db.seat.createMany({
-        data: seatData.map((s) => ({
+        data: uniqueSeatData.map((s) => ({
           eventId: id,
           eventShowDateId: showDates.length === 1 ? showDates[0].id : null,
           seatCode: s.seatCode,
           status: s.status,
           row: s.row,
-          col: s.col,
-          priceCategoryId: s.priceCategoryId,
-          zoneName: s.zoneName,
+            col: s.col,
+            priceCategoryId: s.priceCategoryId,
+            zoneName: s.zoneName,
         })),
       })
       totalCreated = result.count
@@ -207,13 +228,13 @@ export async function POST(
     })
 
     const perDayLabel = showDates.length > 1
-      ? ` (${showDates.length} hari × ${seatData.length} kursi/hari)`
+      ? ` (${showDates.length} hari × ${uniqueSeatData.length} kursi/hari)`
       : ''
 
     return NextResponse.json({
       message: `${totalCreated} kursi berhasil di-generate dari Seat Map "${seatMap.name}"${perDayLabel}`,
       totalSeats: totalCreated,
-      seatsPerDay: seatData.length,
+      seatsPerDay: uniqueSeatData.length,
       showDatesCount: showDates.length,
       seatMapName: seatMap.name,
       seatMapType: seatMap.seatType,

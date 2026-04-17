@@ -19,6 +19,8 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatShortDate, formatEventDateTime } from '@/lib/date'
+import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,6 +87,8 @@ export default function ComplimentaryTicketsPage() {
   const [isLoadingSeats, setIsLoadingSeats] = useState(false)
   const [selectedSeats, setSelectedSeats] = useState<string[]>([])
   const [seatMapInfo, setSeatMapInfo] = useState<SeatMapInfo | null>(null)
+  const [layoutData, setLayoutData] = useState<any>(null)
+  const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
 
   // Form
   const [selectedEventId, setSelectedEventId] = useState<string>('')
@@ -118,6 +122,18 @@ export default function ComplimentaryTicketsPage() {
 
   const isNumberedSeatMap = seatMapInfo?.seatType === 'NUMBERED'
   const isGeneralAdmission = !isNumberedSeatMap || !seatMapInfo
+
+  // Seat lookup for canvas mode
+  const seatLookup = useMemo(() => {
+    const map = new Map<string, SeatData>()
+    for (const seat of seats) {
+      map.set(seat.seatCode, seat)
+    }
+    return map
+  }, [seats])
+
+  // Check if canvas mode is available
+  const useCanvasMode = !!(parsedLayout?.canvasSeats && parsedLayout.canvasSeats.length > 0)
 
   // Group seats by row for the mini map
   const seatsByRow = useMemo(() => {
@@ -199,6 +215,7 @@ export default function ComplimentaryTicketsPage() {
     setIsLoadingSeats(true)
     setSelectedSeats([])
     setSeatMapInfo(null)
+    setLayoutData(null)
     setGaQuantity(1)
     setGaZone('')
 
@@ -224,6 +241,7 @@ export default function ComplimentaryTicketsPage() {
             const map = (mapsData.seatMaps || []).find((m: any) => m.id === eventData.seatMapId)
             if (map) {
               setSeatMapInfo({ id: map.id, name: map.name, seatType: map.seatType })
+              setLayoutData(map.layoutData || null)
             }
           }
         }
@@ -659,45 +677,93 @@ export default function ComplimentaryTicketsPage() {
 
                 {/* Mini Seat Map */}
                 <div className="bg-muted/20 rounded-xl p-4 overflow-x-auto">
-                  <div className="text-center mb-3">
-                    <div className="bg-charcoal text-white text-[10px] uppercase tracking-widest px-6 py-1.5 rounded-full inline-block">
-                      Panggung
-                    </div>
-                  </div>
-
-                  <div className="mx-auto w-full flex flex-col items-center">
-                    {sortedRowKeys.map((row) => (
-                      <div key={row} className="flex items-center gap-2 mb-1.5">
-                        <span className="w-6 text-xs font-mono font-semibold text-charcoal/60 text-right">
-                          {row}
-                        </span>
-                        <div className="flex gap-1 flex-1">
-                          {seatsByRow[row].map((seat) => (
+                  {useCanvasMode && parsedLayout ? (
+                    /* ─── Canvas Mode: preserve empty space like guest view ─── */
+                    <div className="flex justify-center">
+                      <CanvasSeatLayout
+                        parsedLayout={parsedLayout}
+                        seatLookup={seatLookup as Map<string, any>}
+                        renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+                          const isAvailable = seatData.status === 'AVAILABLE'
+                          const isSelected = selectedSeats.includes(canvasSeat.seatCode)
+                          return (
                             <button
-                              key={seat.id}
-                              onClick={() =>
-                                seat.status === 'AVAILABLE'
-                                  ? toggleSeat(seat.seatCode)
-                                  : undefined
-                              }
-                              disabled={seat.status !== 'AVAILABLE'}
-                              className={`
-                                w-8 h-8 rounded text-[10px] font-mono font-medium
-                                flex items-center justify-center transition-all
-                                ${getSeatColorClass(seat)}
-                              `}
-                              title={`${seat.seatCode} - ${seat.status}${seat.priceCategory ? ` (${seat.priceCategory.name})` : ''}`}
+                              key={key}
+                              onClick={() => isAvailable ? toggleSeat(canvasSeat.seatCode) : undefined}
+                              disabled={!isAvailable}
+                              className={cn(
+                                'absolute rounded text-[10px] font-medium flex items-center justify-center transition-all',
+                                isSelected
+                                  ? 'bg-gold text-white shadow-sm ring-2 ring-gold/50 cursor-pointer'
+                                  : isAvailable
+                                    ? 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                              )}
+                              style={{
+                                left: scaledX,
+                                top: scaledY,
+                                width: size,
+                                height: size,
+                              }}
+                              title={`${canvasSeat.seatCode} - ${seatData.status}`}
                             >
-                              {seat.col}
+                              {canvasSeat.seatNum}
                             </button>
-                          ))}
-                        </div>
-                        <span className="w-6 text-xs font-mono font-semibold text-charcoal/60">
-                          {row}
-                        </span>
+                          )
+                        }}
+                        renderEmpty={(x, y, size, key) => (
+                          <div
+                            key={key}
+                            className="absolute"
+                            style={{ left: x, top: y, width: size, height: size }}
+                          />
+                        )}
+                      />
+                    </div>
+                  ) : (
+                    /* ─── Fallback: Simple row-based mini map ─────────────── */
+                    <>
+                    <div className="text-center mb-3">
+                      <div className="bg-charcoal text-white text-[10px] uppercase tracking-widest px-6 py-1.5 rounded-full inline-block">
+                        Panggung
                       </div>
-                    ))}
-                  </div>
+                    </div>
+
+                    <div className="mx-auto w-full flex flex-col items-center">
+                      {sortedRowKeys.map((row) => (
+                        <div key={row} className="flex items-center gap-2 mb-1.5">
+                          <span className="w-6 text-xs font-mono font-semibold text-charcoal/60 text-right">
+                            {row}
+                          </span>
+                          <div className="flex gap-1 flex-1">
+                            {seatsByRow[row].map((seat) => (
+                              <button
+                                key={seat.id}
+                                onClick={() =>
+                                  seat.status === 'AVAILABLE'
+                                    ? toggleSeat(seat.seatCode)
+                                    : undefined
+                                }
+                                disabled={seat.status !== 'AVAILABLE'}
+                                className={`
+                                  w-8 h-8 rounded text-[10px] font-mono font-medium
+                                  flex items-center justify-center transition-all
+                                  ${getSeatColorClass(seat)}
+                                `}
+                                title={`${seat.seatCode} - ${seat.status}${seat.priceCategory ? ` (${seat.priceCategory.name})` : ''}`}
+                              >
+                                {seat.col}
+                              </button>
+                            ))}
+                          </div>
+                          <span className="w-6 text-xs font-mono font-semibold text-charcoal/60">
+                            {row}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    </>
+                  )}
 
                   {/* Legend */}
                   <div className="flex items-center justify-center gap-4 mt-4 text-[10px] text-muted-foreground">

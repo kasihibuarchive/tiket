@@ -61,6 +61,8 @@ export async function PUT(
       synopsis,
       isPublished,
       adminFee,
+      adminFeeQris,
+      adminFeeNonQris,
       priceCategories,
       showDates,
       teaserVideoUrl,
@@ -98,6 +100,8 @@ export async function PUT(
         synopsis: synopsis ?? event.synopsis,
         isPublished: isPublished !== undefined ? isPublished : event.isPublished,
         adminFee: adminFee !== undefined ? adminFee : event.adminFee,
+        adminFeeQris: adminFeeQris !== undefined ? adminFeeQris : event.adminFeeQris,
+        adminFeeNonQris: adminFeeNonQris !== undefined ? adminFeeNonQris : event.adminFeeNonQris,
       },
     })
 

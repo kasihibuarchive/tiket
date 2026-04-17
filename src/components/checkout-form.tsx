@@ -11,7 +11,8 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog'
-import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Ticket, Percent, X, Minus, Plus, Tag } from 'lucide-react'
+import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Ticket, Percent, X, Minus, Plus, Tag, Smartphone, Banknote } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { savePendingTrx } from '@/lib/pending-trx'
 import { getSessionId } from '@/lib/session-id'
 
@@ -115,8 +116,13 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     fetchMerch()
   }, [eventId])
 
+  // Payment method state
+  const [paymentMethod, setPaymentMethod] = useState<'QRIS' | 'NON_QRIS'>('NON_QRIS')
+
   // Fetch admin fee from event if not provided
   const [eventAdminFee, setEventAdminFee] = useState(adminFee)
+  const [qrisFee, setQrisFee] = useState(2000)
+  const [nonQrisFee, setNonQrisFee] = useState(3500)
   useEffect(() => {
     if (adminFee > 0) return
     async function fetchEvent() {
@@ -125,6 +131,8 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
         if (res.ok) {
           const data = await res.json()
           setEventAdminFee(data.adminFee || 0)
+          if (data.adminFeeQris) setQrisFee(data.adminFeeQris)
+          if (data.adminFeeNonQris) setNonQrisFee(data.adminFeeNonQris)
         }
       } catch {}
     }
@@ -133,7 +141,10 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
 
   // === ALL CALCULATIONS (must use resolved admin fee) ===
   const seatTotal = totalPrice
-  const resolvedAdminFee = adminFee > 0 ? adminFee : eventAdminFee
+  const useDynamicFee = qrisFee > 0 || nonQrisFee > 0
+  const resolvedAdminFee = useDynamicFee
+    ? (paymentMethod === 'QRIS' ? qrisFee : nonQrisFee)
+    : (adminFee > 0 ? adminFee : eventAdminFee)
   const effectiveAdminFee = resolvedAdminFee * seatCodes.length
   const merchSubtotal = merchandise.reduce((sum, m) => sum + m.price * m.quantity, 0)
   const totalBeforeDiscount = seatTotal + effectiveAdminFee + merchSubtotal
@@ -332,6 +343,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
           sessionId,
           promoCodeId: appliedPromo?.id || null,
           merchandise: selectedMerch.length > 0 ? selectedMerch : undefined,
+          paymentMethod,
         }),
       })
 
@@ -387,7 +399,9 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
               {/* Admin Fee */}
               {effectiveAdminFee > 0 && (
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Biaya Admin ({seatCodes.length} tiket)</span>
+                  <span className="text-muted-foreground">
+                    Biaya Admin ({seatCodes.length} tiket · {paymentMethod === 'QRIS' ? 'QRIS' : 'Transfer'})
+                  </span>
                   <span className="text-charcoal">Rp {effectiveAdminFee.toLocaleString('id-ID')}</span>
                 </div>
               )}
@@ -482,6 +496,57 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                 </div>
               </div>
             )}
+
+            {/* Payment Method Selector */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-charcoal flex items-center gap-1.5">
+                <CreditCard className="w-3.5 h-3.5" />
+                Metode Pembayaran
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('QRIS')}
+                  className={cn(
+                    'p-3 rounded-lg border-2 text-left transition-all',
+                    paymentMethod === 'QRIS'
+                      ? 'border-gold bg-gold/5'
+                      : 'border-border hover:border-gold/30'
+                  )}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Smartphone className="w-4 h-4 text-gold" />
+                    <p className="text-sm font-semibold text-charcoal">QRIS</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {useDynamicFee ? `Biaya admin Rp ${qrisFee.toLocaleString('id-ID')}/tiket` : 'Scan QR Code'}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('NON_QRIS')}
+                  className={cn(
+                    'p-3 rounded-lg border-2 text-left transition-all',
+                    paymentMethod === 'NON_QRIS'
+                      ? 'border-gold bg-gold/5'
+                      : 'border-border hover:border-gold/30'
+                  )}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Banknote className="w-4 h-4 text-gold" />
+                    <p className="text-sm font-semibold text-charcoal">Transfer Bank</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {useDynamicFee ? `Biaya admin Rp ${nonQrisFee.toLocaleString('id-ID')}/tiket` : 'VA / E-Wallet'}
+                  </p>
+                </button>
+              </div>
+              {useDynamicFee && (
+                <p className="text-[10px] text-muted-foreground/60">
+                  💡 QRIS lebih hemat! Hemat Rp {(nonQrisFee - qrisFee).toLocaleString('id-ID')}/tiket
+                </p>
+              )}
+            </div>
 
             {/* Promo Code */}
             <div className="space-y-2">

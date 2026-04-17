@@ -499,7 +499,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // RENDER: LayoutData Mode — Flat Grid (1:1 match with editor)
   // ═══════════════════════════════════════════════════════════
   if (parsedLayout) {
-    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections } = parsedLayout
+    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections, canvasSeats, fullCanvasBounds } = parsedLayout
     const { cols } = gridSize
     const aisleColumns: number[] = (parsedLayout as any).aisleColumns || []
 
@@ -550,6 +550,9 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const stagePosition = parsedLayout?.stagePosition
     const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
+    // Check if we should use canvas-based rendering (when canvasSeats are available)
+    const useCanvasMode = !!canvasSeats && canvasSeats.length > 0
+
     // ── Canvas → Guest View coordinate mapping ──────────────────────────
     // Map canvas pixel positions (stage, objects) to the guest view grid.
     // We use canvasSeatBounds (bounding box of seats in canvas pixels)
@@ -593,6 +596,255 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       stageGuest = { ...stageGuest, y: stageGuest.y + paddingTop }
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    // RENDER: Canvas-Based Mode (free-form absolute positioning)
+    // ══════════════════════════════════════════════════════════════════════
+    if (useCanvasMode) {
+      const cSeats = canvasSeats!
+      const bounds = fullCanvasBounds
+
+      // Calculate scale to fit container
+      const CONTAINER_MAX_W = 600
+      const rawCanvasW = bounds ? bounds.width + bounds.x : (parsedLayout.canvasWidth || 400)
+      const rawCanvasH = bounds ? bounds.height + bounds.y : (parsedLayout.canvasHeight || 400)
+      const scale = Math.min(CONTAINER_MAX_W / rawCanvasW, 1.2)
+
+      const PAINTED_SEAT = 28
+      const renderedW = rawCanvasW * scale
+      const renderedH = rawCanvasH * scale
+      const seatSize = PAINTED_SEAT * scale
+
+      const cStagePos = parsedLayout.stagePosition
+      const hasStage = cStagePos && typeof cStagePos.x === 'number'
+
+      // Group seats by rowLabel for row labels (NOT raw Y — prevents duplicate
+      // labels when seats in the same logical row have slightly different Y values)
+      const labelGroups = new Map<string, typeof cSeats[0][]>()
+      for (const s of cSeats) {
+        if (!labelGroups.has(s.rowLabel)) labelGroups.set(s.rowLabel, [])
+        labelGroups.get(s.rowLabel)!.push(s)
+      }
+      // Sort labels by their first seat's Y position (top to bottom)
+      const sortedLabels = [...labelGroups.entries()].sort((a, b) => {
+        const aMinY = Math.min(...a[1].map(s => s.y))
+        const bMinY = Math.min(...b[1].map(s => s.y))
+        return aMinY - bMinY
+      })
+
+      // Canvas seat renderer
+      const renderCanvasSeatButton = (seatData: SeatData | undefined, canvasSeat: typeof cSeats[0], x: number, y: number, size: number, key: number) => {
+        if (!seatData) {
+          return (
+            <div
+              key={key}
+              className="absolute"
+              style={{ left: x, top: y, width: size, height: size }}
+            />
+          )
+        }
+
+        const isClickable = seatData.status === 'AVAILABLE' || selectedSeatCodes.has(seatData.seatCode)
+        const isSold = seatData.status === 'SOLD'
+        const isLocked = seatData.status === 'LOCKED_TEMPORARY' && !selectedSeatCodes.has(seatData.seatCode)
+        const isUnavailable = seatData.status === 'UNAVAILABLE'
+
+        return (
+          <button
+            key={key}
+            onClick={() => isClickable && handleSeatClick(seatData)}
+            disabled={!isClickable}
+            className={cn(
+              'absolute rounded-md flex items-center justify-center text-[9px] font-medium transition-all duration-200',
+              getSeatColor(seatData),
+              isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
+              !isClickable && 'cursor-not-allowed',
+              isUnavailable && 'opacity-20',
+              isSold && 'text-white',
+              isLocked && 'text-white',
+              selectedSeatCodes.has(seatData.seatCode) && 'text-charcoal font-bold'
+            )}
+            style={{
+              left: x,
+              top: y,
+              width: size,
+              height: size,
+              ...(seatData.status === 'AVAILABLE' && !selectedSeatCodes.has(seatData.seatCode)
+                ? { borderColor: getSeatBorderColor(seatData) }
+                : {}),
+            }}
+            title={
+              isSold
+                ? `${canvasSeat.seatCode} - Sold`
+                : isLocked
+                ? `${canvasSeat.seatCode} - Locked`
+                : selectedSeatCodes.has(seatData.seatCode)
+                ? `${canvasSeat.seatCode} - Selected (click to deselect)`
+                : `${canvasSeat.seatCode} - ${seatData.priceCategory?.name || 'Uncategorized'} - Rp ${(seatData.priceCategory?.price || 0).toLocaleString('id-ID')}`
+            }
+          >
+            {isSold && <Check className="w-3 h-3" />}
+            {isLocked && <Lock className="w-3 h-3" />}
+            {isUnavailable && <X className="w-3 h-3" />}
+            {!isSold && !isLocked && !isUnavailable && (
+              <span>{canvasSeat.seatNum}</span>
+            )}
+          </button>
+        )
+      }
+
+      return (
+        <div className="w-full">
+          {/* Lock rejection notice */}
+          {lockRejectionMsg && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              {lockRejectionMsg}
+            </div>
+          )}
+
+          <div className="overflow-x-auto pb-4">
+            <div className="min-w-[320px] px-2 flex justify-center">
+              <div
+                className="relative"
+                style={{
+                  width: renderedW + 40,
+                  height: renderedH + 10,
+                }}
+              >
+                {/* Row labels on the left — grouped by rowLabel, positioned at min Y of group */}
+                {sortedLabels.map(([label, seats], rowIdx) => {
+                  const rowColor = getRowColorFromSections(rowIdx)
+                  const labelY = Math.min(...seats.map(s => s.y))
+                  const scaledY = labelY * scale
+
+                  return (
+                    <div
+                      key={label}
+                      className="absolute text-center text-xs font-semibold font-serif"
+                      style={{
+                        left: 0,
+                        top: scaledY,
+                        width: 28,
+                        height: seatSize,
+                        lineHeight: `${seatSize}px`,
+                        color: rowColor,
+                      }}
+                    >
+                      {label}
+                    </div>
+                  )
+                })}
+
+                {/* Seat grid area (offset by label width) */}
+                <div className="absolute" style={{ left: 32, top: 0 }}>
+                  {/* Stage layer (z-index 10, above seats) */}
+                  {hasStage && (
+                    <div
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: cStagePos.x * scale,
+                        top: cStagePos.y * scale,
+                        width: cStagePos.width * scale,
+                        height: cStagePos.height * scale,
+                        zIndex: 10,
+                      }}
+                    >
+                      <StageRenderer
+                        stageType={parsedLayout.stageType || 'PROSCENIUM'}
+                        size="lg"
+                        thrustWidth={parsedLayout.thrustWidth}
+                        thrustDepth={parsedLayout.thrustDepth}
+                        fillParent
+                      />
+                    </div>
+                  )}
+
+                  {/* Objects layer (z-index 5) */}
+                  {parsedLayout.objects?.map((obj) => {
+                    if (typeof obj.x !== 'number' || typeof obj.y !== 'number') return null
+                    return (
+                      <div
+                        key={obj.id}
+                        className="absolute pointer-events-none rounded"
+                        style={{
+                          left: obj.x * scale,
+                          top: obj.y * scale,
+                          width: (obj.pixelW || 60) * scale,
+                          height: (obj.pixelH || 30) * scale,
+                          backgroundColor: obj.color || '#6B7280',
+                          opacity: 0.6,
+                          zIndex: 5,
+                        }}
+                      >
+                        {obj.label && (
+                          <span className="text-[8px] text-white px-1">{obj.label}</span>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {/* Seats layer (z-index 1) */}
+                  {cSeats.map((seat, idx) => {
+                    const seatData = seatLookup.get(seat.seatCode)
+                    const scaledX = seat.x * scale
+                    const scaledY = seat.y * scale
+                    return renderCanvasSeatButton(seatData, seat, scaledX, scaledY, seatSize, idx)
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Selection Summary */}
+          {selectedSeatCodes.size > 0 && (
+            <div className="mt-6 p-4 bg-white rounded-xl border border-gold/20 shadow-sm animate-fade-in">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-charcoal">
+                    {selectedSeatCodes.size} kursi dipilih
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {selectedSeats.map((s) => s.seatCode).join(', ')}
+                  </p>
+                  <p className="font-serif text-lg font-semibold text-gold mt-1">
+                    Rp {totalPrice.toLocaleString('id-ID')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  {lockCountdown && (
+                    <div className={cn(
+                      'px-3 py-1 rounded-full text-xs font-mono font-semibold',
+                      lockCountdown < 120 ? 'bg-red-50 text-danger' : 'bg-gold/10 text-gold-dark'
+                    )}>
+                      ⏱ {formatTime(lockCountdown)}
+                    </div>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={handleClearSelection} className="text-xs text-muted-foreground">
+                    Batal
+                  </Button>
+                  <Button
+                    onClick={() => onProceedToCheckout?.(selectedSeats)}
+                    disabled={hasPendingLock}
+                    className="bg-charcoal hover:bg-charcoal/90 text-gold font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    title={hasPendingLock ? 'Menunggu konfirmasi kursi...' : undefined}
+                  >
+                    {hasPendingLock ? (
+                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengunci...</>
+                    ) : (
+                      'Lanjut Bayar'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )
+    } // end canvas mode
+
+    // ══════════════════════════════════════════════════════════════════════
+    // RENDER: Grid Mode (fallback for legacy data without seatColumns)
+    // ══════════════════════════════════════════════════════════════════════
     return (
       <div className="w-full">
         {/* Lock rejection notice */}
@@ -603,13 +855,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           </div>
         )}
 
-        {/* Seat Grid — Flat grid, 1:1 with editor. Stage inside so it scrolls on mobile. */}
         <div className="overflow-x-auto pb-4">
           <div className="min-w-[320px] px-2">
             <div className="relative mx-auto w-fit flex flex-col items-center" style={{ minWidth: gridW, paddingTop }}>
               {/* Stage — INSIDE scroll container */}
               {hasCustomStagePosition && stageGuest ? (
-                /* Custom position from admin editor — mapped from canvas coords */
                 <div
                   className="absolute pointer-events-none"
                   style={{
@@ -629,7 +879,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                   />
                 </div>
               ) : !isInsetStage ? (
-                /* Default inline rendering for PROSCENIUM, AMPHITHEATER, THRUST */
                 <StageRenderer
                   stageType={stageType}
                   size={stageSize}
@@ -644,7 +893,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
 
                 return (
                   <React.Fragment key={ri}>
-                    {/* Inset stage (BLACK_BOX / ARENA) in middle of rows — only if no custom position */}
                     {isInsetStage && !hasCustomStagePosition && idx === middleRowIndex && (
                       <div className="flex justify-center my-2">
                         <StageRenderer
@@ -659,7 +907,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                     className="flex items-center mb-[3px]"
                     style={{ height: SEAT_W }}
                   >
-                    {/* Left row label */}
                     <div
                       className="w-6 text-center text-xs font-semibold font-serif shrink-0"
                       style={{ color: rowColor }}
@@ -667,10 +914,9 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                       {label}
                     </div>
 
-                    {/* Grid cells — iterate ALL columns */}
                     <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
-                      {Array.from({ length: cols }, (_, c) => {
-                        // Aisle column → thin divider
+                      {Array.from({ length: cols }, (_, ci) => {
+                        const c = ci
                         if (aisleColumns.includes(c)) {
                           return (
                             <div
@@ -687,14 +933,12 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                           return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum, `${ri}-${c}`)
                         }
 
-                        // Empty cell — invisible spacer
                         return (
                           <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
                         )
                       })}
                     </div>
 
-                    {/* Right row label */}
                     <div
                       className="w-6 text-center text-xs font-semibold font-serif shrink-0"
                       style={{ color: rowColor }}
@@ -705,7 +949,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                   </React.Fragment>
                 )
               })}
-              {/* Objects overlay — inside grid so it scrolls with columns */}
               {parsedLayout?.objects && parsedLayout.objects.length > 0 && (
                 <ObjectsOverlay
                   objects={parsedLayout.objects}

@@ -53,6 +53,21 @@ export interface ParsedLayout {
   canvasHeight?: number
   /** Bounding box of seats in canvas pixel space (for coordinate mapping) */
   canvasSeatBounds?: CanvasSeatBounds
+  /** Individual seats with canvas pixel positions (for canvas-based rendering) */
+  canvasSeats?: Array<{
+    x: number
+    y: number
+    seatCode: string
+    seatNum: number
+    rowLabel: string
+  }>
+  /** Full canvas bounds encompassing seats + stage + objects */
+  fullCanvasBounds?: {
+    x: number
+    y: number
+    width: number
+    height: number
+  }
 }
 
 /**
@@ -264,5 +279,123 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
     }
   }
 
-  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType, stagePosition, thrustWidth, thrustDepth, canvasWidth, canvasHeight, canvasSeatBounds }
+  // Build canvasSeats: map each seat's grid (r,c) to canvas (x,y) and seatCode
+  let canvasSeats: Array<{ x: number; y: number; seatCode: string; seatNum: number; rowLabel: string }> | undefined
+  if (Array.isArray(data.seatColumns) && data.seatColumns.length > 0) {
+    // Collect all canvas seats with their column info
+    type CanvasSeatRaw = { x: number; y: number; colLabel: string; colIdx: number }
+    const rawCanvasSeats: CanvasSeatRaw[] = []
+    for (const col of data.seatColumns) {
+      if (!Array.isArray(col.seats)) continue
+      const colIdx = data.seatColumns.indexOf(col)
+      for (const s of col.seats) {
+        rawCanvasSeats.push({
+          x: typeof s.x === 'number' ? s.x : 0,
+          y: typeof s.y === 'number' ? s.y : 0,
+          colLabel: typeof col.label === 'string' ? col.label : '',
+          colIdx,
+        })
+      }
+    }
+
+    // Deduplicate canvas seats by pixel (x, y) — keep first occurrence.
+    // Painting the same cell twice in the editor can create duplicates that
+    // cause visual overlapping seats with the same number.
+    const seenPixels = new Set<string>()
+    const allCanvasSeats: CanvasSeatRaw[] = []
+    for (const s of rawCanvasSeats) {
+      const key = `${s.x},${s.y}`
+      if (seenPixels.has(key)) continue
+      seenPixels.add(key)
+      allCanvasSeats.push(s)
+    }
+
+    // Group by snapped Y to create rows (MUST match deriveGridSeats behavior).
+    // deriveGridSeats uses Math.round(y / SNAP) for row grouping, so we must do
+    // the same here. Using raw Y values would split a single logical row into
+    // multiple rows when seats have slightly different Y positions (e.g., y=63
+    // vs y=64), causing duplicate seat numbers in the rendered layout.
+    const yGroups = new Map<number, CanvasSeatRaw[]>()
+    for (const s of allCanvasSeats) {
+      const yKey = Math.round(s.y / SNAP)
+      if (!yGroups.has(yKey)) yGroups.set(yKey, [])
+      yGroups.get(yKey)!.push(s)
+    }
+
+    // Sort groups by snapped Y (top to bottom) and assign sequential row indices
+    const sortedYKeys = [...yGroups.keys()].sort((a, b) => a - b)
+    const rowSeats = new Map<number, CanvasSeatRaw[]>()
+    for (let i = 0; i < sortedYKeys.length; i++) {
+      const yKey = sortedYKeys[i]
+      const group = yGroups.get(yKey)!
+      group.sort((a, b) => a.x - b.x)
+      // Deduplicate by X within each snapped-Y row (keep first occurrence).
+      // Also snap X to SNAP for dedup matching deriveGridSeats column logic.
+      const deduped: CanvasSeatRaw[] = []
+      const usedXSnapped = new Set<number>()
+      for (const s of group) {
+        const xSnapped = Math.round(s.x / SNAP)
+        if (usedXSnapped.has(xSnapped)) continue
+        usedXSnapped.add(xSnapped)
+        deduped.push(s)
+      }
+      rowSeats.set(i, deduped)
+    }
+
+    // Build canvasSeats — assign seatNum sequentially within each snapped-Y row.
+    // IMPORTANT: Do NOT use rowSeatMap to look up seatNum because rowSeatMap is
+    // derived from deriveGridSeats which may use a DIFFERENT row assignment mode
+    // (column-per-row vs position-based). Mismatching modes causes wrong seatNum
+    // mapping (e.g., duplicate seatCodes). Instead, number seats 1,2,3... left
+    // to right within each snapped-Y row — this matches how generateSeatsFromLayout
+    // assigns seatCodes in the DB.
+    canvasSeats = []
+    for (const [r, sortedSeats] of rowSeats) {
+      const label = rowLabels[r] || String.fromCharCode(65 + r)
+      for (let i = 0; i < sortedSeats.length; i++) {
+        const s = sortedSeats[i]
+        const seatNum = i + 1
+        canvasSeats.push({
+          x: s.x,
+          y: s.y,
+          seatCode: `${label}-${seatNum}`,
+          seatNum,
+          rowLabel: label,
+        })
+      }
+    }
+  }
+
+  // Compute fullCanvasBounds — bounding box of everything on the canvas
+  let fullCanvasBounds: { x: number; y: number; width: number; height: number } | undefined
+  if (canvasWidth !== undefined && canvasHeight !== undefined) {
+    fullCanvasBounds = { x: 0, y: 0, width: canvasWidth, height: canvasHeight }
+  } else if (canvasSeatBounds) {
+    let bx = canvasSeatBounds.originX
+    let by = canvasSeatBounds.originY
+    let bw = canvasSeatBounds.spanX
+    let bh = canvasSeatBounds.spanY
+
+    if (stagePosition) {
+      if (stagePosition.x < bx) { bw += bx - stagePosition.x; bx = stagePosition.x }
+      if (stagePosition.y < by) { bh += by - stagePosition.y; by = stagePosition.y }
+      if (stagePosition.x + stagePosition.width > bx + bw) bw = stagePosition.x + stagePosition.width - bx
+      if (stagePosition.y + stagePosition.height > by + bh) bh = stagePosition.y + stagePosition.height - by
+    }
+
+    for (const obj of objects) {
+      if (typeof obj.x === 'number' && typeof obj.y === 'number') {
+        const ow = obj.pixelW || 60
+        const oh = obj.pixelH || 30
+        if (obj.x < bx) { bw += bx - obj.x; bx = obj.x }
+        if (obj.y < by) { bh += by - obj.y; by = obj.y }
+        if (obj.x + ow > bx + bw) bw = obj.x + ow - bx
+        if (obj.y + oh > by + bh) bh = obj.y + oh - by
+      }
+    }
+
+    fullCanvasBounds = { x: bx, y: by, width: bw, height: bh }
+  }
+
+  return { gridSize: { rows, cols }, rowLabels, sections, aisleColumns, rowSeatMap, embeddedRows, displayRows, objects, stageType, stagePosition, thrustWidth, thrustDepth, canvasWidth, canvasHeight, canvasSeatBounds, canvasSeats, fullCanvasBounds }
 }

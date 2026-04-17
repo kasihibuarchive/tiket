@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
 import { StageRenderer } from '@/lib/stage-renderer'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription
@@ -376,9 +377,68 @@ export default function UsherSeatMapPage() {
   let seatGridContent: React.ReactNode
 
   if (parsedLayout) {
-    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows } = parsedLayout
+    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, canvasSeats, fullCanvasBounds } = parsedLayout
     const { cols } = gridSize
     const aisleColumns: number[] = parsedLayout.aisleColumns || []
+
+    // Check if we should use canvas-based rendering
+    const useCanvasMode = !!canvasSeats && canvasSeats.length > 0
+
+    // ─── Canvas Mode: preserve empty space like guest view ─────────────
+    if (useCanvasMode) {
+      seatGridContent = (
+        <div className="flex justify-center">
+          <CanvasSeatLayout
+            parsedLayout={parsedLayout}
+            seatLookup={seatLookup as Map<string, any>}
+            renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+              return (
+                <button
+                  key={key}
+                  onClick={() => (seatData.status === 'SOLD' || seatData.status === 'INVITATION') ? handleSeatClick(seatData) : undefined}
+                  className={cn(
+                    'absolute rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200',
+                    getSeatColor(seatData),
+                    (seatData.status === 'SOLD' || seatData.status === 'INVITATION') && 'cursor-pointer hover:scale-110 hover:shadow-md',
+                    (seatData.status === 'SOLD' || seatData.status === 'INVITATION') && 'text-white',
+                    seatData.status === 'AVAILABLE' && 'cursor-default',
+                    seatData.status === 'UNAVAILABLE' && 'opacity-20',
+                    selectedSeatCode === canvasSeat.seatCode && 'ring-2 ring-gold ring-offset-1'
+                  )}
+                  style={{
+                    left: scaledX,
+                    top: scaledY,
+                    width: size,
+                    height: size,
+                    ...(seatData.status === 'AVAILABLE' ? { borderColor: getSeatBorderColor(seatData) } : {}),
+                  }}
+                  title={
+                    (seatData.status === 'SOLD' || seatData.status === 'INVITATION')
+                      ? `${canvasSeat.seatCode} — Klik untuk detail`
+                      : `${canvasSeat.seatCode}`
+                  }
+                >
+                  {seatData.status === 'SOLD' && <Check className="w-3 h-3" />}
+                  {seatData.status === 'LOCKED_TEMPORARY' && <span className="text-[8px]">⏳</span>}
+                  {seatData.status === 'UNAVAILABLE' && <X className="w-3 h-3" />}
+                  {seatData.status === 'INVITATION' && <span className="text-[8px]">🎉</span>}
+                  {seatData.status === 'AVAILABLE' && <span className="hidden sm:inline">{canvasSeat.seatNum}</span>}
+                  {seatData.status === 'AVAILABLE' && <span className="sm:hidden">{canvasSeat.seatNum}</span>}
+                </button>
+              )
+            }}
+            renderEmpty={(x, y, size, key) => (
+              <div
+                key={key}
+                className="absolute"
+                style={{ left: x, top: y, width: size, height: size }}
+              />
+            )}
+          />
+        </div>
+      )
+    } else {
+    // ─── Grid Mode: fallback for legacy data without seatColumns ───────
 
     // Build reverse map: target row → source rows
     const embeddedInto: Record<number, number[]> = {}
@@ -499,7 +559,8 @@ export default function UsherSeatMapPage() {
                 {lLabels[ri] || String.fromCharCode(65 + ri)}
               </div>
               <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
-                {Array.from({ length: cols }, (_, c) => {
+                {Array.from({ length: cols }, (_, ci) => {
+                  const c = ci
                   if (aisleColumns.includes(c)) {
                     return (
                       <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5"
@@ -524,6 +585,7 @@ export default function UsherSeatMapPage() {
         ))}
       </div>
     )
+    } // end grid mode else
   } else {
     // ═══════════════════════════════════════════════════════════
     // RENDER: Fallback — Dynamic from DB seats (no seat map editor)

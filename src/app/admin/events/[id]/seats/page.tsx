@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
 
 const CATEGORY_CONFIG: Record<string, { icon: typeof Crown; label: string; defaultColor: string }> = {
   VIP: { icon: Crown, label: 'VIP', defaultColor: '#C8A951' },
@@ -169,11 +170,13 @@ export default function SeatEditorPage() {
   // ─── Parse layoutData for flat grid rendering (1:1 with seat map editor) ──
   const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
 
+  // Component-level canvas mode flag (shared across renderFlatGridInner and JSX)
+  const isCanvasMode = !!(parsedLayout?.canvasSeats && parsedLayout.canvasSeats.length > 0)
+
   // ─── Stage & Objects coordinate mapping (canvas → admin grid) ──
   const stageLayout = useMemo(() => {
     if (!parsedLayout) return null
-    const { gridSize, displayRows, stagePosition, canvasSeatBounds: csb } = parsedLayout
-    const cols = gridSize.cols
+    const { gridSize, displayRows, stagePosition, canvasSeatBounds: csb, cols } = parsedLayout
     const CELL_TOTAL = SEAT_W + SEAT_GAP
     const guestGridW = cols * CELL_TOTAL
     const guestGridH = displayRows.length * CELL_TOTAL
@@ -442,9 +445,65 @@ export default function SeatEditorPage() {
   // ─── Render flat grid from layoutData (reusable for multi-day divider) ─
   function renderFlatGridInner(lookup: Map<string, SeatData>) {
     if (!parsedLayout) return null
-    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections } = parsedLayout
+    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections, canvasSeats, fullCanvasBounds } = parsedLayout
     const { cols } = gridSize
     const aisleColumns = parsedLayout.aisleColumns || []
+
+    // Check if we should use canvas-based rendering
+    const useCanvasMode = !!canvasSeats && canvasSeats.length > 0
+
+    // ─── Canvas Mode: preserve empty space like guest view ─────────────
+    if (useCanvasMode) {
+      return (
+        <CanvasSeatLayout
+          parsedLayout={parsedLayout}
+          seatLookup={lookup as Map<string, any>}
+          renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+            const isSelected = selectedSeatCodes.has(seatData.seatCode)
+            const num = canvasSeat.seatNum
+            return (
+              <button
+                key={key}
+                onMouseDown={(e) => { if (e.button === 0) handleMouseDown(seatData) }}
+                onMouseEnter={() => handleMouseEnter(seatData)}
+                className={cn(
+                  'absolute rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-100 select-none cursor-pointer',
+                  seatData.status === 'SOLD' && 'bg-seat-sold text-white',
+                  seatData.status === 'LOCKED_TEMPORARY' && 'bg-seat-locked text-white',
+                  seatData.status === 'INVITATION' && 'bg-seat-invitation text-white',
+                  seatData.status === 'UNAVAILABLE' && 'bg-gray-300 opacity-40',
+                  isSelected && 'bg-gold text-charcoal ring-2 ring-gold ring-offset-1',
+                  !isSelected && seatData.status === 'AVAILABLE' && 'bg-white border-2',
+                )}
+                style={{
+                  left: scaledX,
+                  top: scaledY,
+                  width: size,
+                  height: size,
+                  ...(seatData.status === 'AVAILABLE' && !isSelected
+                    ? { borderColor: getSeatBorderColor(seatData) }
+                    : {}),
+                }}
+                title={`${canvasSeat.seatCode} | ${seatData.priceCategory?.name || '-'} | ${seatData.status}`}
+              >
+                {seatData.status === 'SOLD' && <Check className="w-3 h-3" />}
+                {seatData.status === 'LOCKED_TEMPORARY' && <Lock className="w-3 h-3" />}
+                {seatData.status === 'UNAVAILABLE' && <X className="w-3 h-3" />}
+                {seatData.status === 'INVITATION' && <Crown className="w-3 h-3" />}
+                {(seatData.status === 'AVAILABLE' || isSelected) && num}
+              </button>
+            )
+          }}
+          renderEmpty={(x, y, size, key) => (
+            <div
+              key={key}
+              className="absolute"
+              style={{ left: x, top: y, width: size, height: size }}
+            />
+          )}
+        />
+      )
+    }
 
     // Build reverse map: target row → source rows
     const embeddedInto: Record<number, number[]> = {}
@@ -513,7 +572,8 @@ export default function SeatEditorPage() {
                   {label}
                 </div>
                 <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
-                  {Array.from({ length: cols }, (_, c) => {
+                  {Array.from({ length: cols }, (_, ci) => {
+                    const c = ci
                     if (aisleColumns.includes(c)) {
                       return (
                         <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5" style={{ width: 2, height: SEAT_W * 0.6 }} />
@@ -552,8 +612,8 @@ export default function SeatEditorPage() {
         </div>
       )
     }
-
     const num = displayNum ?? seat.col
+    const seatCodeFinal = seatCode || seat.seatCode
     return (
       <button
         key={seat.id}
@@ -741,8 +801,8 @@ export default function SeatEditorPage() {
       {/* Seat Grid — Dynamic Layout from actual data */}
       <div className="bg-white rounded-xl p-6 border border-border/50">
         <div className="max-w-4xl mx-auto">
-          {/* Stage — rendered inline (no custom position) or inside grid container (custom position) */}
-          {stageLayout && !stageLayout.hasCustomStagePos && !stageLayout.isInsetStage && (
+          {/* Stage — only for grid mode (canvas mode renders its own stage inside CanvasSeatLayout) */}
+          {!isCanvasMode && stageLayout && !stageLayout.hasCustomStagePos && !stageLayout.isInsetStage && (
             <StageRenderer
               stageType={stageLayout.stageType}
               size={stageLayout.stageSize}
@@ -751,7 +811,7 @@ export default function SeatEditorPage() {
             />
           )}
 
-          {/* ─── Multi-Day Divider View (Semua Hari) ─── */}
+          {/* ─── Multi-Day Divider View (Semua Hari) ───*/}
           {seatsByDate && showDates.length > 1 && !activeShowDate ? (
             <div className="space-y-8 mt-4">
               {showDates.map((sd, dayIdx) => {
@@ -783,12 +843,16 @@ export default function SeatEditorPage() {
                     <div className="overflow-x-auto pb-2">
                       <div className="min-w-[320px]">
                         {parsedLayout ? (
-                          <div className="relative mx-auto w-fit flex flex-col items-center" style={{ minWidth: (() => {
+                          <div className={cn(
+                            isCanvasMode
+                              ? 'overflow-x-auto flex justify-center'
+                              : 'relative mx-auto w-fit flex flex-col items-center',
+                          )} style={!isCanvasMode ? { minWidth: (() => {
                             const CELL_TOTAL = SEAT_W + SEAT_GAP
-                            const cols = parsedLayout.gridSize.cols
-                            return cols * CELL_TOTAL - SEAT_GAP + 60
-                          })() }}>
-                            {stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
+                            const ec = parsedLayout.gridSize.cols
+                            return ec * CELL_TOTAL - SEAT_GAP + 60
+                          })() } : undefined}>
+                            {!isCanvasMode && stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
                               <div
                                 className="absolute pointer-events-none"
                                 style={{
@@ -842,17 +906,21 @@ export default function SeatEditorPage() {
             <div
               className="min-w-[320px]"
               id="admin-grid-wrapper"
-              style={stageLayout && stageLayout.hasCustomStagePos ? { paddingTop: stageLayout.paddingTop } : undefined}
+              style={!isCanvasMode && stageLayout && stageLayout.hasCustomStagePos ? { paddingTop: stageLayout.paddingTop } : undefined}
             >
               {parsedLayout ? (
-                /* Centered wrapper for both stage overlay and grid rows */
-                <div className="relative mx-auto w-fit flex flex-col items-center" style={{ minWidth: (() => {
+                /* Centered wrapper — canvas mode has its own stage/objects inside */
+                <div className={cn(
+                  isCanvasMode
+                    ? 'overflow-x-auto flex justify-center'
+                    : 'relative mx-auto w-fit flex flex-col items-center',
+                )} style={!isCanvasMode ? { minWidth: (() => {
                   const CELL_TOTAL = SEAT_W + SEAT_GAP
-                  const cols = parsedLayout.gridSize.cols
-                  return cols * CELL_TOTAL - SEAT_GAP + 60
-                })() }}>
-                  {/* Custom stage position — absolutely positioned ABOVE seats as an overlay layer */}
-                  {stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
+                  const ec = parsedLayout.gridSize.cols
+                  return ec * CELL_TOTAL - SEAT_GAP + 60
+                })() } : undefined}>
+                  {/* Grid mode: Custom stage position overlay */}
+                  {!isCanvasMode && stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
                     <div
                       className="absolute pointer-events-none"
                       style={{
@@ -873,8 +941,8 @@ export default function SeatEditorPage() {
                     </div>
                   )}
                   {renderFlatGridInner(seatLookup)}
-                  {/* Objects overlay — inside centered grid container */}
-                  {parsedLayout?.objects && parsedLayout.objects.length > 0 && stageLayout && (
+                  {/* Grid mode: Objects overlay */}
+                  {!isCanvasMode && parsedLayout?.objects && parsedLayout.objects.length > 0 && stageLayout && (
                     <ObjectsOverlay
                       objects={parsedLayout.objects}
                       cellSize={SEAT_W + SEAT_GAP}

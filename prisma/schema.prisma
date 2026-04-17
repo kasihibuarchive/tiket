@@ -69,7 +69,9 @@ model Event {
   synopsis        String
   teaserVideoUrl  String?  // YouTube/Vimeo embed URL for teaser video
   isPublished     Boolean  @default(false)
-  adminFee        Int      @default(0) // Admin fee per ticket in IDR
+  adminFee        Int      @default(0) // Admin fee per ticket in IDR (flat fallback)
+  adminFeeQris    Int      @default(2000)  // Admin fee per ticket for QRIS payments
+  adminFeeNonQris Int      @default(3500)  // Admin fee per ticket for non-QRIS payments
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 

@@ -103,8 +103,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const abortController = new AbortController()
 
     async function runCheck() {
+      // Safety timeout: always hide loading after 10s no matter what
+      const safetyTimer = setTimeout(() => {
+        if (!authCheckedRef.current) {
+          authCheckedRef.current = true
+          setIsAuthLoading(false)
+        }
+      }, 10000)
+
       // If already authenticated from a previous check, just validate role guards
       if (authCheckedRef.current && isAuthenticated) {
+        clearTimeout(safetyTimer)
         const role = adminRole || 'admin'
         if (role === 'usher' && !isUsherPath) {
           doRedirect('/admin/usher')
@@ -119,9 +128,13 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       }
 
       const admin = await checkAuth(abortController.signal)
-      if (abortController.signal.aborted) return
+      if (abortController.signal.aborted) {
+        clearTimeout(safetyTimer)
+        return
+      }
 
       if (admin) {
+        clearTimeout(safetyTimer)
         const role = admin?.role || 'admin'
         if (role === 'usher' && !isUsherPath) {
           doRedirect('/admin/usher')
@@ -131,11 +144,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           doRedirect('/admin')
           return
         }
+        setIsAuthLoading(false)
       } else {
+        clearTimeout(safetyTimer)
+        // Not authenticated — redirect to login
+        // Always mark as checked and stop loading to prevent stuck spinner
+        authCheckedRef.current = true
+        setIsAuthLoading(false)
         doRedirect('/admin/login')
         return
       }
-      setIsAuthLoading(false)
     }
 
     runCheck()
