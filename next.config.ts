@@ -1,7 +1,10 @@
 import type { NextConfig } from "next";
 
+// Set DEPLOY_TARGET=vercel to build for Vercel (no standalone output)
+const isVercel = process.env.DEPLOY_TARGET === "vercel"
+
 const nextConfig: NextConfig = {
-  output: "standalone",
+  ...(isVercel ? {} : { output: "standalone" }),
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -9,9 +12,6 @@ const nextConfig: NextConfig = {
   onDemandEntries: {
     maxInactiveAge: 0,
   },
-  allowedDevOrigins: [
-    "preview-chat-3320097f-4523-4c3e-9e9e-a56b3f478eca.space.z.ai",
-  ],
 };
 
 export default nextConfig;
