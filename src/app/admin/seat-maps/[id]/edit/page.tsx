@@ -64,7 +64,7 @@ export default function SeatMapEditPage() {
   // Validate and sanitize layoutData from API
   const sanitizeLayoutData = useCallback((raw: any, type: SeatType): any => {
     if (!raw || typeof raw !== 'object') return null
-    if (type === 'PIANO_ROLL') {
+    if (type === 'PIANO_ROLL' || type === 'GENERAL_ADMISSION') {
       return {
         type: 'PIANO_ROLL',
         gridRows: Number(raw.gridRows) || 15,
@@ -101,15 +101,17 @@ export default function SeatMapEditPage() {
         ...(raw.stageType && { stageType: raw.stageType }),
       }
     }
+    // Fallback: treat as PIANO_ROLL (for GENERAL_ADMISSION with legacy data)
     return {
-      type: 'GENERAL_ADMISSION',
-      gridSize: (raw.gridSize && typeof raw.gridSize === 'object')
-        ? { rows: Number(raw.gridSize.rows) || 1, cols: Number(raw.gridSize.cols) || 1 }
-        : { rows: 8, cols: 10 },
+      type: 'PIANO_ROLL',
+      gridRows: Number(raw.gridRows) || 15,
+      gridCols: Number(raw.gridCols) || 25,
+      cellSize: Number(raw.cellSize) || 32,
       zones: Array.isArray(raw.zones) ? raw.zones : [],
-      // Preserve stage/objects positions
-      ...(raw.stagePosition && typeof raw.stagePosition === 'object' && { stagePosition: raw.stagePosition }),
-      ...(raw.objects && Array.isArray(raw.objects) && { objects: raw.objects }),
+      stage: raw.stage || null,
+      objects: Array.isArray(raw.objects) ? raw.objects : [],
+      canvasWidth: Number(raw.canvasWidth) || 0,
+      canvasHeight: Number(raw.canvasHeight) || 0,
     }
   }, [])
 
@@ -232,13 +234,13 @@ export default function SeatMapEditPage() {
     const templateLayout = selectedTemplate?.layoutData || {}
     const initialLayout = {
       type,
-      ...(type === 'PIANO_ROLL'
+      ...((type === 'PIANO_ROLL' || type === 'GENERAL_ADMISSION')
         ? {
             gridRows: 15,
             gridCols: 25,
             cellSize: 32,
             zones: [],
-            stage: null,
+            stage: { row: 0, col: 5, rows: 2, cols: 15, stageType: 'PROSCENIUM' },
             objects: [],
             canvasWidth: 25 * 32 + 60,
             canvasHeight: 15 * 32 + 60,
@@ -520,8 +522,8 @@ export default function SeatMapEditPage() {
     zonesCount: Array.isArray(layoutData.zones) ? layoutData.zones.length : 'N/A',
   })
 
-  // Render PianoRollEditor for PIANO_ROLL type
-  if (seatType === 'PIANO_ROLL') {
+  // Render PianoRollEditor for PIANO_ROLL or GENERAL_ADMISSION type
+  if (seatType === 'PIANO_ROLL' || seatType === 'GENERAL_ADMISSION') {
     return (
       <ErrorBoundary>
         <PianoRollEditor

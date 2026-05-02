@@ -78,6 +78,7 @@ interface PianoRollObject {
 interface PianoRollStage {
   row: number
   col: number
+  rows: number
   cols: number
   stageType: 'PROSCENIUM' | 'AMPHITHEATER' | 'BLACK_BOX' | 'THRUST' | 'ARENA'
 }
@@ -186,7 +187,7 @@ function normalizeLayoutData(raw: any): PianoRollLayoutData {
       z && typeof z.id === 'string' && typeof z.row === 'number' &&
       typeof z.col === 'number' && typeof z.rows === 'number' && typeof z.cols === 'number'
     ) : [],
-    stage: (raw.stage && typeof raw.stage.row === 'number') ? raw.stage : null,
+    stage: (raw.stage && typeof raw.stage.row === 'number') ? { ...raw.stage, rows: raw.stage.rows || 2 } : null,
     objects: Array.isArray(raw.objects) ? raw.objects : [],
     canvasWidth: Number(raw.canvasWidth) || gridCols * cellSize + 60,
     canvasHeight: Number(raw.canvasHeight) || gridRows * cellSize + 60,
@@ -223,6 +224,7 @@ export function PianoRollEditor({
 
   const [mode, setMode] = useState<EditorMode>('select')
   const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null)
+  const [selectedStage, setSelectedStage] = useState(false)
   const [isPreview, setIsPreview] = useState(false)
   const [zoom, setZoom] = useState(1)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
@@ -261,6 +263,8 @@ export function PianoRollEditor({
   const isDraggingRef = useRef(false)
   const isDrawingRef = useRef(false)
   const isResizingRef = useRef(false)
+  const isDraggingStageRef = useRef(false)
+  const isResizingStageRef = useRef(false)
 
   // ─── Computed ──────────────────────────
   const { gridRows, gridCols, cellSize, zones, stage, objects } = layoutData
@@ -477,6 +481,52 @@ export function PianoRollEditor({
     return null
   }, [selectedZone, cellSize, zoom])
 
+  const getStageResizeHandle = useCallback((e: React.MouseEvent): ResizeHandle => {
+    if (!selectedStage || !stage) return null
+    const gridEl = gridRef.current
+    if (!gridEl) return null
+    const rect = gridEl.getBoundingClientRect()
+    const labelW = 32
+    const headerH = 28
+    const x = e.clientX - rect.left - labelW
+    const y = e.clientY - rect.top - headerH
+    const stageRows = stage.rows || 2
+    const stageLeft = stage.col * cellSize * zoom
+    const stageTop = stage.row * cellSize * zoom
+    const stageRight = (stage.col + stage.cols) * cellSize * zoom
+    const stageBottom = (stage.row + stageRows) * cellSize * zoom
+    const threshold = 6
+
+    // Check corners first
+    if (Math.abs(x - stageLeft) < threshold && Math.abs(y - stageTop) < threshold) return 'nw'
+    if (Math.abs(x - stageRight) < threshold && Math.abs(y - stageTop) < threshold) return 'ne'
+    if (Math.abs(x - stageLeft) < threshold && Math.abs(y - stageBottom) < threshold) return 'sw'
+    if (Math.abs(x - stageRight) < threshold && Math.abs(y - stageBottom) < threshold) return 'se'
+
+    // Check edges
+    if (Math.abs(y - stageTop) < threshold && x > stageLeft + threshold && x < stageRight - threshold) return 'n'
+    if (Math.abs(y - stageBottom) < threshold && x > stageLeft + threshold && x < stageRight - threshold) return 's'
+    if (Math.abs(x - stageLeft) < threshold && y > stageTop + threshold && y < stageBottom - threshold) return 'w'
+    if (Math.abs(x - stageRight) < threshold && y > stageTop + threshold && y < stageBottom - threshold) return 'e'
+
+    return null
+  }, [selectedStage, stage, cellSize, zoom])
+
+  const isOnStage = useCallback((cell: { row: number; col: number }): boolean => {
+    if (!stage) return false
+    const stageRows = stage.rows || 2
+    return cell.row >= stage.row && cell.row < stage.row + stageRows &&
+           cell.col >= stage.col && cell.col < stage.col + stage.cols
+  }, [stage])
+
+  // ─── Stage Update ───────────────────────
+  const handleUpdateStage = useCallback((updates: Partial<PianoRollStage>) => {
+    updateLayout((prev) => ({
+      ...prev,
+      stage: prev.stage ? { ...prev.stage, ...updates } : null,
+    }))
+  }, [updateLayout])
+
   // ─── Mouse Handlers ────────────────────
   const handleGridMouseDown = useCallback((e: React.MouseEvent) => {
     if (isPreview) return
@@ -505,7 +555,23 @@ export function PianoRollEditor({
     }
 
     if (mode === 'select') {
-      // Check for resize handle on selected zone
+      // Priority: resize handle (zone or stage) > stage > zone > empty
+
+      // 1. Check for resize handle on selected stage (highest priority)
+      if (selectedStage && stage) {
+        const handle = getStageResizeHandle(e)
+        if (handle) {
+          isResizingStageRef.current = true
+          isResizingRef.current = true
+          setIsResizing(true)
+          setResizeHandle(handle)
+          setResizeOrigin({ row: stage.row, col: stage.col, rows: stage.rows || 2, cols: stage.cols })
+          setDragOffset(cell)
+          return
+        }
+      }
+
+      // 2. Check for resize handle on selected zone
       if (selectedZone) {
         const handle = getResizeHandle(e)
         if (handle) {
@@ -518,10 +584,23 @@ export function PianoRollEditor({
         }
       }
 
-      // Check if clicking inside a zone
+      // 3. Check if clicking on stage
+      if (isOnStage(cell)) {
+        setSelectedZoneId(null)
+        setSelectedStage(true)
+        isDraggingStageRef.current = true
+        isDraggingRef.current = true
+        setIsDragging(true)
+        setDragOrigin({ row: stage!.row, col: stage!.col })
+        setDragOffset(cell)
+        return
+      }
+
+      // 4. Check if clicking inside a zone
       const zoneId = zoneCellMap.get(`${cell.row},${cell.col}`)
       if (zoneId) {
         setSelectedZoneId(zoneId)
+        setSelectedStage(false)
         const zone = zones.find((z) => z.id === zoneId)
         if (zone) {
           isDraggingRef.current = true
@@ -531,9 +610,10 @@ export function PianoRollEditor({
         }
       } else {
         setSelectedZoneId(null)
+        setSelectedStage(false)
       }
     }
-  }, [mode, isPreview, getCellFromEvent, zoneCellMap, handleDeleteZone, selectedZone, getResizeHandle, zones, toast])
+  }, [mode, isPreview, getCellFromEvent, zoneCellMap, handleDeleteZone, selectedZone, getResizeHandle, zones, toast, stage, selectedStage, getStageResizeHandle, isOnStage, handleUpdateStage])
 
   const handleGridMouseMove = useCallback((e: React.MouseEvent) => {
     if (isDrawingRef.current) {
@@ -542,6 +622,93 @@ export function PianoRollEditor({
       return
     }
 
+    // Stage dragging
+    if (isDraggingStageRef.current && stage && dragOrigin && dragOffset) {
+      const cell = getCellFromEvent(e)
+      if (!cell) return
+      const deltaRow = cell.row - dragOffset.row
+      const deltaCol = cell.col - dragOffset.col
+      const stageRows = stage.rows || 2
+      const newRow = clamp(dragOrigin.row + deltaRow, 0, gridRows - stageRows)
+      const newCol = clamp(dragOrigin.col + deltaCol, 0, gridCols - stage.cols)
+      handleUpdateStage({ row: newRow, col: newCol })
+      return
+    }
+
+    // Stage resizing
+    if (isResizingStageRef.current && stage && resizeOrigin && dragOffset) {
+      const cell = getCellFromEvent(e)
+      if (!cell) return
+      const deltaRow = cell.row - dragOffset.row
+      const deltaCol = cell.col - dragOffset.col
+      let newRow = resizeOrigin.row
+      let newCol = resizeOrigin.col
+      let newRows = resizeOrigin.rows
+      let newCols = resizeOrigin.cols
+
+      switch (resizeHandle) {
+        case 'n': {
+          const dr = Math.min(deltaRow, resizeOrigin.rows - 1)
+          newRow = resizeOrigin.row + dr
+          newRows = resizeOrigin.rows - dr
+          break
+        }
+        case 's':
+          newRows = clamp(resizeOrigin.rows + deltaRow, 1, gridRows - resizeOrigin.row)
+          break
+        case 'w': {
+          const dc = Math.min(deltaCol, resizeOrigin.cols - 2)
+          newCol = resizeOrigin.col + dc
+          newCols = resizeOrigin.cols - dc
+          break
+        }
+        case 'e':
+          newCols = clamp(resizeOrigin.cols + deltaCol, 2, gridCols - resizeOrigin.col)
+          break
+        case 'nw': {
+          const dr = Math.min(deltaRow, resizeOrigin.rows - 1)
+          const dc = Math.min(deltaCol, resizeOrigin.cols - 2)
+          newRow = resizeOrigin.row + dr
+          newRows = resizeOrigin.rows - dr
+          newCol = resizeOrigin.col + dc
+          newCols = resizeOrigin.cols - dc
+          break
+        }
+        case 'ne': {
+          const dr = Math.min(deltaRow, resizeOrigin.rows - 1)
+          const dc = deltaCol
+          newRow = resizeOrigin.row + dr
+          newRows = resizeOrigin.rows - dr
+          newCols = clamp(resizeOrigin.cols + dc, 2, gridCols - resizeOrigin.col)
+          break
+        }
+        case 'sw': {
+          const dr = deltaRow
+          const dc = Math.min(deltaCol, resizeOrigin.cols - 2)
+          newCol = resizeOrigin.col + dc
+          newCols = resizeOrigin.cols - dc
+          newRows = clamp(resizeOrigin.rows + dr, 1, gridRows - resizeOrigin.row)
+          break
+        }
+        case 'se':
+          newRows = clamp(resizeOrigin.rows + deltaRow, 1, gridRows - resizeOrigin.row)
+          newCols = clamp(resizeOrigin.cols + deltaCol, 2, gridCols - resizeOrigin.col)
+          break
+      }
+
+      // Clamp bounds
+      if (newRow < 0) { newRows += newRow; newRow = 0 }
+      if (newCol < 0) { newCols += newCol; newCol = 0 }
+      if (newRow + newRows > gridRows) newRows = gridRows - newRow
+      if (newCol + newCols > gridCols) newCols = gridCols - newCol
+      if (newRows < 1) newRows = 1
+      if (newCols < 2) newCols = 2
+
+      handleUpdateStage({ row: newRow, col: newCol, rows: newRows, cols: newCols })
+      return
+    }
+
+    // Zone dragging
     if (isDraggingRef.current && selectedZoneId && dragOrigin && dragOffset) {
       const cell = getCellFromEvent(e)
       if (!cell) return
@@ -622,7 +789,7 @@ export function PianoRollEditor({
 
       handleUpdateZone(selectedZoneId, { row: newRow, col: newCol, rows: newRows, cols: newCols })
     }
-  }, [isDrawingRef, isDraggingRef, isResizingRef, selectedZoneId, selectedZone, dragOrigin, dragOffset, resizeOrigin, resizeHandle, gridRows, gridCols, getCellFromEvent, handleUpdateZone])
+  }, [isDrawingRef, isDraggingRef, isResizingRef, isDraggingStageRef, isResizingStageRef, selectedZoneId, selectedZone, selectedStage, stage, dragOrigin, dragOffset, resizeOrigin, resizeHandle, gridRows, gridCols, getCellFromEvent, handleUpdateZone, handleUpdateStage])
 
   const handleGridMouseUp = useCallback(() => {
     if (isDrawingRef.current && drawStart && drawEnd) {
@@ -671,12 +838,32 @@ export function PianoRollEditor({
       setDragOffset(null)
     }
 
+    if (isDraggingStageRef.current) {
+      isDraggingStageRef.current = false
+      // Only reset the shared isDraggingRef if zone dragging isn't also active
+      if (!isDraggingRef.current) {
+        setIsDragging(false)
+        setDragOrigin(null)
+        setDragOffset(null)
+      }
+    }
+
     if (isResizingRef.current) {
       isResizingRef.current = false
       setIsResizing(false)
       setResizeHandle(null)
       setResizeOrigin(null)
       setDragOffset(null)
+    }
+
+    if (isResizingStageRef.current) {
+      isResizingStageRef.current = false
+      if (!isResizingRef.current) {
+        setIsResizing(false)
+        setResizeHandle(null)
+        setResizeOrigin(null)
+        setDragOffset(null)
+      }
     }
   }, [drawStart, drawEnd, zones, toast])
 
@@ -1020,7 +1207,7 @@ export function PianoRollEditor({
                     const zoneId = zoneCellMap.get(`${r},${c}`)
                     const zone = zoneId ? zones.find((z) => z.id === zoneId) : null
                     const isSelected = selectedZoneId === zoneId
-                    const isStageCell = stage ? r === stage.row && c >= stage.col && c < stage.col + stage.cols : false
+                    const isStageCell = stage ? r >= stage.row && r < stage.row + (stage.rows || 2) && c >= stage.col && c < stage.col + stage.cols : false
                     const isObjectCell = objects.some((o) => r >= o.row && r < o.row + o.rows && c >= o.col && c < o.col + o.cols)
 
                     // Check if this cell is part of the draw preview
@@ -1107,22 +1294,38 @@ export function PianoRollEditor({
                   )
                 })}
 
-                {/* Stage Label */}
+                {/* Stage Overlay */}
                 {stage && (
                   <div
-                    className="absolute pointer-events-none flex items-center justify-center text-xs font-bold text-gray-300"
+                    className={cn(
+                      'absolute flex items-center justify-center text-xs font-bold pointer-events-none',
+                      selectedStage ? 'text-white' : 'text-gray-300'
+                    )}
                     style={{
                       left: 32 + stage.col * cellSize * zoom,
                       top: 28 + stage.row * cellSize * zoom,
                       width: stage.cols * cellSize * zoom,
-                      height: cellSize * zoom,
-                      zIndex: 5,
+                      height: (stage.rows || 2) * cellSize * zoom,
+                      zIndex: 6,
                       textShadow: '0 1px 3px rgba(0,0,0,0.8)',
-                      background: 'linear-gradient(180deg, #4A4A4A 0%, #3D3D3D 50%, #333 100%)',
-                      borderTop: '2px solid #666',
+                      background: selectedStage
+                        ? 'linear-gradient(180deg, #5A5A5A 0%, #4A4A4A 50%, #3D3D3D 100%)'
+                        : 'linear-gradient(180deg, #4A4A4A 0%, #3D3D3D 50%, #333 100%)',
+                      borderTop: selectedStage ? '2px solid #F59E0B' : '2px solid #666',
+                      borderLeft: selectedStage ? '2px solid #F59E0B' : '1px solid #555',
+                      borderRight: selectedStage ? '2px solid #F59E0B' : '1px solid #555',
+                      borderBottom: selectedStage ? '2px solid #F59E0B' : '1px solid #555',
+                      ...(selectedStage ? {
+                        outline: '2px dashed #F59E0B',
+                        outlineOffset: '-1px',
+                      } : {}),
                     }}
                   >
-                    STAGE
+                    <div className="text-center">
+                      <div>STAGE</div>
+                      <div className="text-[8px] font-normal opacity-60 mt-0.5">{stage.stageType.replace('_', ' ')}</div>
+                      <div className="text-[8px] font-normal opacity-40 mt-0.5">{stage.cols}×{stage.rows || 2}</div>
+                    </div>
                   </div>
                 )}
 
@@ -1153,6 +1356,15 @@ export function PianoRollEditor({
                   />
                 )}
 
+                {/* Stage Resize Handles */}
+                {mode === 'select' && selectedStage && stage && !isPreview && (
+                  <StageResizeHandles
+                    stage={stage}
+                    cellSize={cellSize}
+                    zoom={zoom}
+                  />
+                )}
+
                 {/* Draw Preview Rectangle */}
                 {isDrawing && drawPreview && (
                   <div
@@ -1178,7 +1390,7 @@ export function PianoRollEditor({
           {!sidebarCollapsed && (
             <div className="w-[280px] shrink-0 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-4">
-                {/* Zone Info / General Info */}
+                {/* Zone Info / Stage Info / General Info */}
                 {selectedZone ? (
                   <ZoneProperties
                     zone={selectedZone}
@@ -1186,6 +1398,13 @@ export function PianoRollEditor({
                     gridCols={gridCols}
                     onUpdate={(updates) => handleUpdateZone(selectedZone.id, updates)}
                     onDelete={() => handleDeleteZone(selectedZone.id)}
+                  />
+                ) : selectedStage && stage ? (
+                  <StageProperties
+                    stage={stage}
+                    gridRows={gridRows}
+                    gridCols={gridCols}
+                    onUpdate={handleUpdateStage}
                   />
                 ) : (
                   <GeneralInfo
@@ -1366,6 +1585,44 @@ function ResizeHandles({ zone, cellSize, zoom }: { zone: PianoRollZone; cellSize
   )
 }
 
+function StageResizeHandles({ stage, cellSize, zoom }: { stage: PianoRollStage; cellSize: number; zoom: number }) {
+  const handleSize = 6
+  const stageRows = stage.rows || 2
+  const x = stage.col * cellSize * zoom
+  const y = stage.row * cellSize * zoom
+  const w = stage.cols * cellSize * zoom
+  const h = stageRows * cellSize * zoom
+
+  const handles: { key: string; cx: number; cy: number; cursor: string }[] = [
+    { key: 'n', cx: x + w / 2, cy: y, cursor: 'ns-resize' },
+    { key: 's', cx: x + w / 2, cy: y + h, cursor: 'ns-resize' },
+    { key: 'e', cx: x + w, cy: y + h / 2, cursor: 'ew-resize' },
+    { key: 'w', cx: x, cy: y + h / 2, cursor: 'ew-resize' },
+    { key: 'nw', cx: x, cy: y, cursor: 'nwse-resize' },
+    { key: 'ne', cx: x + w, cy: y, cursor: 'nesw-resize' },
+    { key: 'sw', cx: x, cy: y + h, cursor: 'nesw-resize' },
+    { key: 'se', cx: x + w, cy: y + h, cursor: 'nwse-resize' },
+  ]
+
+  return (
+    <div className="absolute pointer-events-none" style={{ zIndex: 15 }}>
+      {handles.map(({ key, cx, cy, cursor }) => (
+        <div
+          key={key}
+          className="absolute bg-cyan-400 border border-cyan-300 pointer-events-auto"
+          style={{
+            left: 32 + cx - handleSize / 2,
+            top: 28 + cy - handleSize / 2,
+            width: handleSize,
+            height: handleSize,
+            cursor,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
 function ZoneProperties({
   zone,
   gridRows,
@@ -1494,6 +1751,103 @@ function ZoneProperties({
         <Trash2 className="w-3 h-3" />
         Delete Zone
       </Button>
+    </div>
+  )
+}
+
+function StageProperties({
+  stage,
+  gridRows,
+  gridCols,
+  onUpdate,
+}: {
+  stage: PianoRollStage
+  gridRows: number
+  gridCols: number
+  onUpdate: (updates: Partial<PianoRollStage>) => void
+}) {
+  const stageTypes: Array<PianoRollStage['stageType']> = ['PROSCENIUM', 'AMPHITHEATER', 'BLACK_BOX', 'THRUST', 'ARENA']
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
+          <span className="text-xs font-semibold">Stage Properties</span>
+        </div>
+        <Badge variant="outline" className="text-[10px] text-gray-400 border-gray-700 bg-gray-800">
+          {stage.cols}×{stage.rows || 2}
+        </Badge>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-[10px] text-gray-500">Stage Type</Label>
+        <Select
+          value={stage.stageType}
+          onValueChange={(v) => onUpdate({ stageType: v as PianoRollStage['stageType'] })}
+        >
+          <SelectTrigger className="bg-gray-700 border-gray-600 text-gray-200 h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-gray-800 border-gray-700">
+            {stageTypes.map((t) => (
+              <SelectItem key={t} value={t} className="text-gray-200 text-xs">
+                {t.replace('_', ' ')}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-[10px] text-gray-500">Position</Label>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <span className="text-[9px] text-gray-600">Row</span>
+            <Input
+              type="number"
+              value={stage.row}
+              onChange={(e) => onUpdate({ row: clamp(Number(e.target.value), 0, gridRows - 1) })}
+              className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
+              min={0}
+              max={gridRows - 1}
+            />
+          </div>
+          <div>
+            <span className="text-[9px] text-gray-600">Col</span>
+            <Input
+              type="number"
+              value={stage.col}
+              onChange={(e) => onUpdate({ col: clamp(Number(e.target.value), 0, gridCols - 2) })}
+              className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
+              min={0}
+              max={gridCols - 2}
+            />
+          </div>
+          <div>
+            <span className="text-[9px] text-gray-600">Rows</span>
+            <Input
+              type="number"
+              value={stage.rows || 2}
+              onChange={(e) => onUpdate({ rows: clamp(Number(e.target.value), 1, gridRows - stage.row) })}
+              className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
+              min={1}
+              max={gridRows - stage.row}
+            />
+          </div>
+          <div>
+            <span className="text-[9px] text-gray-600">Cols</span>
+            <Input
+              type="number"
+              value={stage.cols}
+              onChange={(e) => onUpdate({ cols: clamp(Number(e.target.value), 2, gridCols - stage.col) })}
+              className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
+              min={2}
+              max={gridCols - stage.col}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -1662,6 +2016,7 @@ function StageSettings({
               onUpdate({
                 row: 0,
                 col: Math.floor(gridCols / 2) - 5,
+                rows: 2,
                 cols: Math.min(10, gridCols),
                 stageType: 'PROSCENIUM',
               })
@@ -1710,24 +2065,37 @@ function StageSettings({
               <Input
                 type="number"
                 value={stage.col}
-                onChange={(e) => onUpdate({ ...stage, col: clamp(Number(e.target.value), 0, gridCols - 1) })}
+                onChange={(e) => onUpdate({ ...stage, col: clamp(Number(e.target.value), 0, gridCols - 2) })}
                 className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
                 min={0}
-                max={gridCols - 1}
+                max={gridCols - 2}
               />
             </div>
           </div>
 
-          <div className="space-y-1">
-            <Label className="text-[10px] text-gray-500">Width (cols)</Label>
-            <Input
-              type="number"
-              value={stage.cols}
-              onChange={(e) => onUpdate({ ...stage, cols: clamp(Number(e.target.value), 2, gridCols - stage.col) })}
-              className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
-              min={2}
-              max={gridCols - stage.col}
-            />
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <Label className="text-[10px] text-gray-500">Height (rows)</Label>
+              <Input
+                type="number"
+                value={stage.rows || 2}
+                onChange={(e) => onUpdate({ ...stage, rows: clamp(Number(e.target.value), 1, gridRows - stage.row) })}
+                className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
+                min={1}
+                max={gridRows - stage.row}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[10px] text-gray-500">Width (cols)</Label>
+              <Input
+                type="number"
+                value={stage.cols}
+                onChange={(e) => onUpdate({ ...stage, cols: clamp(Number(e.target.value), 2, gridCols - stage.col) })}
+                className="bg-gray-700 border-gray-600 text-gray-200 h-7 text-xs font-mono"
+                min={2}
+                max={gridCols - stage.col}
+              />
+            </div>
           </div>
         </div>
       )}
