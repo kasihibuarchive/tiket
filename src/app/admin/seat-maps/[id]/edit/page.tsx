@@ -9,10 +9,11 @@ import { Loader2, ArrowLeft, Lock, AlertTriangle, LayoutGrid } from 'lucide-reac
 import { TemplateModal } from '@/components/seat-map-builder/template-modal'
 import { MetadataModal } from '@/components/seat-map-builder/metadata-modal'
 import { CanvasEditor } from '@/components/seat-map-builder/canvas-editor'
+import { PianoRollEditor } from '@/components/seat-map-builder/piano-roll-editor'
 import { ErrorBoundary } from '@/components/error-boundary'
 
 type WizardStep = 'template' | 'metadata' | 'editor'
-type SeatType = 'NUMBERED' | 'GENERAL_ADMISSION'
+type SeatType = 'NUMBERED' | 'GENERAL_ADMISSION' | 'PIANO_ROLL'
 
 export default function SeatMapEditPage() {
   const params = useParams()
@@ -63,6 +64,19 @@ export default function SeatMapEditPage() {
   // Validate and sanitize layoutData from API
   const sanitizeLayoutData = useCallback((raw: any, type: SeatType): any => {
     if (!raw || typeof raw !== 'object') return null
+    if (type === 'PIANO_ROLL') {
+      return {
+        type: 'PIANO_ROLL',
+        gridRows: Number(raw.gridRows) || 15,
+        gridCols: Number(raw.gridCols) || 25,
+        cellSize: Number(raw.cellSize) || 32,
+        zones: Array.isArray(raw.zones) ? raw.zones : [],
+        stage: raw.stage || null,
+        objects: Array.isArray(raw.objects) ? raw.objects : [],
+        canvasWidth: Number(raw.canvasWidth) || 0,
+        canvasHeight: Number(raw.canvasHeight) || 0,
+      }
+    }
     if (type === 'NUMBERED') {
       return {
         type: 'NUMBERED',
@@ -218,7 +232,18 @@ export default function SeatMapEditPage() {
     const templateLayout = selectedTemplate?.layoutData || {}
     const initialLayout = {
       type,
-      ...(type === 'NUMBERED'
+      ...(type === 'PIANO_ROLL'
+        ? {
+            gridRows: 15,
+            gridCols: 25,
+            cellSize: 32,
+            zones: [],
+            stage: null,
+            objects: [],
+            canvasWidth: 25 * 32 + 60,
+            canvasHeight: 15 * 32 + 60,
+          }
+        : type === 'NUMBERED'
         ? {
             gridSize: { rows: 8, cols: 10 },
             aisleColumns: [],
@@ -494,6 +519,23 @@ export default function SeatMapEditPage() {
     seatsCount: Array.isArray(layoutData.seats) ? layoutData.seats.length : 'N/A',
     zonesCount: Array.isArray(layoutData.zones) ? layoutData.zones.length : 'N/A',
   })
+
+  // Render PianoRollEditor for PIANO_ROLL type
+  if (seatType === 'PIANO_ROLL') {
+    return (
+      <ErrorBoundary>
+        <PianoRollEditor
+          key={realSeatMapId}
+          seatMapId={realSeatMapId}
+          initialLayoutData={layoutData}
+          initialStageType={currentStageType}
+          adminId={adminId}
+          adminName={adminName}
+          onSaveAndExit={handleSaveAndExit}
+        />
+      </ErrorBoundary>
+    )
+  }
 
   return (
     <ErrorBoundary>

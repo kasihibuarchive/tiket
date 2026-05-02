@@ -8,7 +8,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
-import { Drama, Square, RotateCcw, Plus, Sparkles } from 'lucide-react'
+import { Drama, Square, RotateCcw, Plus, Sparkles, LayoutGrid } from 'lucide-react'
 
 interface TemplateModalProps {
   open: boolean
@@ -168,6 +168,20 @@ function buildBlankCanvas() {
   }
 }
 
+function buildPianoRollBlank() {
+  return {
+    type: 'PIANO_ROLL',
+    gridRows: 15,
+    gridCols: 25,
+    cellSize: 32,
+    zones: [] as any[],
+    stage: null,
+    objects: [] as any[],
+    canvasWidth: 25 * 32 + 60,
+    canvasHeight: 15 * 32 + 60,
+  }
+}
+
 // ─────────────────────────────────────────────────
 // Template definitions
 // ─────────────────────────────────────────────────
@@ -196,6 +210,14 @@ const TEMPLATES = [
     icon: RotateCcw,
     accentColor: '#8B8680',
     builder: buildArena,
+  },
+  {
+    id: 'pianoroll',
+    name: 'Piano Roll',
+    description: 'Editor grid fleksibel — gambar zona kursi seperti DAW piano roll.',
+    icon: LayoutGrid,
+    accentColor: '#5B8DBE',
+    builder: buildPianoRollBlank,
   },
   {
     id: 'blank',

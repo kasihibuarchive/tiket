@@ -41,9 +41,9 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    if (seatType && seatType !== 'NUMBERED' && seatType !== 'GENERAL_ADMISSION') {
+    if (seatType && seatType !== 'NUMBERED' && seatType !== 'GENERAL_ADMISSION' && seatType !== 'PIANO_ROLL') {
       return NextResponse.json(
-        { error: 'seatType must be NUMBERED or GENERAL_ADMISSION' },
+        { error: 'seatType must be NUMBERED, GENERAL_ADMISSION, or PIANO_ROLL' },
         { status: 400 }
       )
     }

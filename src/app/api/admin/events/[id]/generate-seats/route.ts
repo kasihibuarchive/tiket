@@ -103,6 +103,76 @@ function generateSeatsFromLayout(
         })
       }
     }
+  } else if (data.type === 'PIANO_ROLL' && Array.isArray(data.zones)) {
+    // ─── PIANO_ROLL zones ──────────────────────────────────────────
+    // For each zone, generate a seat at every grid position.
+    // Row labels are assigned based on absolute grid row position.
+    // Seat codes: {RowLabel}{ColumnNumber} (e.g., A1, A2, B1)
+    const cellSize = data.cellSize || 32
+    const zones = data.zones
+
+    // Collect all used grid rows across all zones, sorted
+    const usedGridRows = new Set<number>()
+    for (const zone of zones) {
+      const zr = zone.row ?? 0
+      const zRows = zone.rows ?? 1
+      for (let r = zr; r < zr + zRows; r++) {
+        usedGridRows.add(r)
+      }
+    }
+    const sortedGridRows = [...usedGridRows].sort((a, b) => a - b)
+    const gridRowToLabel = new Map<number, string>()
+    for (let i = 0; i < sortedGridRows.length; i++) {
+      // Generate row label: A, B, C...
+      let label = ''
+      let n = i
+      while (n >= 0) {
+        label = String.fromCharCode(65 + (n % 26)) + label
+        n = Math.floor(n / 26) - 1
+      }
+      gridRowToLabel.set(sortedGridRows[i], label)
+    }
+
+    // Collect all seats per (mappedRow, col) with dedup
+    const seatMap = new Map<string, { rowLabel: string; col: number; zoneName: string }>()
+
+    for (const zone of zones) {
+      const zr = zone.row ?? 0
+      const zc = zone.col ?? 0
+      const zRows = zone.rows ?? 1
+      const zCols = zone.cols ?? 1
+      const zoneName = zone.name || 'Zone'
+      const category = zoneName // zone name maps to price category
+      const priceCatId = category && priceCategoryMap[category] ? priceCategoryMap[category] : null
+
+      for (let r = zr; r < zr + zRows; r++) {
+        const rowLabel = gridRowToLabel.get(r) || '?'
+        for (let c = zc; c < zc + zCols; c++) {
+          const key = `${r},${c}`
+          if (!seatMap.has(key)) {
+            seatMap.set(key, { rowLabel, col: c, zoneName })
+          }
+        }
+      }
+    }
+
+    // Build seat records
+    for (const [key, info] of seatMap) {
+      const [rStr, cStr] = key.split(',')
+      const gridRow = parseInt(rStr)
+      const gridCol = parseInt(cStr)
+      const category = info.zoneName
+      const priceCatId = category && priceCategoryMap[category] ? priceCategoryMap[category] : null
+
+      seats.push({
+        seatCode: `${info.rowLabel}${gridCol + 1}`,
+        status: 'AVAILABLE',
+        row: info.rowLabel,
+        col: gridCol + 1,
+        priceCategoryId: priceCatId,
+        zoneName: info.zoneName,
+      })
+    }
   } else if (Array.isArray(data) && data.length > 0) {
     // ─── Legacy format ──────────────────────────────────────────────
     for (const seat of data) {

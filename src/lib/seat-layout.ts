@@ -157,10 +157,176 @@ function inferEmbeddedRows(
   return embedded
 }
 
+/**
+ * Convert a grid row index to a row label letter(s): 0→A, 25→Z, 26→AA, etc.
+ */
+function getRowLabelFromIndex(gridRow: number): string {
+  let label = ''
+  let n = gridRow
+  while (n >= 0) {
+    label = String.fromCharCode(65 + (n % 26)) + label
+    n = Math.floor(n / 26) - 1
+  }
+  return label
+}
+
 export function parseLayoutData(layoutData: any): ParsedLayout | null {
   if (!layoutData) return null
   const data = typeof layoutData === 'string' ? JSON.parse(layoutData) : layoutData
-  if (!data || data.type !== 'NUMBERED' || !data.gridSize) return null
+  if (!data) return null
+
+  // ═══ PIANO_ROLL layout ═══
+  if (data.type === 'PIANO_ROLL') {
+    const gridRows: number = data.gridRows || 15
+    const gridCols: number = data.gridCols || 25
+    const cellSize: number = data.cellSize || 32
+    const zones: any[] = Array.isArray(data.zones) ? data.zones : []
+
+    // Build seats from zones — each zone generates seats at every grid position
+    const rawSeats: any[] = []
+    const sections: any[] = []
+    const rowLabels: string[] = []
+
+    // Collect unique row indices used by any zone
+    const usedRows = new Set<number>()
+    for (const zone of zones) {
+      const zr = zone.row ?? 0
+      const zc = zone.col ?? 0
+      const zRows = zone.rows ?? 1
+      const zCols = zone.cols ?? 1
+      for (let r = zr; r < zr + zRows; r++) {
+        usedRows.add(r)
+      }
+    }
+
+    // Sort row indices for consistent ordering
+    const sortedRows = [...usedRows].sort((a, b) => a - b)
+
+    // Assign row labels: A, B, C... based on sorted order
+    const rowIndexMap = new Map<number, number>()
+    for (let i = 0; i < sortedRows.length; i++) {
+      rowIndexMap.set(sortedRows[i], i)
+      rowLabels.push(getRowLabelFromIndex(i))
+    }
+
+    // Build section from each zone
+    for (const zone of zones) {
+      const zr = zone.row ?? 0
+      const zRows = zone.rows ?? 1
+      const fromRow = rowIndexMap.get(zr) ?? 0
+      const toRow = rowIndexMap.get(zr + zRows - 1) ?? fromRow
+      sections.push({
+        name: zone.name || 'Zone',
+        fromRow,
+        toRow,
+        colorCode: zone.color || '#8B8680',
+      })
+    }
+
+    // Build rowSeatMap and rawSeats
+    const rowSeatMap = new Map<number, Array<{ c: number; seatNum: number }>>()
+    for (const zone of zones) {
+      const zr = zone.row ?? 0
+      const zc = zone.col ?? 0
+      const zRows = zone.rows ?? 1
+      const zCols = zone.cols ?? 1
+      for (let r = zr; r < zr + zRows; r++) {
+        const mappedRow = rowIndexMap.get(r) ?? 0
+        if (!rowSeatMap.has(mappedRow)) rowSeatMap.set(mappedRow, [])
+        const rowSeats = rowSeatMap.get(mappedRow)!
+
+        // Collect all column positions in this row across all zones
+        for (let c = zc; c < zc + zCols; c++) {
+          rawSeats.push({ r: mappedRow, c })
+          rowSeats.push({ c, seatNum: 0 }) // seatNum will be assigned below
+        }
+      }
+    }
+
+    // Assign sequential seatNum per row
+    for (const [rowIdx, rowSeats] of rowSeatMap) {
+      const sorted = [...rowSeats].sort((a, b) => a.c - b.c)
+      const colToNum = new Map<number, number>()
+      sorted.forEach((s, idx) => {
+        colToNum.set(s.c, idx + 1)
+      })
+      rowSeatMap.set(rowIdx, sorted.map(s => ({ c: s.c, seatNum: colToNum.get(s.c) || 1 })))
+    }
+
+    const displayRows = sortedRows.map((_, i) => i)
+    const totalRows = sortedRows.length
+    const maxCol = rawSeats.length > 0 ? Math.max(...rawSeats.map(s => s.c)) + 1 : gridCols
+
+    // Build canvasSeats for canvas-based rendering
+    const canvasSeats: Array<{ x: number; y: number; seatCode: string; seatNum: number; rowLabel: string }> = []
+    for (const [rowIdx, rowSeats] of rowSeatMap) {
+      const label = rowLabels[rowIdx] || getRowLabelFromIndex(rowIdx)
+      const sorted = [...rowSeats].sort((a, b) => a.c - b.c)
+      for (const s of sorted) {
+        canvasSeats.push({
+          x: s.c * cellSize,
+          y: rowIdx * cellSize,
+          seatCode: `${label}-${s.seatNum}`,
+          seatNum: s.seatNum,
+          rowLabel: label,
+        })
+      }
+    }
+
+    // Parse objects
+    const objects: LayoutObject[] = Array.isArray(data.objects)
+      ? data.objects.map((o: any) => ({
+          id: o.id || `obj-${Math.random().toString(36).slice(2, 8)}`,
+          type: (o.type || 'CUSTOM_SHAPE') as LayoutObjectType,
+          label: o.label || '',
+          r: o.row ?? o.r ?? 0,
+          c: o.col ?? o.c ?? 0,
+          w: o.cols ?? o.w ?? 1,
+          h: o.rows ?? o.h ?? 1,
+          color: '#6B7280',
+          x: (o.col ?? o.c ?? 0) * cellSize,
+          y: (o.row ?? o.r ?? 0) * cellSize,
+          pixelW: (o.cols ?? o.w ?? 1) * cellSize,
+          pixelH: (o.rows ?? o.h ?? 1) * cellSize,
+        }))
+      : []
+
+    // Stage info
+    const stageType = data.stage?.stageType || 'PROSCENIUM'
+    let stagePosition: { x: number; y: number; width: number; height: number } | undefined
+    if (data.stage && typeof data.stage.row === 'number') {
+      stagePosition = {
+        x: (data.stage.col || 0) * cellSize,
+        y: (data.stage.row || 0) * cellSize,
+        width: (data.stage.cols || 5) * cellSize,
+        height: cellSize,
+      }
+    }
+
+    // Canvas bounds
+    const canvasWidth = gridCols * cellSize
+    const canvasHeight = totalRows * cellSize
+
+    return {
+      gridSize: { rows: totalRows, cols: maxCol },
+      rowLabels,
+      sections,
+      aisleColumns: [],
+      rowSeatMap,
+      embeddedRows: {},
+      displayRows,
+      objects,
+      stageType,
+      stagePosition,
+      canvasWidth,
+      canvasHeight,
+      canvasSeats,
+      fullCanvasBounds: { x: 0, y: 0, width: canvasWidth, height: canvasHeight },
+    }
+  }
+
+  // ═══ NUMBERED layout (original) ═══
+  if (data.type !== 'NUMBERED' || !data.gridSize) return null
 
   const rawSeats: any[] = data.seats || []
   const rowLabels: string[] = data.rowLabels || []

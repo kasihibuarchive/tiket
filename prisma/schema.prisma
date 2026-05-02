@@ -13,6 +13,7 @@ datasource db {
 enum SeatMapType {
   NUMBERED
   GENERAL_ADMISSION
+  PIANO_ROLL
 }
 
 enum StageType {

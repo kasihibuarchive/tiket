@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { cn } from '@/lib/utils'
-import { Ticket, Users, MapPin, ChevronRight } from 'lucide-react'
+import { Ticket, Users, MapPin, ChevronRight, LayoutGrid } from 'lucide-react'
 
 interface MetadataModalProps {
   open: boolean
@@ -22,11 +22,11 @@ interface MetadataModalProps {
   onSubmit: (data: {
     name: string
     creatorName: string
-    seatType: 'NUMBERED' | 'GENERAL_ADMISSION'
+    seatType: 'NUMBERED' | 'GENERAL_ADMISSION' | 'PIANO_ROLL'
   }) => void
   defaultCreatorName: string
   editingName?: string
-  editingType?: 'NUMBERED' | 'GENERAL_ADMISSION'
+  editingType?: 'NUMBERED' | 'GENERAL_ADMISSION' | 'PIANO_ROLL'
 }
 
 export function MetadataModal({
@@ -39,7 +39,7 @@ export function MetadataModal({
 }: MetadataModalProps) {
   const [name, setName] = useState('')
   const [creatorName, setCreatorName] = useState('')
-  const [seatType, setSeatType] = useState<'NUMBERED' | 'GENERAL_ADMISSION'>('NUMBERED')
+  const [seatType, setSeatType] = useState<'NUMBERED' | 'GENERAL_ADMISSION' | 'PIANO_ROLL'>('NUMBERED')
   const [errors, setErrors] = useState<{ name?: string; creatorName?: string }>({})
 
   // Reset form when dialog opens
@@ -169,7 +169,7 @@ export function MetadataModal({
               </Label>
               <RadioGroup
                 value={seatType}
-                onValueChange={(v) => setSeatType(v as 'NUMBERED' | 'GENERAL_ADMISSION')}
+                onValueChange={(v) => setSeatType(v as 'NUMBERED' | 'GENERAL_ADMISSION' | 'PIANO_ROLL')}
                 className="space-y-2"
               >
                 {/* NUMBERED option */}
@@ -229,6 +229,35 @@ export function MetadataModal({
                     <span className="text-[8px] text-gold font-mono font-bold">
                       Z1
                     </span>
+                  </div>
+                </label>
+
+                {/* PIANO_ROLL option */}
+                <label
+                  htmlFor="type-pianoroll"
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-all duration-150',
+                    seatType === 'PIANO_ROLL'
+                      ? 'border-gold/50 bg-gold/5 shadow-sm'
+                      : 'border-border/60 bg-white hover:border-gold/20'
+                  )}
+                >
+                  <RadioGroupItem value="PIANO_ROLL" id="type-pianoroll" />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-charcoal">
+                        Piano Roll
+                      </span>
+                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                        Grid Zones
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Editor grid seperti DAW — gambar, pindah, dan resize zona kursi secara fleksibel.
+                    </p>
+                  </div>
+                  <div className="w-8 h-8 rounded-md bg-charcoal flex items-center justify-center shrink-0">
+                    <LayoutGrid className="w-3.5 h-3.5 text-gold" />
                   </div>
                 </label>
               </RadioGroup>
