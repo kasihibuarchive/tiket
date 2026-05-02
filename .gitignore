@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+.credentials
+.config.juicefs
+.config-juicefs-backup
 
 # vercel
 .vercel
@@ -40,12 +44,59 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 local-*
-.claude
+
+# Skills directory
+/skills/
+
+# Workspace junk files
+.zscripts/
 .z-ai-config
+.claude
 dev.log
 test
 prompt
-
 server.log
-# Skills directory
-/skills/
+accesslog
+.stats
+.server-pid
+
+# Daemon / watchdog scripts (local only)
+daemon-server.js
+daemon.py
+daemon.log
+auto-restart.sh
+keepalive.sh
+warmup.sh
+watchdog.sh
+watchdog.log
+watchdog-server.sh
+server-daemon.sh
+start-server.sh
+run-server.sh
+run-dev.sh
+start.sh
+ensure-env.sh
+seat-service-watchdog.sh
+Caddyfile
+check-db.js
+analyze_images.mjs
+sm_check.json
+
+# Upload directory (user uploaded images)
+/upload/
+
+# Download directory (generated artifacts)
+/download/
+
+# Database file
+db/custom.db
+
+# Mini-services (local dev only)
+/mini-services/
+
+# Lock files (keep package-lock.json, ignore bun.lock)
+bun.lock
+
+# Worklogs
+worklog.md
+worklog-fixes.md
