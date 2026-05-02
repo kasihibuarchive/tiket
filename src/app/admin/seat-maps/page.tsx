@@ -79,6 +79,9 @@ export default function SeatMapsPage() {
       if (data.type === 'GENERAL_ADMISSION' && data.zones) {
         return data.zones.reduce((sum: number, z: any) => sum + (z.capacity || 0), 0)
       }
+      if (data.type === 'PIANO_ROLL' && data.zones) {
+        return data.zones.reduce((sum: number, z: any) => sum + ((z.rows || 1) * (z.cols || 1)), 0)
+      }
       if (Array.isArray(data)) return data.length
     } catch {
       // ignore
@@ -91,7 +94,7 @@ export default function SeatMapsPage() {
     try {
       const data = typeof layoutData === 'string' ? JSON.parse(layoutData) : layoutData
       if (data.type === 'NUMBERED' && data.sections) return data.sections.length
-      if (data.type === 'GENERAL_ADMISSION' && data.zones) return data.zones.length
+      if ((data.type === 'GENERAL_ADMISSION' || data.type === 'PIANO_ROLL') && data.zones) return data.zones.length
     } catch {
       // ignore
     }
@@ -114,8 +117,8 @@ export default function SeatMapsPage() {
       bg: 'bg-blue-500/10',
     },
     {
-      label: 'GA Maps',
-      value: seatMaps.filter((sm) => sm.seatType === 'GENERAL_ADMISSION').length,
+      label: 'GA / Piano Roll',
+      value: seatMaps.filter((sm) => sm.seatType === 'GENERAL_ADMISSION' || sm.seatType === 'PIANO_ROLL').length,
       icon: Users,
       color: 'text-success',
       bg: 'bg-success/10',
@@ -216,10 +219,12 @@ export default function SeatMapsPage() {
                         className={`text-xs ${
                           sm.seatType === 'NUMBERED'
                             ? 'bg-blue-500/10 text-blue-600'
+                            : sm.seatType === 'PIANO_ROLL'
+                            ? 'bg-purple-500/10 text-purple-600'
                             : 'bg-success/10 text-success'
                         }`}
                       >
-                        {sm.seatType === 'NUMBERED' ? 'Kursi Nomor' : 'Bebas Duduk'}
+                        {sm.seatType === 'NUMBERED' ? 'Kursi Nomor' : sm.seatType === 'PIANO_ROLL' ? 'Piano Roll' : 'Bebas Duduk'}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm font-medium">

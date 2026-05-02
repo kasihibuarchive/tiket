@@ -36,6 +36,7 @@ interface EventData {
   priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
   seatSummary?: { total: number; available: number; sold: number }
   seatMapId: string | null
+  seatMapInfo?: { name: string; seatType: string } | null
   showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
   posterUrl?: string | null
   synopsis?: string
@@ -461,7 +462,23 @@ export default function AdminEventsPage() {
                       <p className="text-xs text-muted-foreground">{event.location}</p>
                     </TableCell>
                     <TableCell>
-                      {event.seatSummary && event.seatSummary.total > 0 ? (
+                      {event.seatMapInfo ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-xs font-medium text-charcoal">{event.seatMapInfo.name}</span>
+                          <Badge
+                            variant="secondary"
+                            className={`text-[10px] w-fit ${
+                              event.seatMapInfo.seatType === 'NUMBERED'
+                                ? 'bg-blue-500/10 text-blue-600'
+                                : event.seatMapInfo.seatType === 'PIANO_ROLL'
+                                ? 'bg-purple-500/10 text-purple-600'
+                                : 'bg-success/10 text-success'
+                            }`}
+                          >
+                            {event.seatMapInfo.seatType === 'NUMBERED' ? 'Kursi Nomor' : event.seatMapInfo.seatType === 'PIANO_ROLL' ? 'Piano Roll' : 'Bebas Duduk'}
+                          </Badge>
+                        </div>
+                      ) : event.seatSummary && event.seatSummary.total > 0 ? (
                         <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
                           <CheckCircle2 className="w-3 h-3 mr-1" />
                           {event.seatSummary.total} kursi
@@ -969,8 +986,14 @@ export default function AdminEventsPage() {
                         <div className="flex items-center gap-2">
                           <Map className="w-3.5 h-3.5 text-gold" />
                           <span>{map.name}</span>
-                          <Badge variant="secondary" className="text-[10px] ml-auto">
-                            {map.seatType === 'NUMBERED' ? 'Kursi Nomor' : 'Bebas Duduk'}
+                          <Badge variant="secondary" className={`text-[10px] ml-auto ${
+                            map.seatType === 'NUMBERED'
+                              ? 'bg-blue-500/10 text-blue-600'
+                              : map.seatType === 'PIANO_ROLL'
+                              ? 'bg-purple-500/10 text-purple-600'
+                              : 'bg-success/10 text-success'
+                          }`}>
+                            {map.seatType === 'NUMBERED' ? 'Kursi Nomor' : map.seatType === 'PIANO_ROLL' ? 'Piano Roll' : 'Bebas Duduk'}
                           </Badge>
                         </div>
                       </SelectItem>
@@ -983,7 +1006,7 @@ export default function AdminEventsPage() {
             {selectedMap && (
               <p className="text-xs text-muted-foreground flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 text-success" />
-                Seat map: <strong>{selectedMap.name}</strong> ({selectedMap.seatType === 'NUMBERED' ? 'Kursi Nomor' : 'General Admission'})
+                Seat map: <strong>{selectedMap.name}</strong> ({selectedMap.seatType === 'NUMBERED' ? 'Kursi Nomor' : selectedMap.seatType === 'PIANO_ROLL' ? 'Piano Roll' : 'General Admission'})
               </p>
             )}
 

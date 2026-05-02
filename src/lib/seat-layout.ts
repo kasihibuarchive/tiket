@@ -258,6 +258,9 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
     const maxCol = rawSeats.length > 0 ? Math.max(...rawSeats.map(s => s.c)) + 1 : gridCols
 
     // Build canvasSeats for canvas-based rendering
+    // CRITICAL: seatCode format must match generate-seats API output.
+    // generate-seats uses `${rowLabel}${gridCol + 1}` (e.g., A1, B3, C15)
+    // where gridCol is the absolute grid column index, NOT sequential seat number.
     const canvasSeats: Array<{ x: number; y: number; seatCode: string; seatNum: number; rowLabel: string }> = []
     for (const [rowIdx, rowSeats] of rowSeatMap) {
       const label = rowLabels[rowIdx] || getRowLabelFromIndex(rowIdx)
@@ -266,7 +269,9 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
         canvasSeats.push({
           x: s.c * cellSize,
           y: rowIdx * cellSize,
-          seatCode: `${label}-${s.seatNum}`,
+          // seatCode must match generate-seats: ${rowLabel}${gridCol + 1}
+          seatCode: `${label}${s.c + 1}`,
+          // seatNum is sequential display number within the row
           seatNum: s.seatNum,
           rowLabel: label,
         })

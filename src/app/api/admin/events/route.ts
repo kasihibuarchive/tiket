@@ -16,6 +16,13 @@ export async function GET() {
       orderBy: { date: 'asc' },
     })
 
+    // Fetch linked seat maps for all events that have one
+    const seatMapIds = events.map((e) => e.seatMapId).filter((id): id is string => !!id)
+    const seatMaps = seatMapIds.length > 0
+      ? await db.seatMap.findMany({ where: { id: { in: seatMapIds } }, select: { id: true, name: true, seatType: true } })
+      : []
+    const seatMapMap = new Map(seatMaps.map((sm) => [sm.id, sm]))
+
     const eventsWithSummary = events.map((event) => {
       const eventSeats = allSeats.filter((s) => s.eventId === event.id)
       const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
@@ -23,6 +30,7 @@ export async function GET() {
       const totalSeats = eventSeats.length
       const availableSeats = eventSeats.filter((s) => s.status === 'AVAILABLE').length
       const soldSeats = eventSeats.filter((s) => s.status === 'SOLD').length
+      const linkedSeatMap = event.seatMapId ? seatMapMap.get(event.seatMapId) : null
 
       return {
         ...event,
@@ -33,6 +41,7 @@ export async function GET() {
           available: availableSeats,
           sold: soldSeats,
         },
+        seatMapInfo: linkedSeatMap ? { name: linkedSeatMap.name, seatType: linkedSeatMap.seatType } : null,
       }
     })
 
