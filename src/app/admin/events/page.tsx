@@ -22,8 +22,9 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import {
-  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone
+  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users
 } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
 
 interface EventData {
   id: string
@@ -104,6 +105,16 @@ export default function AdminEventsPage() {
   const [selectedSeatMapId, setSelectedSeatMapId] = useState('')
   const [isLoadingMaps, setIsLoadingMaps] = useState(false)
   const [isGeneratingSeats, setIsGeneratingSeats] = useState(false)
+
+  // Queue config dialog state
+  const [isQueueDialogOpen, setIsQueueDialogOpen] = useState(false)
+  const [queueEventId, setQueueEventId] = useState<string | null>(null)
+  const [queueEventTitle, setQueueEventTitle] = useState('')
+  const [queueEnabled, setQueueEnabled] = useState(false)
+  const [queueMaxConcurrent, setQueueMaxConcurrent] = useState(50)
+  const [queueStats, setQueueStats] = useState<{ activeUsers: number; waitingUsers: number; expiredUsers?: number } | null>(null)
+  const [isSavingQueue, setIsSavingQueue] = useState(false)
+  const [isLoadingQueue, setIsLoadingQueue] = useState(false)
 
   useEffect(() => {
     fetchEvents()
@@ -268,6 +279,64 @@ export default function AdminEventsPage() {
       if (res.ok) fetchEvents()
     } catch (err) {
       console.error('Toggle publish error:', err)
+    }
+  }
+
+  // ─── Queue Management ────────────────────────────────────────────────
+
+  async function openQueueDialog(eventId: string, eventTitle: string) {
+    setQueueEventId(eventId)
+    setQueueEventTitle(eventTitle)
+    setIsQueueDialogOpen(true)
+    setIsLoadingQueue(true)
+
+    try {
+      const res = await fetch(`/api/events/${eventId}/queue/configure`, { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        setQueueEnabled(data.enabled)
+        setQueueMaxConcurrent(data.maxConcurrent)
+        setQueueStats({
+          activeUsers: data.activeUsers,
+          waitingUsers: data.waitingUsers,
+          expiredUsers: data.expiredUsers,
+        })
+      }
+    } catch (err) {
+      console.error('Failed to fetch queue config:', err)
+    } finally {
+      setIsLoadingQueue(false)
+    }
+  }
+
+  async function handleSaveQueue() {
+    if (!queueEventId) return
+    setIsSavingQueue(true)
+
+    try {
+      const res = await fetch(`/api/events/${queueEventId}/queue/configure`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ enabled: queueEnabled, maxConcurrent: queueMaxConcurrent }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setQueueEnabled(data.enabled)
+        setQueueStats({
+          activeUsers: data.activeUsers,
+          waitingUsers: data.waitingUsers,
+        })
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Gagal menyimpan konfigurasi queue')
+      }
+    } catch (err) {
+      console.error('Save queue error:', err)
+      alert('Terjadi kesalahan')
+    } finally {
+      setIsSavingQueue(false)
     }
   }
 
@@ -476,6 +545,20 @@ export default function AdminEventsPage() {
                           title="Edit"
                         >
                           <Edit className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            'h-8 w-8',
+                            queueEventId === event.id && queueEnabled
+                              ? 'text-gold'
+                              : 'text-muted-foreground'
+                          )}
+                          onClick={() => openQueueDialog(event.id, event.title)}
+                          title="Queue Settings"
+                        >
+                          <Users className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
@@ -738,6 +821,101 @@ export default function AdminEventsPage() {
             >
               {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {editingId ? 'Simpan Perubahan' : 'Buat Event'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Queue Config Dialog */}
+      <Dialog open={isQueueDialogOpen} onOpenChange={setIsQueueDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-lg flex items-center gap-2">
+              <Users className="w-5 h-5 text-gold" />
+              Virtual Waiting Room
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Event info */}
+            <div className="bg-muted/30 rounded-lg p-3">
+              <p className="text-xs text-muted-foreground">Event</p>
+              <p className="text-sm font-medium text-charcoal">{queueEventTitle}</p>
+            </div>
+
+            {/* Toggle */}
+            <div className="flex items-center justify-between rounded-lg border border-border/60 p-4">
+              <div>
+                <p className="text-sm font-medium">Aktifkan Queue</p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Batasi jumlah pengguna yang memilih kursi secara bersamaan
+                </p>
+              </div>
+              <Switch
+                checked={queueEnabled}
+                onCheckedChange={setQueueEnabled}
+                disabled={isLoadingQueue}
+              />
+            </div>
+
+            {/* Max Concurrent */}
+            {queueEnabled && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">
+                  Maks. Pengguna Bersamaan
+                </Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={queueMaxConcurrent}
+                  onChange={(e) => setQueueMaxConcurrent(Math.max(1, Number(e.target.value) || 1))}
+                  className="bg-white"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Pengguna baru akan masuk antrian jika sudah ada {queueMaxConcurrent} pengguna aktif. Default: 50
+                </p>
+              </div>
+            )}
+
+            {/* Stats */}
+            {queueEnabled && queueStats && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
+                  <p className="text-xs text-emerald-600 font-medium">Aktif</p>
+                  <p className="text-xl font-bold text-emerald-700">{queueStats.activeUsers}</p>
+                  <p className="text-[10px] text-emerald-500">sedang memilih kursi</p>
+                </div>
+                <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
+                  <p className="text-xs text-amber-600 font-medium">Menunggu</p>
+                  <p className="text-xl font-bold text-amber-700">{queueStats.waitingUsers}</p>
+                  <p className="text-[10px] text-amber-500">dalam antrian</p>
+                </div>
+              </div>
+            )}
+
+            {/* Info note */}
+            <div className="bg-gold/5 rounded-lg p-3 border border-gold/10">
+              <p className="text-xs text-muted-foreground">
+                <strong className="text-charcoal">Admin bypass:</strong> Admin selalu bisa mengakses pemilihan kursi tanpa antrian.
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Session pengguna aktif otomatis kadaluarsa setelah 5 menit tanpa aktivitas.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline" className="text-sm">Tutup</Button>
+            </DialogClose>
+            <Button
+              onClick={handleSaveQueue}
+              disabled={isSavingQueue || isLoadingQueue}
+              className="bg-charcoal hover:bg-charcoal/90 text-gold text-sm"
+            >
+              {isSavingQueue ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Simpan
             </Button>
           </DialogFooter>
         </DialogContent>

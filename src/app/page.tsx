@@ -7,7 +7,6 @@ import { formatEventDate } from '@/lib/date'
 export const dynamic = 'force-dynamic'
 
 export default async function HomePage() {
-  // Separate queries — NO include (crashes Next.js 16)
   const events = await db.event.findMany({
     where: { isPublished: true },
     orderBy: { showDate: 'asc' },
@@ -17,32 +16,27 @@ export default async function HomePage() {
   const priceCategories = await db.priceCategory.findMany({ where: { eventId: { in: eventIds } } })
   const seats = await db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } })
 
-  const now = new Date()
-  const nowShowing = events.filter((e) => new Date(e.showDate) >= now)
-  const comingSoon = events.filter((e) => new Date(e.showDate) < now)
-
-  const eventsWithSummary = (evts: typeof nowShowing) =>
-    evts.map((event) => {
-      const eventSeats = seats.filter((s) => s.eventId === event.id)
-      const eventPriceCats = priceCategories.filter((pc) => pc.eventId === event.id)
-      return {
-        id: event.id,
-        title: event.title,
-        category: event.category,
-        showDate: event.showDate.toISOString(),
-        openGate: event.openGate?.toISOString(),
-        location: event.location,
-        posterUrl: event.posterUrl,
-        synopsis: event.synopsis,
-        isPublished: event.isPublished,
-        priceCategories: eventPriceCats,
-        seatSummary: {
-          total: eventSeats.length,
-          available: eventSeats.filter((s) => s.status === 'AVAILABLE').length,
-          sold: eventSeats.filter((s) => s.status === 'SOLD').length,
-        },
-      }
-    })
+  const eventsWithSummary = events.map((event) => {
+    const eventSeats = seats.filter((s) => s.eventId === event.id)
+    const eventPriceCats = priceCategories.filter((pc) => pc.eventId === event.id)
+    return {
+      id: event.id,
+      title: event.title,
+      category: event.category,
+      showDate: event.showDate.toISOString(),
+      openGate: event.openGate?.toISOString(),
+      location: event.location,
+      posterUrl: event.posterUrl,
+      synopsis: event.synopsis,
+      isPublished: event.isPublished,
+      priceCategories: eventPriceCats,
+      seatSummary: {
+        total: eventSeats.length,
+        available: eventSeats.filter((s) => s.status === 'AVAILABLE').length,
+        sold: eventSeats.filter((s) => s.status === 'SOLD').length,
+      },
+    }
+  })
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -72,17 +66,16 @@ export default async function HomePage() {
             </p>
 
             {/* Featured Event */}
-            {nowShowing.length > 0 && (
+            {eventsWithSummary.length > 0 && (
               <div className="mt-10 animate-fade-in">
-                <p className="text-gold/60 text-xs tracking-widest uppercase mb-2">Sedang Tayang</p>
                 <h2 className="font-serif text-2xl sm:text-3xl text-white font-semibold">
-                  {nowShowing[0].title}
+                  {eventsWithSummary[0].title}
                 </h2>
                 <p className="text-white/40 text-sm mt-1">
-                  {formatEventDate(nowShowing[0].showDate)}
+                  {formatEventDate(eventsWithSummary[0].showDate)}
                 </p>
                 <a
-                  href={`/events/${nowShowing[0].id}`}
+                  href={`/events/${eventsWithSummary[0].id}`}
                   className="inline-flex items-center mt-6 px-6 py-3 bg-gold text-charcoal rounded-full text-sm font-semibold hover:bg-gold-light transition-colors"
                 >
                   Beli Tiket Sekarang
@@ -96,50 +89,25 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* Now Showing */}
-      <section id="now-showing" className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 abstract-bg">
+      {/* All Events */}
+      <section id="events" className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 abstract-bg">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
-            <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">Currently Playing</p>
+            <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">Events</p>
             <h2 className="font-serif text-3xl sm:text-4xl font-bold text-charcoal">
-              SEDANG TAYANG
+              PERTUNJUKAN
             </h2>
             <div className="zen-divider w-16 mx-auto mt-4" />
           </div>
 
-          {nowShowing.length === 0 ? (
+          {eventsWithSummary.length === 0 ? (
             <div className="text-center py-16">
-              <p className="text-muted-foreground text-sm">Belum ada pertunjukan yang sedang tayang</p>
+              <p className="text-muted-foreground text-sm">Belum ada pertunjukan yang tersedia</p>
               <p className="text-muted-foreground/50 text-xs mt-2">Silakan cek kembali nanti</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {eventsWithSummary(nowShowing).map((event) => (
-                <EventCard key={event.id} {...event} />
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Coming Soon */}
-      <section id="coming-soon" className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-12">
-            <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">Upcoming</p>
-            <h2 className="font-serif text-3xl sm:text-4xl font-bold text-charcoal">
-              SEGERA HADIR
-            </h2>
-            <div className="zen-divider w-16 mx-auto mt-4" />
-          </div>
-
-          {comingSoon.length === 0 ? (
-            <div className="text-center py-16">
-              <p className="text-muted-foreground text-sm">Belum ada pertunjukan yang dijadwalkan</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {eventsWithSummary(comingSoon).map((event) => (
+              {eventsWithSummary.map((event) => (
                 <EventCard key={event.id} {...event} />
               ))}
             </div>

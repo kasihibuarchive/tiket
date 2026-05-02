@@ -319,3 +319,38 @@ model ActivityLog {
   @@index([action])
   @@index([createdAt])
 }
+
+// =====================
+// EVENT QUEUE MODEL (Virtual Waiting Room)
+// =====================
+model EventQueue {
+  id            String   @id @default(cuid())
+  eventId       String   @unique  // One queue config per event
+  maxConcurrent Int      @default(50) // Max users in seat selection simultaneously
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  tokens EventQueueToken[]
+
+  @@index([eventId])
+}
+
+model EventQueueToken {
+  id          String    @id @default(cuid())
+  eventId     String
+  sessionId   String    // Browser session ID from sessionStorage
+  status      String    @default("WAITING") // WAITING, ACTIVE, EXPIRED, LEFT
+  position    Int       @default(0) // Queue position (0 = in queue, >0 = active slot number)
+  joinedAt    DateTime  @default(now())
+  activatedAt DateTime?
+  expiresAt   DateTime? // When this active slot expires (auto-release)
+  createdAt   DateTime  @default(now())
+
+  // Relations
+  eventQueue EventQueue @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId, sessionId])
+  @@index([eventId, status])
+  @@index([expiresAt])
+}

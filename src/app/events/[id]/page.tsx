@@ -6,6 +6,7 @@ import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
 import { SeatMap } from '@/components/seat-map'
 import { CheckoutForm } from '@/components/checkout-form'
+import { QueueGate } from '@/components/queue-gate'
 import { Badge } from '@/components/ui/badge'
 import { formatEventDate, formatEventTime } from '@/lib/date'
 import { cn } from '@/lib/utils'
@@ -373,39 +374,41 @@ export default function EventDetailPage() {
           </div>
         </section>
 
-        {/* Seat Selection */}
-        <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 abstract-bg">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-8">
-              <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">Pilih kursi Anda</p>
-              <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">
-                PILIH KURSI
-              </h2>
-              <div className="zen-divider w-16 mx-auto mt-4" />
-            </div>
+        {/* Seat Selection — wrapped with QueueGate for virtual waiting room */}
+        <QueueGate eventId={eventId}>
+          <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 abstract-bg">
+            <div className="max-w-7xl mx-auto">
+              <div className="text-center mb-8">
+                <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">Pilih kursi Anda</p>
+                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">
+                  PILIH KURSI
+                </h2>
+                <div className="zen-divider w-16 mx-auto mt-4" />
+              </div>
 
-            {!showCheckout ? (
-              <SeatMap
-                key={activeShowDate?.id || 'default'}
-                eventId={eventId}
-                showDateId={activeShowDate?.id || null}
-                seats={filteredSeats}
-                priceCategories={event.priceCategories}
-                layoutData={event.seatMapLayout}
-                onSelectionChange={handleSelectionChange}
-                onProceedToCheckout={handleProceedToCheckout}
-              />
-            ) : (
-              <CheckoutForm
-                eventId={eventId}
-                showDateId={activeShowDate?.id || null}
-                selectedSeats={selectedSeats}
-                totalPrice={totalPrice}
-                onBack={handleBackToSeats}
-              />
-            )}
-          </div>
-        </section>
+              {!showCheckout ? (
+                <SeatMap
+                  key={activeShowDate?.id || 'default'}
+                  eventId={eventId}
+                  showDateId={activeShowDate?.id || null}
+                  seats={filteredSeats}
+                  priceCategories={event.priceCategories}
+                  layoutData={event.seatMapLayout}
+                  onSelectionChange={handleSelectionChange}
+                  onProceedToCheckout={handleProceedToCheckout}
+                />
+              ) : (
+                <CheckoutForm
+                  eventId={eventId}
+                  showDateId={activeShowDate?.id || null}
+                  selectedSeats={selectedSeats}
+                  totalPrice={totalPrice}
+                  onBack={handleBackToSeats}
+                />
+              )}
+            </div>
+          </section>
+        </QueueGate>
       </main>
 
       <Footer />

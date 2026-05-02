@@ -26,11 +26,8 @@ export function Footer() {
               Navigasi
             </h4>
             <div className="flex flex-col gap-2">
-              <Link href="/#now-showing" className="text-sm hover:text-gold transition-colors">
-                Sedang Tayang
-              </Link>
-              <Link href="/#coming-soon" className="text-sm hover:text-gold transition-colors">
-                Segera Hadir
+              <Link href="/#events" className="text-sm hover:text-gold transition-colors">
+                Pertunjukan
               </Link>
               <Link href="/verify" className="text-sm hover:text-gold transition-colors">
                 Cek Tiket

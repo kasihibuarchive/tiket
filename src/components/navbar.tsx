@@ -24,16 +24,10 @@ export function Navbar() {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-8">
             <Link
-              href="/#now-showing"
+              href="/#events"
               className="text-sm font-medium text-muted-foreground hover:text-charcoal transition-colors"
             >
-              Sedang Tayang
-            </Link>
-            <Link
-              href="/#coming-soon"
-              className="text-sm font-medium text-muted-foreground hover:text-charcoal transition-colors"
-            >
-              Segera Hadir
+              Pertunjukan
             </Link>
             <Link
               href="/verify"
@@ -61,18 +55,11 @@ export function Navbar() {
               </SheetTitle>
               <div className="flex flex-col gap-4">
                 <Link
-                  href="/#now-showing"
+                  href="/#events"
                   onClick={() => setOpen(false)}
                   className="text-sm font-medium text-muted-foreground hover:text-charcoal py-2 transition-colors"
                 >
-                  Sedang Tayang
-                </Link>
-                <Link
-                  href="/#coming-soon"
-                  onClick={() => setOpen(false)}
-                  className="text-sm font-medium text-muted-foreground hover:text-charcoal py-2 transition-colors"
-                >
-                  Segera Hadir
+                  Pertunjukan
                 </Link>
                 <Link
                   href="/verify"
