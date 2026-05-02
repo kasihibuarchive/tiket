@@ -68,6 +68,19 @@ export interface ParsedLayout {
     width: number
     height: number
   }
+  /** GA zone information for General Admission layouts */
+  gaZones?: Array<{
+    id: string
+    name: string
+    capacity: number
+    color: string
+    row: number
+    col: number
+    rows: number
+    cols: number
+  }>
+  /** Whether this is a General Admission layout */
+  isGA?: boolean
 }
 
 /**
@@ -174,6 +187,73 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
   if (!layoutData) return null
   const data = typeof layoutData === 'string' ? JSON.parse(layoutData) : layoutData
   if (!data) return null
+
+  // ═══ GENERAL_ADMISSION layout ═══
+  if (data.type === 'GENERAL_ADMISSION') {
+    const gridRows: number = data.gridRows || 15
+    const gridCols: number = data.gridCols || 25
+    const cellSize: number = data.cellSize || 32
+    const zones: any[] = Array.isArray(data.zones) ? data.zones : []
+
+    // Build GA zones array
+    const gaZones = zones.map((zone: any) => ({
+      id: zone.id || 'ga-' + Math.random().toString(36).slice(2, 8),
+      name: zone.name || 'GA',
+      capacity: zone.capacity || (zone.rows || 1) * (zone.cols || 1),
+      color: zone.color || '#8B8680',
+      row: zone.row ?? 0,
+      col: zone.col ?? 0,
+      rows: zone.rows ?? 1,
+      cols: zone.cols ?? 1,
+    }))
+
+    // Stage info
+    const stageType = data.stage?.stageType || 'PROSCENIUM'
+    let stagePosition: { x: number; y: number; width: number; height: number } | undefined
+    if (data.stage && typeof data.stage.row === 'number') {
+      stagePosition = {
+        x: (data.stage.col || 0) * cellSize,
+        y: (data.stage.row || 0) * cellSize,
+        width: (data.stage.cols || 5) * cellSize,
+        height: cellSize,
+      }
+    }
+
+    // Parse objects
+    const objects: LayoutObject[] = Array.isArray(data.objects)
+      ? data.objects.map((o: any) => ({
+          id: o.id || `obj-${Math.random().toString(36).slice(2, 8)}`,
+          type: (o.type || 'CUSTOM_SHAPE') as LayoutObjectType,
+          label: o.label || '',
+          r: o.row ?? o.r ?? 0,
+          c: o.col ?? o.c ?? 0,
+          w: o.cols ?? o.w ?? 1,
+          h: o.rows ?? o.h ?? 1,
+          color: '#6B7280',
+          x: (o.col ?? o.c ?? 0) * cellSize,
+          y: (o.row ?? o.r ?? 0) * cellSize,
+          pixelW: (o.cols ?? o.w ?? 1) * cellSize,
+          pixelH: (o.rows ?? o.h ?? 1) * cellSize,
+        }))
+      : []
+
+    return {
+      gridSize: { rows: 1, cols: 1 },
+      rowLabels: [],
+      sections: [],
+      aisleColumns: [],
+      rowSeatMap: new Map(),
+      embeddedRows: {},
+      displayRows: [],
+      objects,
+      stageType,
+      stagePosition,
+      canvasWidth: gridCols * cellSize,
+      canvasHeight: gridRows * cellSize,
+      gaZones,
+      isGA: true,
+    }
+  }
 
   // ═══ PIANO_ROLL layout ═══
   if (data.type === 'PIANO_ROLL') {

@@ -63,6 +63,7 @@ export interface PianoRollZone {
   rows: number
   cols: number
   color: string
+  capacity?: number
 }
 
 interface PianoRollObject {
@@ -84,7 +85,7 @@ interface PianoRollStage {
 }
 
 export interface PianoRollLayoutData {
-  type: 'PIANO_ROLL'
+  type: 'PIANO_ROLL' | 'GENERAL_ADMISSION'
   gridRows: number
   gridCols: number
   cellSize: number
@@ -101,6 +102,7 @@ interface PianoRollEditorProps {
   initialStageType?: string
   adminId: string
   adminName: string
+  seatType?: string
   onSaveAndExit: (layoutData: any, stageType?: string) => void
 }
 
@@ -170,7 +172,7 @@ function getDefaultLayout(): PianoRollLayoutData {
 }
 
 function normalizeLayoutData(raw: any): PianoRollLayoutData {
-  if (!raw || typeof raw !== 'object' || raw.type !== 'PIANO_ROLL') {
+  if (!raw || typeof raw !== 'object' || (raw.type !== 'PIANO_ROLL' && raw.type !== 'GENERAL_ADMISSION')) {
     return getDefaultLayout()
   }
 
@@ -179,7 +181,7 @@ function normalizeLayoutData(raw: any): PianoRollLayoutData {
   const gridCols = clamp(Number(raw.gridCols) || 25, MIN_GRID_COLS, MAX_GRID_COLS)
 
   return {
-    type: 'PIANO_ROLL',
+    type: raw.type === 'GENERAL_ADMISSION' ? 'GENERAL_ADMISSION' : 'PIANO_ROLL',
     gridRows,
     gridCols,
     cellSize,
@@ -208,9 +210,12 @@ export function PianoRollEditor({
   initialStageType,
   adminId,
   adminName,
+  seatType,
   onSaveAndExit,
 }: PianoRollEditorProps) {
   const { toast } = useToast()
+
+  const isGA = seatType === 'GENERAL_ADMISSION'
 
   // ─── State ─────────────────────────────
   const [layoutData, setLayoutData] = useState<PianoRollLayoutData>(() => {
@@ -249,6 +254,7 @@ export function PianoRollEditor({
   const [pendingZone, setPendingZone] = useState<{ row: number; col: number; rows: number; cols: number } | null>(null)
   const [zoneFormName, setZoneFormName] = useState('')
   const [zoneFormColor, setZoneFormColor] = useState(ZONE_COLORS[0])
+  const [zoneFormCapacity, setZoneFormCapacity] = useState<number | undefined>(undefined)
 
   // Auto-save
   const [autoSaveTime, setAutoSaveTime] = useState<Date | null>(null)
@@ -274,8 +280,11 @@ export function PianoRollEditor({
   }, [zones, selectedZoneId])
 
   const totalSeats = useMemo(() => {
+    if (isGA) {
+      return zones.reduce((sum, z) => sum + (z.capacity || z.rows * z.cols), 0)
+    }
     return zones.reduce((sum, z) => sum + z.rows * z.cols, 0)
-  }, [zones])
+  }, [zones, isGA])
 
   // Build a set of cells covered by each zone for rendering
   const zoneCellMap = useMemo(() => {
@@ -823,6 +832,7 @@ export function PianoRollEditor({
           setPendingZone({ row: minRow, col: minCol, rows, cols })
           setZoneFormName('')
           setZoneFormColor(ZONE_COLORS[zones.length % ZONE_COLORS.length])
+          setZoneFormCapacity(isGA ? rows * cols : undefined)
           setZoneDialogOpen(true)
         }
       }
@@ -879,6 +889,7 @@ export function PianoRollEditor({
       rows: pendingZone.rows,
       cols: pendingZone.cols,
       color: zoneFormColor,
+      ...(isGA && zoneFormCapacity ? { capacity: zoneFormCapacity } : {}),
     }
 
     updateLayout((prev) => ({
@@ -890,8 +901,12 @@ export function PianoRollEditor({
     setPendingZone(null)
     setSelectedZoneId(newZone.id)
     setMode('select')
-    toast({ title: 'Zona dibuat', description: `${zoneFormName.trim()} (${pendingZone.rows}×${pendingZone.cols})` })
-  }, [pendingZone, zoneFormName, zoneFormColor, updateLayout, toast])
+    if (isGA) {
+      toast({ title: 'Zona dibuat', description: `${zoneFormName.trim()} (${zoneFormCapacity || pendingZone.rows * pendingZone.cols} orang)` })
+    } else {
+      toast({ title: 'Zona dibuat', description: `${zoneFormName.trim()} (${pendingZone.rows}×${pendingZone.cols})` })
+    }
+  }, [pendingZone, zoneFormName, zoneFormColor, zoneFormCapacity, updateLayout, toast, isGA])
 
   // ─── Grid Settings Handlers ────────────
   const handleGridRowsChange = useCallback((value: number) => {
@@ -936,8 +951,13 @@ export function PianoRollEditor({
   // ─── Save & Exit ───────────────────────
   const handleSaveAndExit = useCallback(() => {
     const stageTypeValue = stage?.stageType || initialStageType || 'PROSCENIUM'
-    onSaveAndExit(deepClone(layoutData), stageTypeValue)
-  }, [layoutData, stage, initialStageType, onSaveAndExit])
+    // For GA, preserve the GENERAL_ADMISSION type in layoutData
+    const outputData = deepClone(layoutData)
+    if (isGA) {
+      outputData.type = 'GENERAL_ADMISSION'
+    }
+    onSaveAndExit(outputData, stageTypeValue)
+  }, [layoutData, stage, initialStageType, onSaveAndExit, isGA])
 
   // ─── Cursor Style ──────────────────────
   const getCursorStyle = useMemo(() => {
@@ -1042,7 +1062,7 @@ export function PianoRollEditor({
             <span>•</span>
             <span>{zones.length} zones</span>
             <span>•</span>
-            <span className="text-gold font-semibold">{totalSeats} seats</span>
+            <span className="text-gold font-semibold">{totalSeats} {isGA ? 'orang' : 'seats'}</span>
           </div>
 
           {/* Right: Actions */}
@@ -1289,7 +1309,11 @@ export function PianoRollEditor({
                       }}
                     >
                       {zone.name}
-                      <span className="ml-1 opacity-60 text-[8px]">({zone.rows * zone.cols})</span>
+                      {isGA ? (
+                        <span className="ml-1 opacity-60 text-[8px]">({zone.capacity || zone.rows * zone.cols} org)</span>
+                      ) : (
+                        <span className="ml-1 opacity-60 text-[8px]">({zone.rows * zone.cols})</span>
+                      )}
                     </div>
                   )
                 })}
@@ -1396,6 +1420,7 @@ export function PianoRollEditor({
                     zone={selectedZone}
                     gridRows={gridRows}
                     gridCols={gridCols}
+                    isGA={isGA}
                     onUpdate={(updates) => handleUpdateZone(selectedZone.id, updates)}
                     onDelete={() => handleDeleteZone(selectedZone.id)}
                   />
@@ -1469,7 +1494,7 @@ export function PianoRollEditor({
         {/* ─── Bottom Toolbar ─── */}
         <div className="flex items-center justify-between px-3 py-1.5 bg-gray-800 border-t border-gray-700 shrink-0">
           <div className="flex items-center gap-3 text-[10px] text-gray-500">
-            <span>PIANO ROLL EDITOR</span>
+            <span>{isGA ? 'GENERAL ADMISSION EDITOR' : 'PIANO ROLL EDITOR'}</span>
             <span>•</span>
             <span>Cell: {cellSize}px</span>
           </div>
@@ -1485,7 +1510,7 @@ export function PianoRollEditor({
       <Dialog open={zoneDialogOpen} onOpenChange={setZoneDialogOpen}>
         <DialogContent className="sm:max-w-[380px] bg-gray-800 border-gray-700 text-gray-200">
           <DialogHeader>
-            <DialogTitle className="text-sm">New Zone ({pendingZone?.rows}×{pendingZone?.cols})</DialogTitle>
+            <DialogTitle className="text-sm">Zona Baru ({pendingZone?.rows}×{pendingZone?.cols})</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
@@ -1525,6 +1550,20 @@ export function PianoRollEditor({
                 <div className="w-7 h-7 rounded-md border border-gray-600" style={{ backgroundColor: zoneFormColor }} />
               </div>
             </div>
+            {isGA && (
+              <div className="space-y-2">
+                <Label className="text-xs text-gray-400">Kapasitas (orang)</Label>
+                <Input
+                  type="number"
+                  value={zoneFormCapacity ?? ''}
+                  onChange={(e) => setZoneFormCapacity(e.target.value ? Number(e.target.value) : undefined)}
+                  placeholder={pendingZone ? `${pendingZone.rows * pendingZone.cols}` : ''}
+                  className="bg-gray-700 border-gray-600 text-gray-200 h-9 text-sm"
+                  min={1}
+                />
+                <p className="text-[10px] text-gray-500">Kosongkan = {pendingZone?.rows || 0}×{pendingZone?.cols || 0} = {pendingZone ? pendingZone.rows * pendingZone.cols : 0}</p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setZoneDialogOpen(false)} className="text-gray-400">
@@ -1627,12 +1666,14 @@ function ZoneProperties({
   zone,
   gridRows,
   gridCols,
+  isGA,
   onUpdate,
   onDelete,
 }: {
   zone: PianoRollZone
   gridRows: number
   gridCols: number
+  isGA?: boolean
   onUpdate: (updates: Partial<PianoRollZone>) => void
   onDelete: () => void
 }) {
@@ -1644,7 +1685,7 @@ function ZoneProperties({
           <span className="text-xs font-semibold">Zone Properties</span>
         </div>
         <Badge variant="outline" className="text-[10px] text-gray-400 border-gray-700 bg-gray-800">
-          {zone.rows * zone.cols} seats
+          {isGA ? `${zone.capacity || zone.rows * zone.cols} orang` : `${zone.rows * zone.cols} seats`}
         </Badge>
       </div>
 

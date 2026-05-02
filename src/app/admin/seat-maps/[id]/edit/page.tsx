@@ -64,7 +64,20 @@ export default function SeatMapEditPage() {
   // Validate and sanitize layoutData from API
   const sanitizeLayoutData = useCallback((raw: any, type: SeatType): any => {
     if (!raw || typeof raw !== 'object') return null
-    if (type === 'PIANO_ROLL' || type === 'GENERAL_ADMISSION') {
+    if (type === 'GENERAL_ADMISSION') {
+      return {
+        type: 'GENERAL_ADMISSION',
+        gridRows: Number(raw.gridRows) || 15,
+        gridCols: Number(raw.gridCols) || 25,
+        cellSize: Number(raw.cellSize) || 32,
+        zones: Array.isArray(raw.zones) ? raw.zones : [],
+        stage: raw.stage || null,
+        objects: Array.isArray(raw.objects) ? raw.objects : [],
+        canvasWidth: Number(raw.canvasWidth) || 0,
+        canvasHeight: Number(raw.canvasHeight) || 0,
+      }
+    }
+    if (type === 'PIANO_ROLL') {
       return {
         type: 'PIANO_ROLL',
         gridRows: Number(raw.gridRows) || 15,
@@ -533,6 +546,7 @@ export default function SeatMapEditPage() {
           initialStageType={currentStageType}
           adminId={adminId}
           adminName={adminName}
+          seatType={seatType}
           onSaveAndExit={handleSaveAndExit}
         />
       </ErrorBoundary>

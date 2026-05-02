@@ -77,7 +77,7 @@ export default function SeatMapsPage() {
       const data = typeof layoutData === 'string' ? JSON.parse(layoutData) : layoutData
       if (data.type === 'NUMBERED' && data.seats) return data.seats.length
       if (data.type === 'GENERAL_ADMISSION' && data.zones) {
-        return data.zones.reduce((sum: number, z: any) => sum + (z.capacity || 0), 0)
+        return data.zones.reduce((sum: number, z: any) => sum + (z.capacity || (z.rows || 1) * (z.cols || 1)), 0)
       }
       if (data.type === 'PIANO_ROLL' && data.zones) {
         return data.zones.reduce((sum: number, z: any) => sum + ((z.rows || 1) * (z.cols || 1)), 0)

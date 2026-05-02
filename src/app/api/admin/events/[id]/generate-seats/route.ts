@@ -84,7 +84,7 @@ function generateSeatsFromLayout(
   } else if (data.type === 'GENERAL_ADMISSION' && data.zones && Array.isArray(data.zones)) {
     // ─── GA zones ───────────────────────────────────────────────────
     for (const zone of data.zones) {
-      const capacity = zone.capacity || 0
+      const capacity = zone.capacity || (zone.rows || 1) * (zone.cols || 1)
       const zoneName = zone.name || 'GA'
       const category = zone.category || null
       const priceCatId = category && priceCategoryMap[category] ? priceCategoryMap[category] : null
@@ -265,7 +265,7 @@ export async function POST(
             eventId: id,
             eventShowDateId: sd.id,
             seatCode: s.seatCode,
-            status: s.status,
+            status: s.status as any,
             row: s.row,
             col: s.col,
             priceCategoryId: s.priceCategoryId,
@@ -281,7 +281,7 @@ export async function POST(
           eventId: id,
           eventShowDateId: showDates.length === 1 ? showDates[0].id : null,
           seatCode: s.seatCode,
-          status: s.status,
+          status: s.status as any,
           row: s.row,
             col: s.col,
             priceCategoryId: s.priceCategoryId,

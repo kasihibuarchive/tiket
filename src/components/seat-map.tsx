@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { DoorOpen, Lock, Check, X, Crown, User, GraduationCap, Loader2, AlertTriangle } from 'lucide-react'
+import { DoorOpen, Lock, Check, X, Crown, User, GraduationCap, Loader2, AlertTriangle, Minus, Plus, Ticket } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { Button } from '@/components/ui/button'
 import { cleanupExpiredLocks } from '@/lib/seat-cleanup'
@@ -19,6 +19,7 @@ interface SeatData {
   status: string
   row: string
   col: number
+  zoneName?: string | null
   priceCategory: {
     id: string
     name: string
@@ -74,6 +75,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
 
   const sessionId = useRef(getSessionId())
 
+  // GA-specific state
+  const [selectedGAZoneId, setSelectedGAZoneId] = useState<string | null>(null)
+  const [selectedGAQty, setSelectedGAQty] = useState(1)
+
   // Sync seats from props when initialSeats changes (e.g., switching show dates).
   // Uses the "adjusting state during render" pattern recommended by React docs,
   // because useEffect + setState is not allowed in React 19 strict mode.
@@ -84,6 +89,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     setSelectedSeatCodes(new Set())
     setLockCountdown(null)
     setHasPendingLock(false)
+    setSelectedGAZoneId(null)
+    setSelectedGAQty(1)
   }
 
   const onSelectionChangeRef = useRef(onSelectionChange)
@@ -495,6 +502,366 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     )
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // GA (General Admission) Hooks — always called, used conditionally
+  // ═══════════════════════════════════════════════════════════
+  const gaZones = parsedLayout?.isGA ? (parsedLayout.gaZones || []) : []
+  const isGA = parsedLayout?.isGA && gaZones.length > 0
+
+  const zoneAvailability = useMemo(() => {
+    if (!isGA) return new Map<string, { total: number; available: number; price: number; priceCatId: string | null }>()
+    const avail = new Map<string, { total: number; available: number; price: number; priceCatId: string | null }>()
+    for (const zone of gaZones) {
+      const zoneSeats = seats.filter((s) => s.zoneName === zone.name)
+      const total = zoneSeats.length
+      const available = zoneSeats.filter((s) => s.status === 'AVAILABLE').length
+      const firstSeat = zoneSeats[0]
+      const price = firstSeat?.priceCategory?.price || 0
+      const priceCatId = firstSeat?.priceCategory?.id || null
+      avail.set(zone.id, { total, available, price, priceCatId })
+    }
+    return avail
+  }, [seats, gaZones, isGA])
+
+  const selectedGAZoneData = isGA && selectedGAZoneId ? zoneAvailability.get(selectedGAZoneId) || null : null
+
+  const gaSelectedSeats = useMemo(() => {
+    if (!isGA || !selectedGAZoneId) return []
+    return seats.filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === gaZones.find(z => z.id === selectedGAZoneId)?.name)
+  }, [seats, selectedSeatCodes, selectedGAZoneId, gaZones, isGA])
+
+  const handleGAZoneClick = useCallback((zone: any) => {
+    if (!isGA) return
+    if (selectedGAZoneId === zone.id) {
+      setSelectedGAZoneId(null)
+      setSelectedGAQty(1)
+      const zoneCodes = seats
+        .filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === zone.name)
+        .map((s) => s.seatCode)
+      if (zoneCodes.length > 0) {
+        const newCodes = new Set(selectedSeatCodes)
+        for (const c of zoneCodes) newCodes.delete(c)
+        setSelectedSeatCodes(newCodes)
+        unlockSeats(zoneCodes, sessionId.current)
+        fetch('/api/seats/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, seatCodes: zoneCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
+        }).catch(() => {})
+        notifyParentWithCodes(newCodes)
+        if (newCodes.size === 0) setLockCountdown(null)
+      }
+      return
+    }
+
+    if (selectedGAZoneId) {
+      const prevZone = gaZones.find((z) => z.id === selectedGAZoneId)
+      const prevCodes = seats
+        .filter((s) => selectedSeatCodes.has(s.seatCode) && prevZone && s.zoneName === prevZone.name)
+        .map((s) => s.seatCode)
+      if (prevCodes.length > 0) {
+        const newCodes = new Set(selectedSeatCodes)
+        for (const c of prevCodes) newCodes.delete(c)
+        setSelectedSeatCodes(newCodes)
+        unlockSeats(prevCodes, sessionId.current)
+      }
+    }
+
+    setSelectedGAZoneId(zone.id)
+    setSelectedGAQty(1)
+  }, [isGA, selectedGAZoneId, selectedSeatCodes, seats, gaZones, eventId, showDateId, unlockSeats, notifyParentWithCodes])
+
+  const handleGAQtyChange = useCallback((newQty: number) => {
+    if (!isGA || !selectedGAZoneId) return
+    const currentQty = selectedSeatCodes.size
+    const zone = gaZones.find((z) => z.id === selectedGAZoneId)
+    if (!zone) return
+    const zoneSeats = seats.filter((s) => s.zoneName === zone.name && s.status === 'AVAILABLE')
+    const clampedQty = Math.max(1, Math.min(newQty, zoneSeats.length + currentQty))
+    setSelectedGAQty(clampedQty)
+  }, [isGA, selectedGAZoneId, selectedSeatCodes.size, seats, gaZones])
+
+  const handleGAQtyConfirm = useCallback(async () => {
+    if (!isGA || !selectedGAZoneId || !selectedGAZoneData) return
+    const zone = gaZones.find((z) => z.id === selectedGAZoneId)
+    if (!zone) return
+
+    const currentLocked = new Set(
+      seats.filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === zone.name).map((s) => s.seatCode)
+    )
+    const targetQty = selectedGAQty
+    const needMore = targetQty - currentLocked.size
+
+    if (needMore > 0) {
+      const availableSeats = seats.filter(
+        (s) => s.zoneName === zone.name && s.status === 'AVAILABLE' && !currentLocked.has(s.seatCode)
+      )
+      const toLock = availableSeats.slice(0, needMore).map((s) => s.seatCode)
+      if (toLock.length === 0) return
+
+      const newCodes = new Set(selectedSeatCodes)
+      for (const c of toLock) newCodes.add(c)
+      for (const c of toLock) pendingLockRef.current.add(c)
+      setSelectedSeatCodes(newCodes)
+      setHasPendingLock(true)
+
+      lockSeats(Array.from(newCodes), sessionId.current)
+      fetch('/api/seats/lock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatCodes: Array.from(newCodes), sessionId: sessionId.current, showDateId: showDateId || undefined }),
+      }).then((res) => {
+        for (const c of toLock) pendingLockRef.current.delete(c)
+        setHasPendingLock(false)
+        if (!res.ok) {
+          res.json().then((data) => {
+            const rejected = data.rejectedSeats || []
+            if (rejected.length > 0) {
+              setSelectedSeatCodes((prev) => {
+                const next = new Set(prev)
+                for (const code of rejected) next.delete(code)
+                if (next.size === 0) setLockCountdown(null)
+                return next
+              })
+              setLockRejectionMsg(data.error || 'Kursi sudah diambil orang lain')
+            }
+          }).catch(() => {})
+        }
+      }).catch(() => {
+        for (const c of toLock) pendingLockRef.current.delete(c)
+        setHasPendingLock(false)
+      })
+
+      if (currentLocked.size === 0) setLockCountdown(LOCK_DURATION / 1000)
+    }
+
+    notifyParentWithCodes(new Set(selectedSeatCodes))
+  }, [isGA, selectedGAZoneId, selectedSeatCodes, selectedGAQty, seats, gaZones, eventId, showDateId, lockSeats, notifyParentWithCodes, selectedGAZoneData])
+
+  const handleGAClear = useCallback(async () => {
+    if (!isGA || !selectedGAZoneId) return
+    const zone = gaZones.find((z) => z.id === selectedGAZoneId)
+    if (!zone) return
+
+    const zoneCodes = seats
+      .filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === zone.name)
+      .map((s) => s.seatCode)
+
+    unlockSeats(zoneCodes, sessionId.current)
+    try {
+      await fetch('/api/seats/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatCodes: zoneCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
+      })
+    } catch { /* silent */ }
+
+    setSelectedGAZoneId(null)
+    setSelectedGAQty(1)
+    setSelectedSeatCodes(new Set())
+    pendingLockRef.current.clear()
+    setHasPendingLock(false)
+    setLockCountdown(null)
+    notifyParentWithCodes(new Set())
+  }, [isGA, selectedGAZoneId, selectedSeatCodes, seats, gaZones, eventId, showDateId, unlockSeats, notifyParentWithCodes])
+
+  // GA: Clear zone selection when all locked GA seats are lost (sold/locked by others)
+  // Uses "adjusting state during render" pattern (React 19 compatible)
+  const [prevGASelectedCodes, setPrevGASelectedCodes] = useState<Set<string>>(new Set())
+  if (isGA && selectedGAZoneId) {
+    const currentLockedCodes = new Set(
+      seats.filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === gaZones.find(z => z.id === selectedGAZoneId)?.name).map((s) => s.seatCode)
+    )
+    if (currentLockedCodes.size === 0 && prevGASelectedCodes.size > 0) {
+      setSelectedGAQty(1)
+      setSelectedGAZoneId(null)
+    }
+    if (currentLockedCodes.size !== prevGASelectedCodes.size) {
+      setPrevGASelectedCodes(currentLockedCodes)
+    }
+  } else {
+    if (prevGASelectedCodes.size > 0) setPrevGASelectedCodes(new Set())
+  }
+
+  // Integrate qty confirmation directly into the qty change handler
+  const handleGAQtyChangeWithConfirm = useCallback((newQty: number) => {
+    if (!isGA || !selectedGAZoneId) return
+    const currentQty = selectedSeatCodes.size
+    const zone = gaZones.find((z) => z.id === selectedGAZoneId)
+    if (!zone) return
+    const zoneSeats = seats.filter((s) => s.zoneName === zone.name && s.status === 'AVAILABLE')
+    const clampedQty = Math.max(1, Math.min(newQty, zoneSeats.length + currentQty))
+    setSelectedGAQty(clampedQty)
+    setTimeout(() => handleGAQtyConfirm(), 0)
+  }, [isGA, selectedGAZoneId, selectedSeatCodes.size, seats, gaZones, selectedGAQty, handleGAQtyConfirm])
+
+  // ═══════════════════════════════════════════════════════════
+  // RENDER: General Admission (GA) Mode — Zone Cards with Capacity
+  // ═══════════════════════════════════════════════════════════
+  if (isGA) {
+    const gaStageType = parsedLayout?.stageType || 'PROSCENIUM'
+
+    return (
+      <div className="w-full space-y-4">
+        {/* Lock rejection notice */}
+        {lockRejectionMsg && (
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            {lockRejectionMsg}
+          </div>
+        )}
+
+        {/* Stage */}
+        <div className="flex justify-center">
+          <StageRenderer stageType={gaStageType} size="lg" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
+        </div>
+
+        {/* GA Zones Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {gaZones.map((zone) => {
+            const avail = zoneAvailability.get(zone.id)
+            const isSelected = selectedGAZoneId === zone.id
+            const available = avail?.available || 0
+            const price = avail?.price || 0
+
+            return (
+              <button
+                key={zone.id}
+                type="button"
+                onClick={() => handleGAZoneClick(zone)}
+                disabled={available === 0 && !isSelected}
+                className={cn(
+                  'p-4 rounded-xl border-2 text-left transition-all duration-200 w-full',
+                  isSelected
+                    ? 'border-[#C8A951] bg-[#C8A951]/5 shadow-sm'
+                    : available === 0
+                    ? 'border-gray-200 opacity-50 cursor-not-allowed'
+                    : 'border-gray-200 hover:border-[#C8A951]/50 hover:shadow-sm cursor-pointer'
+                )}
+              >
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-4 h-4 rounded-sm shrink-0"
+                    style={{ backgroundColor: zone.color }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <h3 className={cn(
+                      'font-semibold text-sm text-charcoal truncate',
+                      isSelected && 'text-[#C8A951]'
+                    )}>
+                      {zone.name}
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Kapasitas: {zone.capacity} orang
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between mt-2">
+                  <p className={cn(
+                    'text-sm font-medium',
+                    available === 0 ? 'text-red-500' : 'text-green-600'
+                  )}>
+                    Tersedia: {available}
+                  </p>
+                  {price > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Rp {price.toLocaleString('id-ID')}
+                    </p>
+                  )}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Quantity Picker for Selected Zone */}
+        {selectedGAZoneId && selectedGAZoneData && (
+          <div className="p-4 bg-white rounded-xl border border-[#C8A951]/20 shadow-sm animate-fade-in">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex-1">
+                <p className="text-sm font-medium text-charcoal">
+                  {selectedGAZoneData.available} kursi tersedia di zona ini
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {gaZones.find(z => z.id === selectedGAZoneId)?.name}
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                {lockCountdown && (
+                  <div className={cn(
+                    'px-3 py-1 rounded-full text-xs font-mono font-semibold',
+                    lockCountdown < 120 ? 'bg-red-50 text-red-600' : 'bg-[#C8A951]/10 text-[#C8A951]'
+                  )}>
+                    ⏱ {formatTime(lockCountdown)}
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleGAQtyChangeWithConfirm(selectedGAQty - 1)}
+                    disabled={selectedGAQty <= 1}
+                    className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-500 hover:bg-gray-50 disabled:opacity-30 transition-colors"
+                  >
+                    <Minus className="w-4 h-4" />
+                  </button>
+                  <span className="w-10 text-center text-lg font-semibold text-charcoal">
+                    {selectedSeatCodes.size}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleGAQtyChangeWithConfirm(selectedGAQty + 1)}
+                    disabled={selectedSeatCodes.size >= selectedGAZoneData.available}
+                    className="w-8 h-8 rounded-full border border-[#C8A951]/50 flex items-center justify-center text-[#C8A951] hover:bg-[#C8A951]/5 disabled:opacity-30 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleGAClear}
+                  className="text-xs text-muted-foreground"
+                >
+                  Batal
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Checkout Button */}
+        {selectedSeatCodes.size > 0 && (
+          <div className="p-4 bg-white rounded-xl border border-[#C8A951]/20 shadow-sm animate-fade-in">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-medium text-charcoal">
+                  <Ticket className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+                  {selectedSeatCodes.size} tiket dipilih
+                </p>
+                <p className="font-serif text-lg font-semibold text-[#C8A951] mt-1">
+                  Rp {totalPrice.toLocaleString('id-ID')}
+                </p>
+              </div>
+              <Button
+                onClick={() => onProceedToCheckout?.(selectedSeats)}
+                disabled={hasPendingLock}
+                className="bg-charcoal hover:bg-charcoal/90 text-[#C8A951] font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                title={hasPendingLock ? 'Menunggu konfirmasi...' : undefined}
+              >
+                {hasPendingLock ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengunci...</>
+                ) : (
+                  'Lanjut Bayar'
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  
   // ═══════════════════════════════════════════════════════════
   // RENDER: LayoutData Mode — Flat Grid (1:1 match with editor)
   // ═══════════════════════════════════════════════════════════
