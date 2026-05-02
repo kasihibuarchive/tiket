@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf'
 
-// Color palette — Japanese minimalist
+// Color palette
 const CHARCOAL = '#1a1a2e'
 const GOLD = '#C8A951'
 const CREAM = '#f9f7f4'
@@ -43,9 +43,7 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
   doc.setTextColor(LIGHT_GOLD)
   doc.text('E-TIKET RESMI  |  OFFICIAL E-TICKET', pageW / 2, 30, { align: 'center' })
 
-  doc.setFontSize(8)
-  doc.setTextColor('#888888')
-  doc.text('Japanese-Inspired Theater Experience', pageW / 2, 37, { align: 'center' })
+
 
   // ── Event Title ──────────────────────────────────────────
   const yStart = 62
@@ -182,7 +180,7 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
   doc.text('TEATERAN', pageW / 2, footerY + 5, { align: 'center' })
   doc.setFontSize(6)
   doc.setTextColor('#666666')
-  doc.text('www.teateran.com  |  E-Tiket ini digenerate secara otomatis dan sah sebagai bukti pembayaran.', pageW / 2, footerY + 11, { align: 'center' })
+  doc.text('teateran.vercel.app  |  E-Tiket ini digenerate secara otomatis dan sah sebagai bukti pembayaran.', pageW / 2, footerY + 11, { align: 'center' })
 
   return Buffer.from(doc.output('arraybuffer'))
 }
