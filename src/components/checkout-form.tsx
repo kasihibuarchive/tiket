@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, createElement } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog'
-import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Ticket, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store, ChevronRight, CheckCircle2 } from 'lucide-react'
+import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { savePendingTrx } from '@/lib/pending-trx'
 import { getSessionId } from '@/lib/session-id'
@@ -64,7 +64,7 @@ interface PaymentChannel {
 }
 
 const PAYMENT_CHANNELS: PaymentChannel[] = [
-  { code: 'QRIS', name: 'QRIS', icon: 'Smartphone', group: 'QRIS' },
+  { code: 'QRIS', name: 'QRIS', icon: 'QrCode', group: 'QRIS' },
   { code: 'BCAVA', name: 'BCA Virtual Account', icon: 'Landmark', group: 'Virtual Account' },
   { code: 'BNIVA', name: 'BNI Virtual Account', icon: 'Landmark', group: 'Virtual Account' },
   { code: 'BRIVA', name: 'BRI Virtual Account', icon: 'Landmark', group: 'Virtual Account' },
@@ -344,6 +344,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
 
   const finalTotal = grandTotal
   const selectedChannel = PAYMENT_CHANNELS.find((c) => c.code === paymentMethod)
+  const SelectedPaymentIcon = selectedChannel ? (ICON_MAP[selectedChannel.icon] || CreditCard) : CreditCard
 
   // Group channels for display
   const groupedChannels: Record<string, PaymentChannel[]> = {}
@@ -494,7 +495,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                   {selectedChannel ? (
                     <>
                       <div className="w-8 h-8 rounded-md bg-gold/10 flex items-center justify-center">
-                        {createElement(ICON_MAP[selectedChannel.icon] || CreditCard, { className: 'w-4 h-4 text-gold' })}
+                        <SelectedPaymentIcon className="w-4 h-4 text-gold" />
                       </div>
                       <div className="text-left">
                         <p className="text-sm font-semibold text-charcoal">{selectedChannel.name}</p>
