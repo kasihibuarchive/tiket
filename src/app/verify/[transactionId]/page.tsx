@@ -34,7 +34,6 @@ interface TransactionData {
 interface VerifyResponse {
   transaction: TransactionData
   justPaid?: boolean
-  midtransStatus?: string
 }
 
 export default function VerifyPage() {
@@ -181,7 +180,7 @@ export default function VerifyPage() {
                   MENUNGGU PEMBAYARAN
                 </h1>
                 <p className="text-sm text-muted-foreground text-center mt-1">
-                  Menunggu konfirmasi dari Midtrans...
+                  Menunggu konfirmasi pembayaran...
                 </p>
                 {pollCount > 0 && (
                   <p className="text-xs text-muted-foreground/50 text-center mt-1">

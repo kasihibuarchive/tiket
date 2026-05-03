@@ -21,6 +21,7 @@ import {
   RefreshCw,
   ArrowLeft,
   Ticket,
+  ExternalLink,
 } from 'lucide-react'
 
 interface TransactionData {
@@ -34,23 +35,12 @@ interface TransactionData {
   qrCodeUrl: string | null
   paidAt: string | null
   createdAt: string
+  paymentMethod?: string | null
+  paymentUrl?: string | null
   event: {
     title: string
     showDate: string
     location: string
-  }
-}
-
-declare global {
-  interface Window {
-    snap: {
-      pay: (token: string, callbacks: {
-        onSuccess?: (result: any) => void
-        onPending?: (result: any) => void
-        onError?: (result: any) => void
-        onClose?: () => void
-      }) => void
-    }
   }
 }
 
@@ -63,7 +53,7 @@ export default function CheckoutStatusPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [isRefreshing, setIsRefreshing] = useState(false)
-  const [snapLoading, setSnapLoading] = useState(false)
+  const [repayLoading, setRepayLoading] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchTransaction = useCallback(async (showLoading = false) => {
@@ -135,92 +125,34 @@ export default function CheckoutStatusPage() {
 
   const handlePayNow = async () => {
     if (!transaction) return
-    setSnapLoading(true)
+    setRepayLoading(true)
 
     try {
-      // Build item details from seat codes
-      const seatCodes: string[] = JSON.parse(transaction.seatCodes)
-      const items = seatCodes.map((code) => ({
-        id: code,
-        price: Math.round(transaction.totalAmount / seatCodes.length),
-        quantity: 1,
-        name: 'Kursi ' + code,
-        category: 'Tiket',
-      }))
-
+      // Re-create Tripay transaction and get new checkout URL
       const res = await fetch('/api/snap-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          transactionId: transaction.transactionId,
-          amount: transaction.totalAmount,
-          customerName: transaction.customerName,
-          customerEmail: transaction.customerEmail,
-          customerWa: transaction.customerWa,
-          itemDetails: items,
-        }),
+        body: JSON.stringify({ transactionId: transaction.transactionId }),
       })
 
       if (!res.ok) {
-        setError('Gagal mendapatkan token pembayaran')
-        setSnapLoading(false)
+        setError('Gagal mendapatkan halaman pembayaran')
+        setRepayLoading(false)
         return
       }
 
       const data = await res.json()
-      if (!data.token) {
-        setError('Gagal mendapatkan token pembayaran')
-        setSnapLoading(false)
+      if (!data.checkoutUrl) {
+        setError('Gagal mendapatkan halaman pembayaran')
+        setRepayLoading(false)
         return
       }
 
-      // Open Snap popup
-      if (typeof window !== 'undefined' && window.snap) {
-        window.snap.pay(data.token, {
-          onSuccess: () => {
-            clearPendingTrx()
-            router.push('/verify/' + transactionId)
-          },
-          onPending: () => {
-            router.push('/verify/' + transactionId)
-          },
-          onError: () => {
-            setError('Pembayaran gagal. Coba lagi.')
-            setSnapLoading(false)
-          },
-          onClose: () => setSnapLoading(false),
-        })
-      } else {
-        // Wait for snap.js
-        let attempts = 0
-        const waitForSnap = setInterval(() => {
-          attempts++
-          if (typeof window !== 'undefined' && window.snap) {
-            clearInterval(waitForSnap)
-            window.snap.pay(data.token, {
-              onSuccess: () => {
-                clearPendingTrx()
-                router.push('/verify/' + transactionId)
-              },
-              onPending: () => {
-                router.push('/verify/' + transactionId)
-              },
-              onError: () => {
-                setError('Pembayaran gagal')
-                setSnapLoading(false)
-              },
-              onClose: () => setSnapLoading(false),
-            })
-          } else if (attempts > 50) {
-            clearInterval(waitForSnap)
-            setError('Payment gateway tidak tersedia. Refresh halaman.')
-            setSnapLoading(false)
-          }
-        }, 200)
-      }
+      // Redirect to Tripay checkout page
+      window.location.href = data.checkoutUrl
     } catch {
       setError('Terjadi kesalahan. Coba lagi.')
-      setSnapLoading(false)
+      setRepayLoading(false)
     }
   }
 
@@ -400,10 +332,10 @@ export default function CheckoutStatusPage() {
             {isPending && (
               <Button
                 onClick={handlePayNow}
-                disabled={snapLoading}
+                disabled={repayLoading}
                 className="w-full bg-charcoal hover:bg-charcoal/90 text-gold font-semibold py-5"
               >
-                {snapLoading ? (
+                {repayLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Memuat Payment...
@@ -414,6 +346,17 @@ export default function CheckoutStatusPage() {
                     Bayar Sekarang
                   </>
                 )}
+              </Button>
+            )}
+
+            {isPending && transaction.paymentUrl && (
+              <Button
+                onClick={() => window.open(transaction.paymentUrl!, '_blank')}
+                variant="outline"
+                className="w-full border-gold/20 text-charcoal hover:bg-warm-white"
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                Buka Halaman Pembayaran
               </Button>
             )}
 

@@ -1,0 +1,148 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { verifyCallbackSignature } from '@/lib/tripay'
+import { sendETicketEmail } from '@/lib/email'
+import QRCode from 'qrcode'
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+
+    // Verify Tripay callback signature
+    const xCallbackSignature = request.headers.get('x-callback-signature') || ''
+    if (!verifyCallbackSignature(body, xCallbackSignature)) {
+      console.error('[tripay-webhook] Invalid signature for reference:', body.reference)
+      return NextResponse.json({ success: false, message: 'Invalid signature' }, { status: 403 })
+    }
+
+    const { reference, merchant_ref, status, paid_at } = body
+
+    // Find transaction by Tripay reference (stored in midtransId) or by transactionId (merchant_ref)
+    let transaction = await db.transaction.findUnique({
+      where: { transactionId: merchant_ref },
+    })
+
+    // Fallback: search by midtransId = reference
+    if (!transaction && reference) {
+      transaction = await db.transaction.findFirst({
+        where: { midtransId: reference },
+      })
+    }
+
+    if (!transaction) {
+      console.error('[tripay-webhook] Transaction not found. merchant_ref:', merchant_ref, 'reference:', reference)
+      return NextResponse.json({ success: false, message: 'Transaction not found' }, { status: 404 })
+    }
+
+    // Only process if still PENDING (avoid duplicate processing)
+    if (transaction.paymentStatus !== 'PENDING' && status !== 'REFUNDED') {
+      console.log('[tripay-webhook] Transaction', merchant_ref, 'already', transaction.paymentStatus, '- skipping')
+      return NextResponse.json({ success: true })
+    }
+
+    // ── PAID ──
+    if (status === 'PAID') {
+      const seatCodes: string[] = JSON.parse(transaction.seatCodes)
+
+      await db.transaction.update({
+        where: { transactionId: transaction.transactionId },
+        data: {
+          paymentStatus: 'PAID',
+          paidAt: paid_at ? new Date(paid_at * 1000) : new Date(),
+          midtransId: reference,
+        },
+      })
+
+      // Mark seats as SOLD — clear lockedBy too
+      await db.seat.updateMany({
+        where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
+        data: { status: 'SOLD', lockedUntil: null, lockedBy: null },
+      })
+
+      // Generate QR code
+      const qrText = 'NAMA: ' + transaction.customerName + ' | KURSI: ' + transaction.seatCodes + ' | KODE TRX: ' + transaction.transactionId
+      const qrDataUrl = await QRCode.toDataURL(qrText)
+      await db.transaction.update({
+        where: { transactionId: transaction.transactionId },
+        data: { qrCodeUrl: qrDataUrl },
+      })
+
+      // Send e-ticket email
+      const event = await db.event.findUnique({ where: { id: transaction.eventId } })
+      const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
+
+      if (event) {
+        const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
+          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+        })
+        console.log('[tripay-webhook] Sending e-ticket email to:', transaction.customerEmail, 'for order:', merchant_ref)
+        sendETicketEmail({
+          customerName: transaction.customerName,
+          customerEmail: transaction.customerEmail,
+          eventName: event.title,
+          showDate,
+          location: event.location,
+          seatCodes,
+          transactionId: transaction.transactionId,
+          totalAmount: transaction.totalAmount,
+          qrCodeDataUrl: qrDataUrl,
+          template: emailTemplate ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer } : undefined,
+        }).then(() => {
+          console.log('[tripay-webhook] E-ticket email sent successfully to:', transaction.customerEmail)
+        }).catch((emailError: any) => console.error('[tripay-webhook] Failed to send E-Ticket email:', emailError))
+      }
+
+      return NextResponse.json({ success: true })
+    }
+
+    // ── EXPIRED ──
+    if (status === 'EXPIRED') {
+      const seatCodes: string[] = JSON.parse(transaction.seatCodes)
+
+      await db.transaction.update({
+        where: { transactionId: transaction.transactionId },
+        data: { paymentStatus: 'EXPIRED', expiredAt: new Date(), midtransId: reference },
+      })
+
+      // Release seats
+      await db.seat.updateMany({
+        where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
+        data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
+      })
+
+      return NextResponse.json({ success: true })
+    }
+
+    // ── FAILED ──
+    if (status === 'FAILED') {
+      const seatCodes: string[] = JSON.parse(transaction.seatCodes)
+
+      await db.transaction.update({
+        where: { transactionId: transaction.transactionId },
+        data: { paymentStatus: 'FAILED', expiredAt: new Date(), midtransId: reference },
+      })
+
+      await db.seat.updateMany({
+        where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
+        data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
+      })
+
+      return NextResponse.json({ success: true })
+    }
+
+    // ── REFUNDED ──
+    if (status === 'REFUNDED') {
+      await db.transaction.update({
+        where: { transactionId: transaction.transactionId },
+        data: { paymentStatus: 'FAILED', midtransId: reference },
+      })
+      return NextResponse.json({ success: true })
+    }
+
+    console.log('[tripay-webhook] Unhandled status:', status, 'for order:', merchant_ref)
+    return NextResponse.json({ success: true })
+  } catch (error) {
+    console.error('[tripay-webhook] Error processing callback:', error)
+    return NextResponse.json({ success: false, message: 'Webhook processing failed' }, { status: 500 })
+  }
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { randomUUID } from 'crypto'
+import { getTripayConfig, createTransactionSignature, LEGACY_METHOD_MAP } from '@/lib/tripay'
 
 const CHECKOUT_PREFIX = 'CK:'
 
@@ -49,7 +50,12 @@ export async function POST(request: NextRequest) {
 
     // Get event for admin fee
     const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true } })
-    const resolvedPaymentMethod = paymentMethod || 'NON_QRIS'
+
+    // Resolve payment method — accept Tripay channel codes or legacy QRIS/NON_QRIS
+    let resolvedMethod = paymentMethod || 'BCAVA'
+    if (LEGACY_METHOD_MAP[resolvedMethod]) {
+      resolvedMethod = LEGACY_METHOD_MAP[resolvedMethod]
+    }
 
     // Calculate seat prices
     const priceCats = await db.priceCategory.findMany({ where: { eventId } })
@@ -64,11 +70,10 @@ export async function POST(request: NextRequest) {
       items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket' })
     }
 
-    // Admin fee — flat per ticket (same for all payment methods)
+    // Admin fee — flat per ticket
     const adminFeePerTicket = event?.adminFee || 0
     const adminFeeTotal = adminFeePerTicket * seatCodes.length
 
-    // Add admin fee as item if > 0
     if (adminFeeTotal > 0) {
       items.push({ id: 'ADMIN-FEE', price: adminFeeTotal, quantity: 1, name: 'Biaya Admin', category: 'Biaya' })
     }
@@ -95,7 +100,6 @@ export async function POST(request: NextRequest) {
         if (nowJakarta >= fromJakarta && nowJakarta <= untilJakarta) {
           const hasMerch = merchandise && Array.isArray(merchandise) && merchandise.length > 0
 
-          // Validate minimum requirements
           if (seatCodes.length < (promoCodeData.minTickets || 0)) {
             return NextResponse.json({ error: `Promo ini berlaku untuk pembelian minimal ${promoCodeData.minTickets} tiket` }, { status: 400 })
           }
@@ -103,7 +107,6 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: `Promo ini berlaku jika membeli minimal ${promoCodeData.minMerchItems} merchandise` }, { status: 400 })
           }
 
-          // Validate target requirements
           if (promoTarget === 'BUNDLING' && !(seatCodes.length > 0 && hasMerch)) {
             return NextResponse.json({ error: 'Promo bundling hanya berlaku jika membeli tiket + merchandise' }, { status: 400 })
           }
@@ -111,16 +114,11 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Promo ini hanya berlaku untuk merchandise' }, { status: 400 })
           }
 
-          // Calculate discount based on target and isPerItem
-          // Note: merchTotal will be calculated below, so for TICKET target, use seatTotal only
-          // For MERCH/BUNDLING/ALL, discount will be recalculated after merch processing
           const ticketSubtotal = seatTotal + adminFeeTotal
           const isPerItem = promoCodeData.isPerItem === true
 
           if (promoTarget === 'TICKET') {
-            // Discount applies to ticket subtotal only
             if (isPerItem) {
-              // Per-item: discount × number of tickets
               const perItemDiscount =
                 promoCodeData.discountType === 'PERCENT'
                   ? Math.round((ticketSubtotal / seatCodes.length) * promoCodeData.discountValue / 100)
@@ -133,7 +131,6 @@ export async function POST(request: NextRequest) {
                   : Math.min(promoCodeData.discountValue, ticketSubtotal)
             }
           }
-          // For MERCH, BUNDLING, ALL — discount will be calculated after merchandise processing
         }
       }
     }
@@ -145,7 +142,6 @@ export async function POST(request: NextRequest) {
       let merchTotal = 0
 
       for (const merch of merchandise) {
-        // Look up in DB for authoritative price & stock
         const merchItem = await db.merchandise.findUnique({ where: { id: merch.merchandiseId } })
         if (!merchItem) {
           return NextResponse.json({ error: 'Merchandise "' + merch.name + '" tidak ditemukan' }, { status: 404 })
@@ -154,7 +150,7 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'Stok "' + merchItem.name + '" tidak cukup (sisa: ' + merchItem.stock + ')' }, { status: 409 })
         }
 
-        const subtotal = merchItem.price * merch.quantity  // Use DB price
+        const subtotal = merchItem.price * merch.quantity
         merchTotal += subtotal
 
         merchDataToSave.push({
@@ -173,7 +169,6 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      // Deduct stock AFTER all items verified (avoid partial deduction)
       for (const merch of merchandise) {
         await db.merchandise.update({
           where: { id: merch.merchandiseId },
@@ -181,7 +176,6 @@ export async function POST(request: NextRequest) {
         })
       }
 
-      // Recalculate discount for MERCH/BUNDLING/ALL targets now that we have merch total
       if (promoCodeData && discountAmount >= 0 && (promoTarget === 'ALL' || promoTarget === 'MERCH' || promoTarget === 'BUNDLING')) {
         const isPerItem = promoCodeData.isPerItem === true
         let targetSubtotal = 0
@@ -191,12 +185,10 @@ export async function POST(request: NextRequest) {
         } else if (promoTarget === 'BUNDLING') {
           targetSubtotal = seatTotal + adminFeeTotal + merchTotal
         } else {
-          // ALL
           targetSubtotal = seatTotal + adminFeeTotal + merchTotal
         }
 
         if (isPerItem) {
-          // Per-item discount
           const totalItems = seatCodes.length + (merchandise || []).reduce((s: number, m: any) => s + m.quantity, 0)
           const perItemDiscount =
             promoCodeData.discountType === 'PERCENT'
@@ -219,8 +211,7 @@ export async function POST(request: NextRequest) {
 
     console.log('[checkout] seatTotal:', seatTotal, 'adminFee:', adminFeeTotal, 'discount:', discountAmount, 'merchTotal:', merchTotalCalc, 'totalAmount:', totalAmount)
 
-    // Increment promo code usage whenever promoCodeId is provided
-    // This prevents double-use even if server-side validation differs from client
+    // Increment promo code usage
     if (promoCodeId) {
       try {
         await db.promoCode.update({
@@ -233,9 +224,85 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Generate transaction
+    // Generate transaction ID
     const tid = 'TRX-' + randomUUID().slice(0, 8).toUpperCase()
 
+    // ── Tripay: Create closed payment transaction ──
+    const tripayConfig = getTripayConfig()
+    if (!tripayConfig.apiKey) {
+      console.error('[checkout] TRIPAY_API_KEY is not configured')
+      return NextResponse.json(
+        { error: 'Payment gateway belum dikonfigurasi. Hubungi admin untuk mengatur API key Tripay.' },
+        { status: 503 }
+      )
+    }
+
+    const expiredTime = Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
+    const signature = createTransactionSignature(tid, totalAmount)
+    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+
+    // Build order_items for Tripay
+    const orderItems = discountAmount === 0
+      ? items.map((item) => ({
+          sku: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: item.quantity,
+        }))
+      : [{
+          sku: 'SUMMARY',
+          name: seatCodes.length + ' Tiket' + (merchDataToSave ? ' + Merchandise' : ''),
+          price: totalAmount,
+          quantity: 1,
+        }]
+
+    const tripayParams = new URLSearchParams({
+      method: resolvedMethod,
+      merchant_ref: tid,
+      amount: String(totalAmount),
+      customer_name: customerName,
+      customer_email: customerEmail,
+      customer_phone: customerWa,
+      order_items: JSON.stringify(orderItems),
+      callback_url: appUrl + '/api/webhooks/tripay',
+      return_url: appUrl + '/verify/' + tid,
+      expired_time: String(expiredTime),
+      signature,
+    })
+
+    console.log('[checkout] Tripay creating transaction:', resolvedMethod, 'amount:', totalAmount, 'tid:', tid)
+
+    const tripayRes = await fetch(tripayConfig.baseUrl + '/transaction/create', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + tripayConfig.apiKey,
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: tripayParams.toString(),
+    })
+
+    if (!tripayRes.ok) {
+      const errText = await tripayRes.text().catch(() => 'Unknown error')
+      console.error('[checkout] Tripay error:', tripayRes.status, errText)
+      return NextResponse.json({ error: 'Gagal menghubungi payment gateway (error ' + tripayRes.status + ')' }, { status: 502 })
+    }
+
+    const tripayData = await tripayRes.json()
+
+    if (!tripayData.success || !tripayData.data) {
+      const errMsg = tripayData.message || 'Gagal membuat transaksi pembayaran'
+      console.error('[checkout] Tripay API error:', errMsg)
+      return NextResponse.json({ error: errMsg }, { status: 502 })
+    }
+
+    const { reference, checkout_url, pay_url, pay_code, status } = tripayData.data
+
+    // Determine payment URL: prefer checkout_url (works for all channels)
+    const paymentUrl = checkout_url || pay_url || null
+
+    console.log('[checkout] Tripay success — reference:', reference, 'checkout_url:', !!paymentUrl, 'pay_code:', !!pay_code)
+
+    // Save transaction to DB
     await db.transaction.create({
       data: {
         transactionId: tid,
@@ -250,75 +317,19 @@ export async function POST(request: NextRequest) {
         adminFeeApplied: adminFeeTotal,
         promoCodeId: discountAmount > 0 ? promoCodeId : null,
         merchandiseData: merchDataToSave ? JSON.stringify(merchDataToSave) : null,
+        midtransId: reference,       // Store Tripay reference (backward compat field name)
+        paymentMethod: resolvedMethod,
+        paymentUrl: paymentUrl,
       },
     })
 
-    // Midtrans Snap - use finalTotal as gross_amount
-    // DO NOT send item_details when discount is applied to avoid mismatch
-    // Midtrans validates sum(item_details) === gross_amount; if mismatch, it may override
-    const serverKey = process.env.MIDTRANS_SERVER_KEY || ''
-    if (!serverKey) {
-      console.error('[checkout] MIDTRANS_SERVER_KEY is not configured in .env')
-      return NextResponse.json(
-        { error: 'Payment gateway belum dikonfigurasi. Hubungi admin untuk mengatur API key Midtrans.' },
-        { status: 503 }
-      )
-    }
-    const auth = Buffer.from(serverKey + ':').toString('base64')
-    const snapUrl = 'https://app.sandbox.midtrans.com/snap/v1/transactions'
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
-
-    const snapPayload: any = {
-      transaction_details: { order_id: tid, gross_amount: totalAmount },
-      customer_details: { first_name: customerName, email: customerEmail, phone: customerWa },
-      callbacks: { finish: appUrl + '/verify/' + tid },
-    }
-
-    // Restrict payment methods based on user selection
-    if (resolvedPaymentMethod === 'QRIS') {
-      snapPayload.enabled_payments = ['qris']
-    } else {
-      snapPayload.enabled_payments = ['bca_va', 'bni_va', 'bri_va', 'permata_va', 'bank_transfer', 'gopay', 'shopeepay', 'indomaret', 'alfamart']
-    }
-
-    // Only include item_details when there's no discount (items sum matches gross_amount)
-    if (discountAmount === 0) {
-      snapPayload.item_details = items
-    } else {
-      // With discount: send single summary item so display matches gross_amount
-      const itemNames: string[] = []
-      for (const item of items) {
-        if (item.category !== 'Biaya') {
-          itemNames.push(item.name)
-        }
-      }
-      snapPayload.item_details = [
-        {
-          id: 'SUMMARY',
-          price: totalAmount,
-          quantity: 1,
-          name: seatCodes.length + ' Tiket' + (merchDataToSave ? ' + Merchandise' : ''),
-          category: 'Tiket Teateran',
-        },
-      ]
-    }
-
-    console.log('[checkout] Midtrans payload:', JSON.stringify(snapPayload, null, 2))
-
-    const snapRes = await fetch(snapUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: 'Basic ' + auth },
-      body: JSON.stringify(snapPayload),
+    return NextResponse.json({
+      reference,
+      checkoutUrl: paymentUrl,
+      payCode: pay_code,
+      transactionId: tid,
+      paymentMethod: resolvedMethod,
     })
-
-    if (!snapRes.ok) {
-      const errText = await snapRes.text().catch(() => 'Unknown error')
-      console.error('[checkout] Midtrans error:', snapRes.status, errText)
-      return NextResponse.json({ error: 'Gagal menghubungi payment gateway (error ' + snapRes.status + ')' }, { status: 502 })
-    }
-
-    const snapData = await snapRes.json()
-    return NextResponse.json({ snapToken: snapData.token, transactionId: tid, redirectUrl: snapData.redirect_url })
   } catch (error) {
     console.error('[checkout] Fatal error:', error)
     return NextResponse.json({ error: 'Terjadi kesalahan server. Coba lagi.' }, { status: 500 })

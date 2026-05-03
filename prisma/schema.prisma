@@ -184,7 +184,7 @@ model Transaction {
   customerWa       String        // WhatsApp number
   seatCodes        String        // JSON array of strings, e.g., ["A-1", "A-2"]
   totalAmount      Float
-  midtransId       String?       // Midtrans order ID
+  midtransId       String?       // Payment gateway reference ID (Tripay reference)
   paymentStatus    PaymentStatus @default(PENDING)
   qrCodeUrl        String?       // QR code image (base64 or URL)
   paidAt           DateTime?
@@ -195,6 +195,8 @@ model Transaction {
   adminFeeApplied  Int           @default(0) // Total admin fee charged
   promoCodeId      String?       // Applied promo code
   merchandiseData  String?       // JSON: [{merchandiseId, name, price, quantity}]
+  paymentMethod    String?       // Payment channel code (e.g., BCAVA, QRIS, OVO, BRIVA)
+  paymentUrl       String?       // Tripay checkout_url / pay_url for re-payment
 
   // Relations
   event          Event          @relation(fields: [eventId], references: [id])

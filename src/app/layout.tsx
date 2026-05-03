@@ -3,7 +3,7 @@ import { Noto_Serif_JP, Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { PendingTransactionToast } from "@/components/pending-transaction-toast";
-import Script from "next/script";
+
 
 const inter = Inter({
   variable: "--font-inter",
@@ -47,13 +47,6 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="id" suppressHydrationWarning>
-      <head>
-        <Script
-          src="https://app.sandbox.midtrans.com/snap/snap.js"
-          data-client-key={process.env.NEXT_PUBLIC_MIDTRANS_CLIENT_KEY}
-          strategy="lazyOnload"
-        />
-      </head>
       <body
         className={`${inter.variable} ${notoSerif.variable} ${geistMono.variable} font-sans antialiased`}
       >

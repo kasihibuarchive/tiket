@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog'
-import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Ticket, Percent, X, Minus, Plus, Tag, Smartphone, Banknote } from 'lucide-react'
+import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Ticket, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { savePendingTrx } from '@/lib/pending-trx'
 import { getSessionId } from '@/lib/session-id'
@@ -55,17 +55,34 @@ interface CheckoutFormProps {
   adminFee?: number
 }
 
-declare global {
-  interface Window {
-    snap: {
-      pay: (token: string, callbacks: {
-        onSuccess?: (result: any) => void
-        onPending?: (result: any) => void
-        onError?: (result: any) => void
-        onClose?: () => void
-      }) => void
-    }
-  }
+// Payment channels grouped for the selector
+interface PaymentChannel {
+  code: string
+  name: string
+  icon: 'Landmark' | 'Wallet' | 'Smartphone' | 'Store'
+  group: string
+}
+
+const PAYMENT_CHANNELS: PaymentChannel[] = [
+  { code: 'QRIS', name: 'QRIS', icon: 'Smartphone', group: 'QRIS' },
+  { code: 'BCAVA', name: 'BCA Virtual Account', icon: 'Landmark', group: 'Virtual Account' },
+  { code: 'BNIVA', name: 'BNI Virtual Account', icon: 'Landmark', group: 'Virtual Account' },
+  { code: 'BRIVA', name: 'BRI Virtual Account', icon: 'Landmark', group: 'Virtual Account' },
+  { code: 'MANDIRIVA', name: 'Mandiri Virtual Account', icon: 'Landmark', group: 'Virtual Account' },
+  { code: 'PERMATAVA', name: 'Permata VA', icon: 'Landmark', group: 'Virtual Account' },
+  { code: 'OVO', name: 'OVO', icon: 'Wallet', group: 'E-Wallet' },
+  { code: 'DANA', name: 'DANA', icon: 'Wallet', group: 'E-Wallet' },
+  { code: 'SHOPEEPAY', name: 'ShopeePay', icon: 'Wallet', group: 'E-Wallet' },
+  { code: 'ALFAMART', name: 'Alfamart', icon: 'Store', group: 'Toko Retail' },
+  { code: 'INDOMARET', name: 'Indomaret', icon: 'Store', group: 'Toko Retail' },
+]
+
+const ICON_MAP: Record<string, any> = {
+  Landmark,
+  Wallet,
+  Smartphone,
+  Store,
+  QrCode,
 }
 
 export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, onBack, adminFee = 0 }: CheckoutFormProps) {
@@ -84,7 +101,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
   const [merchDialogOpen, setMerchDialogOpen] = useState(false)
   const [selectedMerchId, setSelectedMerchId] = useState<string | null>(null)
 
-  // Derive live merch item from array (fixes stale quantity in dialog)
   const liveMerchItem = selectedMerchId ? merchandise.find((m) => m.id === selectedMerchId) || null : null
 
   // Promo code state
@@ -95,6 +111,9 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
 
   const sessionId = getSessionId()
   const seatCodes = selectedSeats.map((s) => s.seatCode)
+
+  // Payment method state — now uses specific Tripay channel codes
+  const [paymentMethod, setPaymentMethod] = useState<string>('QRIS')
 
   // Fetch merchandise for this event
   useEffect(() => {
@@ -116,9 +135,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     fetchMerch()
   }, [eventId])
 
-  // Payment method state
-  const [paymentMethod, setPaymentMethod] = useState<'QRIS' | 'NON_QRIS'>('NON_QRIS')
-
   // Fetch admin fee from event if not provided
   const [eventAdminFee, setEventAdminFee] = useState(adminFee)
   useEffect(() => {
@@ -135,14 +151,14 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     fetchEvent()
   }, [eventId, adminFee])
 
-  // === ALL CALCULATIONS (must use resolved admin fee) ===
+  // === ALL CALCULATIONS ===
   const seatTotal = totalPrice
   const resolvedAdminFee = adminFee > 0 ? adminFee : eventAdminFee
   const effectiveAdminFee = resolvedAdminFee * seatCodes.length
   const merchSubtotal = merchandise.reduce((sum, m) => sum + m.price * m.quantity, 0)
   const totalBeforeDiscount = seatTotal + effectiveAdminFee + merchSubtotal
 
-  // Calculate discount matching server-side logic in /api/checkout
+  // Calculate discount
   let discountAmount = 0
   let discountLabel = ''
 
@@ -251,45 +267,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     )
   }
 
-  const openSnapPopup = (token: string, transactionId: string) => {
-    // Helper: unlock seats on error so user can retry
-    const releaseOnFailure = () => {
-      fetch('/api/seats/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes, sessionId, showDateId: showDateId || undefined }),
-      }).catch(() => {})
-    }
-
-    if (typeof window !== 'undefined' && window.snap) {
-      window.snap.pay(token, {
-        onSuccess: () => router.push('/verify/' + transactionId),
-        onPending: () => router.push('/verify/' + transactionId),
-        onError: () => { setError('Pembayaran gagal. Coba lagi.'); setIsLoading(false); releaseOnFailure() },
-        onClose: () => { setIsLoading(false); releaseOnFailure() },
-      })
-    } else {
-      let attempts = 0
-      const waitForSnap = setInterval(() => {
-        attempts++
-        if (typeof window !== 'undefined' && window.snap) {
-          clearInterval(waitForSnap)
-          window.snap.pay(token, {
-            onSuccess: () => router.push('/verify/' + transactionId),
-            onPending: () => router.push('/verify/' + transactionId),
-            onError: () => { setError('Pembayaran gagal'); setIsLoading(false); releaseOnFailure() },
-            onClose: () => { setIsLoading(false); releaseOnFailure() },
-          })
-        } else if (attempts > 50) {
-          clearInterval(waitForSnap)
-          setError('Payment gateway tidak tersedia. Refresh halaman.')
-          setIsLoading(false)
-          releaseOnFailure()
-        }
-      }, 200)
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
@@ -300,7 +277,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     if (!formData.customerWa.trim()) { setError('Nomor WhatsApp harus diisi'); setIsLoading(false); return }
 
     try {
-      // Gate 2: Atomic checkout lock
+      // Gate: Atomic checkout lock
       const confirmRes = await fetch('/api/seats/confirm-lock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -347,10 +324,16 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
       }
 
       const data = await res.json()
-      if (!data.snapToken) { setError('Gagal mendapatkan token pembayaran'); setIsLoading(false); return }
+      if (!data.checkoutUrl) {
+        setError('Gagal mendapatkan halaman pembayaran')
+        setIsLoading(false); return
+      }
 
+      // Save pending transaction for toast reminder
       savePendingTrx(data.transactionId, new Date(Date.now() + 10 * 60 * 1000))
-      openSnapPopup(data.snapToken, data.transactionId)
+
+      // Redirect to Tripay checkout page
+      window.location.href = data.checkoutUrl
     } catch (err) {
       console.error('Checkout error:', err)
       setError('Terjadi kesalahan. Silakan coba lagi.')
@@ -359,6 +342,14 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
   }
 
   const finalTotal = grandTotal
+  const selectedChannel = PAYMENT_CHANNELS.find((c) => c.code === paymentMethod)
+
+  // Group channels for display
+  const groupedChannels: Record<string, PaymentChannel[]> = {}
+  for (const ch of PAYMENT_CHANNELS) {
+    if (!groupedChannels[ch.group]) groupedChannels[ch.group] = []
+    groupedChannels[ch.group].push(ch)
+  }
 
   return (
     <div className="mt-8 animate-fade-in">
@@ -389,7 +380,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                 </div>
               ))}
 
-              {/* Admin Fee */}
               {effectiveAdminFee > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
@@ -399,7 +389,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                 </div>
               )}
 
-              {/* Merchandise line items */}
               {merchandise.filter((m) => m.quantity > 0).map((m) => (
                 <div key={m.id} className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
@@ -410,7 +399,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                 </div>
               ))}
 
-              {/* Discount */}
               {discountAmount > 0 && (
                 <div className="space-y-0.5">
                   <div className="flex justify-between text-sm text-success font-medium">
@@ -490,50 +478,47 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
               </div>
             )}
 
-            {/* Payment Method Selector */}
+            {/* Payment Method Selector — Tripay specific channels */}
             <div className="space-y-2">
               <Label className="text-sm font-medium text-charcoal flex items-center gap-1.5">
                 <CreditCard className="w-3.5 h-3.5" />
                 Metode Pembayaran
               </Label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('QRIS')}
-                  className={cn(
-                    'p-3 rounded-lg border-2 text-left transition-all',
-                    paymentMethod === 'QRIS'
-                      ? 'border-gold bg-gold/5'
-                      : 'border-border hover:border-gold/30'
-                  )}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Smartphone className="w-4 h-4 text-gold" />
-                    <p className="text-sm font-semibold text-charcoal">QRIS</p>
+              <div className="space-y-2">
+                {Object.entries(groupedChannels).map(([group, channels]) => (
+                  <div key={group}>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1.5">{group}</p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {channels.map((channel) => {
+                        const IconComponent = ICON_MAP[channel.icon] || CreditCard
+                        return (
+                          <button
+                            key={channel.code}
+                            type="button"
+                            onClick={() => setPaymentMethod(channel.code)}
+                            className={cn(
+                              'p-2.5 rounded-lg border-2 text-left transition-all',
+                              paymentMethod === channel.code
+                                ? 'border-gold bg-gold/5'
+                                : 'border-border hover:border-gold/30'
+                            )}
+                          >
+                            <div className="flex items-center gap-1.5">
+                              <IconComponent className={cn('w-3.5 h-3.5', paymentMethod === channel.code ? 'text-gold' : 'text-muted-foreground')} />
+                              <p className="text-xs font-semibold text-charcoal leading-tight">{channel.name}</p>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Scan QR Code
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPaymentMethod('NON_QRIS')}
-                  className={cn(
-                    'p-3 rounded-lg border-2 text-left transition-all',
-                    paymentMethod === 'NON_QRIS'
-                      ? 'border-gold bg-gold/5'
-                      : 'border-border hover:border-gold/30'
-                  )}
-                >
-                  <div className="flex items-center gap-1.5">
-                    <Banknote className="w-4 h-4 text-gold" />
-                    <p className="text-sm font-semibold text-charcoal">Transfer Bank</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    VA / E-Wallet
-                  </p>
-                </button>
+                ))}
               </div>
+              {selectedChannel && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Kamu akan dialihkan ke halaman pembayaran {selectedChannel.name}
+                </p>
+              )}
             </div>
 
             {/* Promo Code */}

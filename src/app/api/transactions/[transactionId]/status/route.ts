@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getMidtransConfig } from '@/lib/midtrans'
+import { getTripayConfig } from '@/lib/tripay'
 import QRCode from 'qrcode'
 
 /**
  * GET /api/transactions/[transactionId]/status
- * 
- * Polls Midtrans API directly for payment status (bypasses webhook).
+ *
+ * Polls Tripay API directly for payment status (bypasses webhook).
  * Needed in development where localhost webhooks are unreachable.
- * On settlement: updates DB → marks seats SOLD → generates QR → sends email.
+ * On PAID: updates DB → marks seats SOLD → generates QR → sends email.
  */
 export async function GET(
   request: NextRequest,
@@ -36,43 +36,52 @@ export async function GET(
       })
     }
 
-    // Query Midtrans API for the real status
-    const config = getMidtransConfig()
-    const authString = Buffer.from(config.serverKey + ':').toString('base64')
-
-    const midtransRes = await fetch(
-      `https://api.${config.isProduction ? 'midtrans.com' : 'sandbox.midtrans.com'}/v2/${transactionId}/status`,
-      {
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Basic ${authString}`,
-        },
-      }
-    )
-
-    if (!midtransRes.ok) {
-      console.error(`[status-check] Midtrans API error: ${midtransRes.status}`)
+    // Query Tripay API for the real status
+    if (!transaction.midtransId) {
+      // No Tripay reference yet — return DB status
       return NextResponse.json({
         transactionId: transaction.transactionId,
         paymentStatus: transaction.paymentStatus,
       })
     }
 
-    const midtransData = await midtransRes.json()
-    const midtransStatus: string = midtransData.transaction_status
+    const tripayConfig = getTripayConfig()
+    const statusUrl = tripayConfig.baseUrl + '/transaction/detail?reference=' + transaction.midtransId
 
-    console.log(`[status-check] ${transactionId}: Midtrans="${midtransStatus}" DB="${transaction.paymentStatus}"`)
+    const tripayRes = await fetch(statusUrl, {
+      headers: { 'Authorization': 'Bearer ' + tripayConfig.apiKey },
+    })
+
+    if (!tripayRes.ok) {
+      console.error(`[status-check] Tripay API error: ${tripayRes.status}`)
+      return NextResponse.json({
+        transactionId: transaction.transactionId,
+        paymentStatus: transaction.paymentStatus,
+      })
+    }
+
+    const tripayData = await tripayRes.json()
+
+    if (!tripayData.success || !tripayData.data) {
+      console.error('[status-check] Tripay API returned non-success:', tripayData.message)
+      return NextResponse.json({
+        transactionId: transaction.transactionId,
+        paymentStatus: transaction.paymentStatus,
+      })
+    }
+
+    const tripayStatus: string = tripayData.data.status
+    console.log(`[status-check] ${transactionId}: Tripay="${tripayStatus}" DB="${transaction.paymentStatus}"`)
 
     // ── PAYMENT SUCCESS ──
-    if (midtransStatus === 'settlement' && transaction.paymentStatus !== 'PAID') {
+    if (tripayStatus === 'PAID' && transaction.paymentStatus !== 'PAID') {
       const seatCodes: string[] = JSON.parse(transaction.seatCodes)
 
       await db.transaction.update({
         where: { transactionId },
         data: {
           paymentStatus: 'PAID',
-          paidAt: new Date(),
-          midtransId: midtransData.transaction_id || null,
+          paidAt: tripayData.data.paid_at ? new Date(tripayData.data.paid_at * 1000) : new Date(),
         },
       })
 
@@ -126,17 +135,16 @@ export async function GET(
       return NextResponse.json(updated)
     }
 
-    // ── EXPIRE / FAILURE / CANCEL ──
-    if (['expire', 'failure', 'cancel'].includes(midtransStatus) && transaction.paymentStatus === 'PENDING') {
+    // ── EXPIRE / FAILURE ──
+    if (['EXPIRED', 'FAILED'].includes(tripayStatus) && transaction.paymentStatus === 'PENDING') {
       const seatCodes: string[] = JSON.parse(transaction.seatCodes)
-      const newStatus = midtransStatus === 'expire' ? 'EXPIRED' : 'FAILED'
+      const newStatus = tripayStatus === 'EXPIRED' ? 'EXPIRED' : 'FAILED'
 
       await db.transaction.update({
         where: { transactionId },
         data: {
           paymentStatus: newStatus as 'EXPIRED' | 'FAILED',
           expiredAt: new Date(),
-          midtransId: midtransData.transaction_id || null,
         },
       })
 
