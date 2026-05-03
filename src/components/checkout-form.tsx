@@ -121,8 +121,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
 
   // Fetch admin fee from event if not provided
   const [eventAdminFee, setEventAdminFee] = useState(adminFee)
-  const [qrisFee, setQrisFee] = useState(2000)
-  const [nonQrisFee, setNonQrisFee] = useState(3500)
   useEffect(() => {
     if (adminFee > 0) return
     async function fetchEvent() {
@@ -131,8 +129,6 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
         if (res.ok) {
           const data = await res.json()
           setEventAdminFee(data.adminFee || 0)
-          if (data.adminFeeQris) setQrisFee(data.adminFeeQris)
-          if (data.adminFeeNonQris) setNonQrisFee(data.adminFeeNonQris)
         }
       } catch {}
     }
@@ -141,10 +137,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
 
   // === ALL CALCULATIONS (must use resolved admin fee) ===
   const seatTotal = totalPrice
-  const useDynamicFee = qrisFee > 0 || nonQrisFee > 0
-  const resolvedAdminFee = useDynamicFee
-    ? (paymentMethod === 'QRIS' ? qrisFee : nonQrisFee)
-    : (adminFee > 0 ? adminFee : eventAdminFee)
+  const resolvedAdminFee = adminFee > 0 ? adminFee : eventAdminFee
   const effectiveAdminFee = resolvedAdminFee * seatCodes.length
   const merchSubtotal = merchandise.reduce((sum, m) => sum + m.price * m.quantity, 0)
   const totalBeforeDiscount = seatTotal + effectiveAdminFee + merchSubtotal
@@ -400,7 +393,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
               {effectiveAdminFee > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Biaya Admin ({seatCodes.length} tiket · {paymentMethod === 'QRIS' ? 'QRIS' : 'Transfer'})
+                    Biaya Admin ({seatCodes.length} tiket)
                   </span>
                   <span className="text-charcoal">Rp {effectiveAdminFee.toLocaleString('id-ID')}</span>
                 </div>
@@ -519,7 +512,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                     <p className="text-sm font-semibold text-charcoal">QRIS</p>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {useDynamicFee ? `Biaya admin Rp ${qrisFee.toLocaleString('id-ID')}/tiket` : 'Scan QR Code'}
+                    Scan QR Code
                   </p>
                 </button>
                 <button
@@ -537,15 +530,10 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                     <p className="text-sm font-semibold text-charcoal">Transfer Bank</p>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    {useDynamicFee ? `Biaya admin Rp ${nonQrisFee.toLocaleString('id-ID')}/tiket` : 'VA / E-Wallet'}
+                    VA / E-Wallet
                   </p>
                 </button>
               </div>
-              {useDynamicFee && (
-                <p className="text-[10px] text-muted-foreground/60">
-                  💡 QRIS lebih hemat! Hemat Rp {(nonQrisFee - qrisFee).toLocaleString('id-ID')}/tiket
-                </p>
-              )}
             </div>
 
             {/* Promo Code */}

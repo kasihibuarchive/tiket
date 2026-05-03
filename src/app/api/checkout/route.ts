@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     })
 
     // Get event for admin fee
-    const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true, adminFeeQris: true, adminFeeNonQris: true } })
+    const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true } })
     const resolvedPaymentMethod = paymentMethod || 'NON_QRIS'
 
     // Calculate seat prices
@@ -64,15 +64,8 @@ export async function POST(request: NextRequest) {
       items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket' })
     }
 
-    // Admin fee — dynamic based on payment method
-    let adminFeePerTicket: number
-    if (event?.adminFeeQris && event?.adminFeeNonQris) {
-      adminFeePerTicket = resolvedPaymentMethod === 'QRIS' ? event.adminFeeQris : event.adminFeeNonQris
-    } else if (event?.adminFee) {
-      adminFeePerTicket = event.adminFee
-    } else {
-      adminFeePerTicket = resolvedPaymentMethod === 'QRIS' ? 2000 : 3500
-    }
+    // Admin fee — flat per ticket (same for all payment methods)
+    const adminFeePerTicket = event?.adminFee || 0
     const adminFeeTotal = adminFeePerTicket * seatCodes.length
 
     // Add admin fee as item if > 0

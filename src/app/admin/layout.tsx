@@ -27,6 +27,7 @@ const adminLinks = [
 const usherLinks = [
   { href: '/admin/scanner', label: 'Scanner Tiket', icon: ScanLine },
   { href: '/admin/usher/events', label: 'Database Penonton', icon: Users },
+  { href: '/admin/usher/complimentary', label: 'Tiket Komplimen', icon: Gift },
   { href: '/admin/usher/merchandise', label: 'Merchandise Orders', icon: ShoppingBag },
 ]
 

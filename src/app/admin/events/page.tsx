@@ -42,8 +42,6 @@ interface EventData {
   synopsis?: string
   teaserVideoUrl?: string | null
   adminFee?: number
-  adminFeeQris?: number
-  adminFeeNonQris?: number
 }
 
 interface SeatMapOption {
@@ -63,8 +61,6 @@ interface EventFormData {
   synopsis: string
   isPublished: boolean
   adminFee: number
-  adminFeeQris: number
-  adminFeeNonQris: number
   priceCategories: Array<{ name: string; price: number; colorCode: string }>
   showDates: Array<{ date: string; openGate: string; label: string }>
 }
@@ -80,8 +76,6 @@ const emptyForm: EventFormData = {
   synopsis: '',
   isPublished: false,
   adminFee: 0,
-  adminFeeQris: 2000,
-  adminFeeNonQris: 3500,
   priceCategories: [
     { name: 'VIP', price: 150000, colorCode: '#C8A951' },
     { name: 'Regular', price: 75000, colorCode: '#8B8680' },
@@ -154,8 +148,6 @@ export default function AdminEventsPage() {
       synopsis: event.synopsis || '',
       isPublished: event.isPublished,
       adminFee: event.adminFee || 0,
-      adminFeeQris: event.adminFeeQris || 2000,
-      adminFeeNonQris: event.adminFeeNonQris || 3500,
       priceCategories: event.priceCategories.map((pc) => ({
         name: pc.name,
         price: pc.price,
@@ -739,38 +731,6 @@ export default function AdminEventsPage() {
                 className="bg-white"
               />
               <p className="text-xs text-muted-foreground">Biaya tambahan per tiket. Set 0 jika tidak ada biaya admin.</p>
-            </div>
-
-            {/* Dynamic Admin Fees */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  <Smartphone className="w-4 h-4 text-gold" />
-                  Biaya Admin QRIS per Tiket (Rp)
-                </Label>
-                <Input
-                  type="number"
-                  value={formData.adminFeeQris}
-                  onChange={(e) => setFormData({ ...formData, adminFeeQris: Number(e.target.value) || 0 })}
-                  placeholder="2000"
-                  className="bg-white"
-                />
-                <p className="text-xs text-muted-foreground">Default: 2000. Biaya admin untuk pembayaran QRIS.</p>
-              </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  <Banknote className="w-4 h-4 text-gold" />
-                  Biaya Admin Non-QRIS per Tiket (Rp)
-                </Label>
-                <Input
-                  type="number"
-                  value={formData.adminFeeNonQris}
-                  onChange={(e) => setFormData({ ...formData, adminFeeNonQris: Number(e.target.value) || 0 })}
-                  placeholder="3500"
-                  className="bg-white"
-                />
-                <p className="text-xs text-muted-foreground">Default: 3500. Biaya admin untuk transfer bank/e-wallet.</p>
-              </div>
             </div>
 
             <Separator />

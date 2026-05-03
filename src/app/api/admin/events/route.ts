@@ -68,8 +68,6 @@ export async function POST(request: NextRequest) {
       synopsis,
       isPublished,
       adminFee,
-      adminFeeQris,
-      adminFeeNonQris,
       priceCategories,
       showDates,
       teaserVideoUrl,
@@ -111,8 +109,6 @@ export async function POST(request: NextRequest) {
         synopsis,
         isPublished: isPublished || false,
         adminFee: adminFee || 0,
-        adminFeeQris: adminFeeQris || 0,
-        adminFeeNonQris: adminFeeNonQris || 0,
       },
     })
 

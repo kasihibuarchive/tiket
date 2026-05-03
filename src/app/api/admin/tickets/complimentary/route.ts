@@ -75,7 +75,7 @@ export async function GET() {
   }
 }
 
-// POST: Create complimentary ticket
+// POST: Create complimentary ticket (admin or usher)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
@@ -94,6 +94,16 @@ export async function POST(request: NextRequest) {
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
+
+    // ─── Auth: verify admin/usher from localStorage ─────────────────
+    let adminId = 'unknown'
+    let adminName = 'Unknown'
+    try {
+      const authHeader = request.headers.get('x-admin-id')
+      const authNameHeader = request.headers.get('x-admin-name')
+      if (authHeader) adminId = authHeader
+      if (authNameHeader) adminName = authNameHeader
+    } catch {}
 
     // Determine if this is a numbered or GA event
     const isNumbered = event.seatMapId
@@ -236,6 +246,21 @@ export async function POST(request: NextRequest) {
     }).catch((emailError: unknown) =>
       console.error('Failed to send complimentary e-ticket email:', emailError)
     )
+
+    // ─── Log activity ──────────────────────────────────────────────
+    const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+                     request.headers.get('x-real-ip') || null
+    try {
+      await db.activityLog.create({
+        data: {
+          adminId,
+          adminName,
+          action: 'COMPLIMENTARY_TICKET',
+          details: `Tiket komplimen untuk "${guestName}" (${guestEmail}) — Event: ${event.title} — ${seatCodes.length} tiket: ${seatCodes.join(', ')} — TRX: ${transactionId}`,
+          ipAddress: clientIp,
+        },
+      })
+    } catch {}
 
     return NextResponse.json({ success: true, transactionId, transaction })
   } catch (error) {
