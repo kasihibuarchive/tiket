@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { randomUUID } from 'crypto'
-import { getTripayConfig, createTransactionSignature, LEGACY_METHOD_MAP } from '@/lib/tripay'
+import { getTripayConfig, createTransactionSignature, createTripayTransaction, LEGACY_METHOD_MAP } from '@/lib/tripay'
 
 const CHECKOUT_PREFIX = 'CK:'
 
@@ -256,30 +256,23 @@ export async function POST(request: NextRequest) {
           quantity: 1,
         }]
 
-    const tripayParams = new URLSearchParams({
+    const tripayPayload = {
       method: resolvedMethod,
       merchant_ref: tid,
-      amount: String(totalAmount),
+      amount: totalAmount,
       customer_name: customerName,
       customer_email: customerEmail,
       customer_phone: customerWa,
-      order_items: JSON.stringify(orderItems),
+      order_items: orderItems,
       callback_url: appUrl + '/api/webhooks/tripay',
       return_url: appUrl + '/verify/' + tid,
-      expired_time: String(expiredTime),
+      expired_time: expiredTime,
       signature,
-    })
+    }
 
     console.log('[checkout] Tripay creating transaction:', resolvedMethod, 'amount:', totalAmount, 'tid:', tid)
 
-    const tripayRes = await fetch(tripayConfig.baseUrl + '/transaction/create', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + tripayConfig.apiKey,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: tripayParams.toString(),
-    })
+    const tripayRes = await createTripayTransaction(tripayPayload)
 
     if (!tripayRes.ok) {
       const errText = await tripayRes.text().catch(() => 'Unknown error')
