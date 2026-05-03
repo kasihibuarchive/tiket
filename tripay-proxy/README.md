@@ -1,88 +1,38 @@
 # Teateran Tripay Proxy
 
-Proxy server dengan IP statis untuk menghubungkan Vercel (serverless) ke Tripay API.
+Proxy tanpa dependency (pure Node.js) untuk menghubungkan Vercel ke Tripay API.
 
-## Masalah
-Vercel serverless punya IP dinamis → tidak bisa di-whitelist di Tripay.
+## Deploy ke Render.com
 
-## Solusi
-Proxy ini di-deploy di platform dengan IP statis (Render/Railway/Fly.io), lalu:
-- Vercel → Proxy (IP statis) → Tripay
-- Proxy IP di-whitelist di dashboard Tripay
+1. **Buka [render.com](https://render.com)** → Sign up dengan GitHub
 
----
+2. **New → Web Service** → Connect repo `kasihibuarchive/tiket`
 
-## Deploy ke Render.com (Gratis)
+3. **PENTING** — Setting:
+   - **Root Directory**: `tripay-proxy`
+   - **Build Command**: (kosongkan / hapus isi defaultnya)
+   - **Start Command**: `node server.js`
+   - **Instance Type**: **Free**
 
-1. **Fork/Upload repo ini** ke GitHub (atau buat repo baru, isi file `server.js`, `package.json`)
+4. **Environment Variables**:
+   | Key | Value |
+   |-----|-------|
+   | `TRIPAY_API_KEY` | dari dashboard Tripay |
+   | `TRIPAY_PRIVATE_KEY` | dari dashboard Tripay |
+   | `TRIPAY_MERCHANT_CODE` | dari dashboard Tripay |
+   | `TRIPAY_IS_PRODUCTION` | `false` |
+   | `PROXY_AUTH_KEY` | bikin random string |
+   | `ALLOWED_ORIGIN` | `https://www.teateran.site` |
 
-2. **Buka [render.com](https://render.com)** → Sign up dengan GitHub
+5. **Create Web Service** → tunggu Live
 
-3. **Buat Web Service baru:**
-   - Klik **New → Web Service**
-   - Connect repo GitHub kamu
-   - Setting:
-     - **Name**: `teateran-tripay-proxy`
-     - **Environment**: `Node`
-     - **Build Command**: `npm install`
-     - **Start Command**: `node server.js`
-     - **Instance Type**: `Free`
-   - Klik **Create Web Service**
+6. **Test**: buka `https://nama-service.onrender.com/health`
+   - Harus keluar `{"status":"ok",...}`
 
-4. **Set Environment Variables** (di bagian Environment):
-   ```
-   TRIPAY_API_KEY      = (isi dari dashboard Tripay)
-   TRIPAY_PRIVATE_KEY  = (isi dari dashboard Tripay)
-   TRIPAY_MERCHANT_CODE = (isi dari dashboard Tripay)
-   TRIPAY_IS_PRODUCTION = false
-   PROXY_AUTH_KEY      = (buat random string, misal: abc123xyz)
-   ALLOWED_ORIGIN      = https://www.teateran.site
-   ```
+7. **Cari IP**: buka terminal → `nslookup nama-service.onrender.com`
 
-5. **Deploy** → Tunggu sampai aktif (status "Live")
+8. **Whitelist IP** di Tripay Dashboard
 
-6. **Copy URL proxy**, formatnya: `https://teateran-tripay-proxy.onrender.com`
-
-7. **Dapatkan IP proxy:**
-   ```
-   curl https://api.ipify.org?hostname=teateran-tripay-proxy.onrender.com
-   ```
-   Atau: `nslookup teateran-tripay-proxy.onrender.com`
-
-8. **Whitelist IP tersebut di Tripay Dashboard** → Preferensi → IP Whitelist
-
----
-
-## Deploy ke Fly.io (Gratis, IP dedicated)
-
-1. Install flyctl: `curl -L https://fly.io/install.sh | sh`
-2. Login: `fly auth login`
-3. Di folder proxy, jalankan:
-   ```
-   fly launch
-   ```
-4. Set secrets:
-   ```
-   fly secrets set TRIPAY_API_KEY=xxx
-   fly secrets set TRIPAY_PRIVATE_KEY=xxx
-   fly secrets set TRIPAY_MERCHANT_CODE=xxx
-   fly secrets set TRIPAY_IS_PRODUCTION=false
-   fly secrets set PROXY_AUTH_KEY=random_string
-   fly secrets set ALLOWED_ORIGIN=https://www.teateran.site
-   ```
-5. Deploy: `fly deploy`
-6. Dapatkan IP: `fly ips list`
-7. Whitelist IP di Tripay
-
----
-
-## Setup di Vercel (Teateran)
-
-Setelah proxy aktif, tambahkan env var di Vercel:
-
-```
-TRIPAY_PROXY_URL = https://teateran-tripay-proxy.onrender.com
-TRIPAY_PROXY_AUTH_KEY = (sama dengan PROXY_AUTH_KEY di proxy)
-```
-
-Kode Teateran sudah diupdate otomatis — kalau `TRIPAY_PROXY_URL` di-set, semua request ke Tripay akan lewat proxy.
+9. **Set Vercel env vars**:
+   - `TRIPAY_PROXY_URL` = `https://nama-service.onrender.com`
+   - `TRIPAY_PROXY_AUTH_KEY` = (sama dengan PROXY_AUTH_KEY di atas)
