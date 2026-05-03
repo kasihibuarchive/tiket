@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, createElement } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -494,7 +494,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                   {selectedChannel ? (
                     <>
                       <div className="w-8 h-8 rounded-md bg-gold/10 flex items-center justify-center">
-                        {(ICON_MAP[selectedChannel.icon] || CreditCard)({ className: 'w-4 h-4 text-gold' })}
+                        {createElement(ICON_MAP[selectedChannel.icon] || CreditCard, { className: 'w-4 h-4 text-gold' })}
                       </div>
                       <div className="text-left">
                         <p className="text-sm font-semibold text-charcoal">{selectedChannel.name}</p>
