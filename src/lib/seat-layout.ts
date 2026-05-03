@@ -81,6 +81,8 @@ export interface ParsedLayout {
   }>
   /** Whether this is a General Admission layout */
   isGA?: boolean
+  /** URL of exported layout image (GA only) */
+  layoutImageUrl?: string | null
 }
 
 /**
@@ -252,6 +254,7 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
       canvasHeight: gridRows * cellSize,
       gaZones,
       isGA: true,
+      layoutImageUrl: data.layoutImageUrl || null,
     }
   }
 

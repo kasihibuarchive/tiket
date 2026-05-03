@@ -716,6 +716,17 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           <StageRenderer stageType={gaStageType} size="lg" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
         </div>
 
+        {/* Layout Image (if exported) */}
+        {parsedLayout?.layoutImageUrl && (
+          <div className="w-full rounded-xl overflow-hidden border border-gray-200">
+            <img
+              src={parsedLayout.layoutImageUrl}
+              alt="Layout Venue"
+              className="w-full h-auto"
+            />
+          </div>
+        )}
+
         {/* GA Zones Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {gaZones.map((zone) => {

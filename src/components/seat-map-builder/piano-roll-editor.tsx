@@ -48,6 +48,7 @@ import {
   GripVertical,
   Maximize2,
   LayoutGrid,
+  DoorOpen,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -64,6 +65,7 @@ export interface PianoRollZone {
   cols: number
   color: string
   capacity?: number
+  shape?: 'rectangle' | 'rounded-rect' | 'ellipse'
 }
 
 interface PianoRollObject {
@@ -94,6 +96,7 @@ export interface PianoRollLayoutData {
   objects: PianoRollObject[]
   canvasWidth: number
   canvasHeight: number
+  layoutImageUrl?: string
 }
 
 interface PianoRollEditorProps {
@@ -127,7 +130,15 @@ const ZONE_COLORS = [
   '#98C379', '#E5C07B', '#56B6C2', '#BE5046',
 ]
 
-type EditorMode = 'select' | 'draw' | 'erase'
+const OBJECT_PRESETS = [
+  { type: 'door', label: 'Pintu Masuk', emoji: '🚪', rows: 1, cols: 2, color: '#4A7C59' },
+  { type: 'exit', label: 'Pintu Keluar', emoji: '🚶', rows: 1, cols: 2, color: '#C75050' },
+  { type: 'toilet', label: 'Toilet', emoji: '🚻', rows: 1, cols: 2, color: '#5B8DBE' },
+  { type: 'info', label: 'Info', emoji: 'ℹ️', rows: 1, cols: 1, color: '#D4843E' },
+  { type: 'food', label: 'F&B', emoji: '🍜', rows: 1, cols: 2, color: '#8B6BAE' },
+]
+
+type EditorMode = 'select' | 'draw' | 'erase' | 'object'
 type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se' | null
 
 // ═══════════════════════════════════════════
@@ -193,6 +204,7 @@ function normalizeLayoutData(raw: any): PianoRollLayoutData {
     objects: Array.isArray(raw.objects) ? raw.objects : [],
     canvasWidth: Number(raw.canvasWidth) || gridCols * cellSize + 60,
     canvasHeight: Number(raw.canvasHeight) || gridRows * cellSize + 60,
+    layoutImageUrl: raw.layoutImageUrl || undefined,
   }
 }
 
@@ -255,6 +267,13 @@ export function PianoRollEditor({
   const [zoneFormName, setZoneFormName] = useState('')
   const [zoneFormColor, setZoneFormColor] = useState(ZONE_COLORS[0])
   const [zoneFormCapacity, setZoneFormCapacity] = useState<number | undefined>(undefined)
+  const [zoneFormShape, setZoneFormShape] = useState<'rectangle' | 'rounded-rect' | 'ellipse'>('rectangle')
+
+  // Grid snap (GA only)
+  const [snapToGrid, setSnapToGrid] = useState(true)
+
+  // Object palette (GA only)
+  const [selectedObjectType, setSelectedObjectType] = useState<string | null>(null)
 
   // Auto-save
   const [autoSaveTime, setAutoSaveTime] = useState<Date | null>(null)
@@ -374,10 +393,13 @@ export function PianoRollEditor({
       if (e.key === '3') {
         if ((e.target as HTMLElement).tagName !== 'INPUT') setMode('erase')
       }
+      if (e.key === '4' && isGA) {
+        if ((e.target as HTMLElement).tagName !== 'INPUT') setMode('object')
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, selectedZoneId])
+  }, [undo, redo, selectedZoneId, isGA])
 
   // ─── Auto-Save ─────────────────────────
   const performAutoSave = useCallback(async () => {
@@ -544,6 +566,24 @@ export function PianoRollEditor({
     const cell = getCellFromEvent(e)
     if (!cell) return
 
+    if (mode === 'object' && cell && selectedObjectType) {
+      const preset = OBJECT_PRESETS.find(p => p.type === selectedObjectType)
+      if (preset) {
+        const newObject: PianoRollObject = {
+          id: generateId(),
+          type: preset.type,
+          label: preset.label,
+          row: cell.row,
+          col: cell.col,
+          rows: preset.rows,
+          cols: preset.cols,
+        }
+        updateLayout(prev => ({ ...prev, objects: [...prev.objects, newObject] }))
+        toast({ title: 'Objek ditambahkan', description: preset.label })
+      }
+      return
+    }
+
     if (mode === 'draw') {
       // Start drawing a new zone
       isDrawingRef.current = true
@@ -622,7 +662,7 @@ export function PianoRollEditor({
         setSelectedStage(false)
       }
     }
-  }, [mode, isPreview, getCellFromEvent, zoneCellMap, handleDeleteZone, selectedZone, getResizeHandle, zones, toast, stage, selectedStage, getStageResizeHandle, isOnStage, handleUpdateStage])
+  }, [mode, isPreview, getCellFromEvent, zoneCellMap, handleDeleteZone, selectedZone, getResizeHandle, zones, toast, stage, selectedStage, getStageResizeHandle, isOnStage, handleUpdateStage, selectedObjectType, updateLayout])
 
   const handleGridMouseMove = useCallback((e: React.MouseEvent) => {
     if (isDrawingRef.current) {
@@ -890,6 +930,7 @@ export function PianoRollEditor({
       cols: pendingZone.cols,
       color: zoneFormColor,
       ...(isGA && zoneFormCapacity ? { capacity: zoneFormCapacity } : {}),
+      ...(isGA ? { shape: zoneFormShape } : {}),
     }
 
     updateLayout((prev) => ({
@@ -906,7 +947,7 @@ export function PianoRollEditor({
     } else {
       toast({ title: 'Zona dibuat', description: `${zoneFormName.trim()} (${pendingZone.rows}×${pendingZone.cols})` })
     }
-  }, [pendingZone, zoneFormName, zoneFormColor, zoneFormCapacity, updateLayout, toast, isGA])
+  }, [pendingZone, zoneFormName, zoneFormColor, zoneFormCapacity, zoneFormShape, updateLayout, toast, isGA])
 
   // ─── Grid Settings Handlers ────────────
   const handleGridRowsChange = useCallback((value: number) => {
@@ -948,22 +989,147 @@ export function PianoRollEditor({
     })
   }, [updateLayout])
 
+  // ─── Layout Image Export ───────────────
+  const exportLayoutAsImage = useCallback(() => {
+    const canvas = document.createElement('canvas')
+    const scale = 2
+    const padding = 40
+    const w = layoutData.canvasWidth * scale
+    const h = layoutData.canvasHeight * scale
+    canvas.width = w + padding * 2
+    canvas.height = h + padding * 2
+    const ctx = canvas.getContext('2d')!
+
+    ctx.fillStyle = '#1a1a2e'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    const offsetX = padding
+    const offsetY = padding
+
+    if (layoutData.stage) {
+      const s = layoutData.stage
+      const sx = offsetX + s.col * layoutData.cellSize * scale
+      const sy = offsetY + s.row * layoutData.cellSize * scale
+      const sw = s.cols * layoutData.cellSize * scale
+      const sh = (s.rows || 2) * layoutData.cellSize * scale
+      const grad = ctx.createLinearGradient(sx, sy, sx, sy + sh)
+      grad.addColorStop(0, '#4A4A4A')
+      grad.addColorStop(1, '#333333')
+      ctx.fillStyle = grad
+      ctx.fillRect(sx, sy, sw, sh)
+      ctx.strokeStyle = '#666'
+      ctx.lineWidth = 2
+      ctx.strokeRect(sx, sy, sw, sh)
+      ctx.fillStyle = '#fff'
+      ctx.font = `bold ${14 * scale}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.fillText('STAGE', sx + sw / 2, sy + sh / 2 + 5 * scale)
+    }
+
+    for (const zone of layoutData.zones) {
+      const zx = offsetX + zone.col * layoutData.cellSize * scale
+      const zy = offsetY + zone.row * layoutData.cellSize * scale
+      const zw = zone.cols * layoutData.cellSize * scale
+      const zh = zone.rows * layoutData.cellSize * scale
+
+      ctx.save()
+      ctx.fillStyle = zone.color + '40'
+
+      const shape = zone.shape || 'rectangle'
+      if (shape === 'rounded-rect') {
+        const r = 12 * scale
+        ctx.beginPath()
+        ctx.roundRect(zx, zy, zw, zh, r)
+        ctx.fill()
+        ctx.strokeStyle = zone.color + '80'
+        ctx.lineWidth = 2
+        ctx.stroke()
+      } else if (shape === 'ellipse') {
+        ctx.beginPath()
+        ctx.ellipse(zx + zw / 2, zy + zh / 2, zw / 2, zh / 2, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.strokeStyle = zone.color + '80'
+        ctx.lineWidth = 2
+        ctx.stroke()
+      } else {
+        ctx.fillRect(zx, zy, zw, zh)
+        ctx.strokeStyle = zone.color + '80'
+        ctx.lineWidth = 2
+        ctx.strokeRect(zx, zy, zw, zh)
+      }
+      ctx.restore()
+
+      ctx.fillStyle = '#fff'
+      ctx.font = `bold ${11 * scale}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.shadowColor = 'rgba(0,0,0,0.8)'
+      ctx.shadowBlur = 4
+      ctx.fillText(zone.name, zx + zw / 2, zy + zh / 2 - 7 * scale)
+      ctx.font = `${9 * scale}px sans-serif`
+      ctx.fillStyle = '#ccc'
+      const cap = zone.capacity || zone.rows * zone.cols
+      ctx.fillText(`${cap} org`, zx + zw / 2, zy + zh / 2 + 7 * scale)
+      ctx.shadowBlur = 0
+    }
+
+    for (const obj of layoutData.objects) {
+      const ox = offsetX + obj.col * layoutData.cellSize * scale
+      const oy = offsetY + obj.row * layoutData.cellSize * scale
+      const ow = obj.cols * layoutData.cellSize * scale
+      const oh = obj.rows * layoutData.cellSize * scale
+
+      ctx.fillStyle = '#2A3A5C'
+      ctx.fillRect(ox, oy, ow, oh)
+      ctx.strokeStyle = '#4A6FA5'
+      ctx.lineWidth = 1
+      ctx.strokeRect(ox, oy, ow, oh)
+
+      ctx.fillStyle = '#8BB8E8'
+      ctx.font = `${8 * scale}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(obj.label || obj.type, ox + ow / 2, oy + oh / 2)
+    }
+
+    return canvas.toDataURL('image/png')
+  }, [layoutData])
+
   // ─── Save & Exit ───────────────────────
-  const handleSaveAndExit = useCallback(() => {
+  const handleSaveAndExit = useCallback(async () => {
     const stageTypeValue = stage?.stageType || initialStageType || 'PROSCENIUM'
-    // For GA, preserve the GENERAL_ADMISSION type in layoutData
     const outputData = deepClone(layoutData)
     if (isGA) {
       outputData.type = 'GENERAL_ADMISSION'
+      try {
+        const imageUrl = exportLayoutAsImage()
+        if (imageUrl) {
+          const uploadRes = await fetch('/api/admin/upload-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageBase64: imageUrl.split(',')[1],
+              fileName: `layout-${seatMapId}-${Date.now()}.png`,
+            }),
+          })
+          if (uploadRes.ok) {
+            const { url } = await uploadRes.json()
+            outputData.layoutImageUrl = url
+          }
+        }
+      } catch (err) {
+        console.error('Failed to export layout image:', err)
+      }
     }
     onSaveAndExit(outputData, stageTypeValue)
-  }, [layoutData, stage, initialStageType, onSaveAndExit, isGA])
+  }, [layoutData, stage, initialStageType, onSaveAndExit, isGA, seatMapId, exportLayoutAsImage])
 
   // ─── Cursor Style ──────────────────────
   const getCursorStyle = useMemo(() => {
     if (isPreview) return 'cursor-default'
     if (mode === 'draw') return 'cursor-crosshair'
     if (mode === 'erase') return 'cursor-pointer'
+    if (mode === 'object') return 'cursor-copy'
     if (mode === 'select') return 'cursor-default'
     return 'cursor-default'
   }, [mode, isPreview])
@@ -1051,8 +1217,43 @@ export function PianoRollEditor({
 
             <Separator orientation="vertical" className="h-6 mx-2 bg-gray-700" />
 
+            {/* Object Mode Button (GA only) */}
+            {isGA && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={mode === 'object' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setMode('object')}
+                    className={cn('h-8 w-8 p-0', mode === 'object' && 'bg-blue-900/50 text-blue-300')}
+                  >
+                    <DoorOpen className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">Place Object (4)</TooltipContent>
+              </Tooltip>
+            )}
+
+            {/* Snap Toggle (GA only) */}
+            {isGA && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={snapToGrid ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setSnapToGrid(s => !s)}
+                    className={cn('h-8 px-2 text-[10px] gap-1', snapToGrid && 'bg-gray-600 text-white')}
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    Snap
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">Grid Snap</TooltipContent>
+              </Tooltip>
+            )}
+
             <Badge variant="outline" className="text-[10px] font-mono text-gray-400 border-gray-700 bg-gray-800">
-              {mode === 'select' ? 'SELECT' : mode === 'draw' ? 'DRAW' : 'ERASE'}
+              {mode === 'select' ? 'SELECT' : mode === 'draw' ? 'DRAW' : mode === 'erase' ? 'ERASE' : 'OBJECT'}
             </Badge>
           </div>
 
@@ -1187,6 +1388,7 @@ export function PianoRollEditor({
                 }}
               >
                 {/* Column Headers */}
+                {!(isGA && !snapToGrid) && (
                 <div className="absolute left-8 top-0 flex" style={{ height: 28 }}>
                   {Array.from({ length: gridCols }, (_, c) => (
                     <div
@@ -1198,8 +1400,10 @@ export function PianoRollEditor({
                     </div>
                   ))}
                 </div>
+                )}
 
                 {/* Row Labels */}
+                {!(isGA && !snapToGrid) && (
                 <div className="absolute left-0 top-7 flex flex-col">
                   {Array.from({ length: gridRows }, (_, r) => (
                     <div
@@ -1211,6 +1415,7 @@ export function PianoRollEditor({
                     </div>
                   ))}
                 </div>
+                )}
 
                 {/* Grid Cells */}
                 <div
@@ -1264,7 +1469,7 @@ export function PianoRollEditor({
                         key={`cell-${r}-${c}`}
                         className={cn(
                           'border-r border-b transition-colors duration-75',
-                          borderColor,
+                          isGA && !snapToGrid ? 'border-transparent' : borderColor,
                           isPreview && mode === 'erase' && zone && 'opacity-80'
                         )}
                         style={{
@@ -1292,6 +1497,15 @@ export function PianoRollEditor({
                 {/* Zone Labels (overlay on top of grid) */}
                 {!isPreview && zones.map((zone) => {
                   const isSelected = selectedZoneId === zone.id
+                  const shape = zone.shape || 'rectangle'
+                  const shapeStyle: React.CSSProperties = {}
+                  if (isGA && shape === 'rounded-rect') {
+                    shapeStyle.borderRadius = '12px'
+                    shapeStyle.overflow = 'hidden'
+                  } else if (isGA && shape === 'ellipse') {
+                    shapeStyle.borderRadius = '50%'
+                    shapeStyle.overflow = 'hidden'
+                  }
                   return (
                     <div
                       key={`label-${zone.id}`}
@@ -1306,6 +1520,7 @@ export function PianoRollEditor({
                         height: zone.rows * cellSize * zoom,
                         zIndex: 5,
                         textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+                        ...shapeStyle,
                       }}
                     >
                       {zone.name}
@@ -1392,7 +1607,12 @@ export function PianoRollEditor({
                 {/* Draw Preview Rectangle */}
                 {isDrawing && drawPreview && (
                   <div
-                    className="absolute pointer-events-none border-2 border-dashed border-amber-400 bg-amber-400/10 rounded-sm"
+                    className={cn(
+                      'absolute pointer-events-none border-2 border-dashed border-amber-400 bg-amber-400/10',
+                      isGA && zoneFormShape === 'rounded-rect' && 'rounded-xl',
+                      isGA && zoneFormShape === 'ellipse' && 'rounded-full',
+                      !isGA && 'rounded-sm'
+                    )}
                     style={{
                       left: 32 + drawPreview.col * cellSize * zoom,
                       top: 28 + drawPreview.row * cellSize * zoom,
@@ -1414,6 +1634,72 @@ export function PianoRollEditor({
           {!sidebarCollapsed && (
             <div className="w-[280px] shrink-0 bg-gray-800 border-l border-gray-700 flex flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-4">
+                {/* Object Palette (GA only, when in object mode) */}
+                {isGA && mode === 'object' ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <DoorOpen className="w-4 h-4 text-blue-400" />
+                      <span className="text-xs font-semibold">Object Palette</span>
+                    </div>
+                    <p className="text-[10px] text-gray-500">Select an object, then click on the grid to place it.</p>
+                    <div className="space-y-1.5">
+                      {OBJECT_PRESETS.map((preset) => (
+                        <button
+                          key={preset.type}
+                          onClick={() => setSelectedObjectType(selectedObjectType === preset.type ? null : preset.type)}
+                          className={cn(
+                            'w-full flex items-center gap-2.5 px-3 py-2 rounded-lg border text-left transition-all',
+                            selectedObjectType === preset.type
+                              ? 'border-blue-500 bg-blue-900/20 text-blue-300'
+                              : 'border-gray-700 bg-gray-700/30 text-gray-300 hover:border-gray-600 hover:bg-gray-700/50'
+                          )}
+                        >
+                          <span className="text-lg">{preset.emoji}</span>
+                          <div className="flex-1">
+                            <div className="text-xs font-medium">{preset.label}</div>
+                            <div className="text-[9px] text-gray-500">{preset.rows}×{preset.cols}</div>
+                          </div>
+                          {selectedObjectType === preset.type && (
+                            <div className="w-2 h-2 rounded-full bg-blue-400" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    <Separator className="bg-gray-700" />
+
+                    {/* Objects list */}
+                    {objects.length > 0 && (
+                      <div className="space-y-2">
+                        <span className="text-[10px] text-gray-500 font-medium">Placed Objects ({objects.length})</span>
+                        <div className="max-h-48 overflow-y-auto space-y-1 custom-scrollbar">
+                          {objects.map((obj) => {
+                            const preset = OBJECT_PRESETS.find(p => p.type === obj.type)
+                            return (
+                              <div
+                                key={obj.id}
+                                className="flex items-center gap-2 px-2 py-1.5 rounded bg-gray-700/30 text-gray-300"
+                              >
+                                <span className="text-sm">{preset?.emoji || '📦'}</span>
+                                <span className="text-xs flex-1 truncate">{obj.label || obj.type}</span>
+                                <button
+                                  onClick={() => updateLayout(prev => ({
+                                    ...prev,
+                                    objects: prev.objects.filter(o => o.id !== obj.id)
+                                  }))}
+                                  className="text-gray-600 hover:text-red-400 transition-colors"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                <>
                 {/* Zone Info / Stage Info / General Info */}
                 {selectedZone ? (
                   <ZoneProperties
@@ -1481,11 +1767,14 @@ export function PianoRollEditor({
                     <div><kbd className="bg-gray-700 px-1 rounded">1</kbd> Select</div>
                     <div><kbd className="bg-gray-700 px-1 rounded">2</kbd> Draw</div>
                     <div><kbd className="bg-gray-700 px-1 rounded">3</kbd> Erase</div>
+                    {isGA && <div><kbd className="bg-gray-700 px-1 rounded">4</kbd> Object</div>}
                     <div><kbd className="bg-gray-700 px-1 rounded">Del</kbd> Delete</div>
                     <div><kbd className="bg-gray-700 px-1 rounded">⌘Z</kbd> Undo</div>
                     <div><kbd className="bg-gray-700 px-1 rounded">⌘Y</kbd> Redo</div>
                   </div>
                 </div>
+                </>
+                )}
               </div>
             </div>
           )}
@@ -1513,6 +1802,59 @@ export function PianoRollEditor({
             <DialogTitle className="text-sm">Zona Baru ({pendingZone?.rows}×{pendingZone?.cols})</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
+            {/* Shape Selector (GA only) */}
+            {isGA && (
+              <div className="space-y-2">
+                <Label className="text-xs text-gray-400">Shape</Label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setZoneFormShape('rectangle')}
+                    className={cn(
+                      'flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-lg border-2 transition-all',
+                      zoneFormShape === 'rectangle'
+                        ? 'border-amber-500 bg-amber-900/20'
+                        : 'border-gray-600 hover:border-gray-500'
+                    )}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-gray-300">
+                      <rect x="3" y="5" width="18" height="14" stroke="currentColor" strokeWidth="2" />
+                    </svg>
+                    <span className="text-[10px] text-gray-400">Rectangle</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setZoneFormShape('rounded-rect')}
+                    className={cn(
+                      'flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-lg border-2 transition-all',
+                      zoneFormShape === 'rounded-rect'
+                        ? 'border-amber-500 bg-amber-900/20'
+                        : 'border-gray-600 hover:border-gray-500'
+                    )}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-gray-300">
+                      <rect x="3" y="5" width="18" height="14" rx="4" stroke="currentColor" strokeWidth="2" />
+                    </svg>
+                    <span className="text-[10px] text-gray-400">Rounded</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setZoneFormShape('ellipse')}
+                    className={cn(
+                      'flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-lg border-2 transition-all',
+                      zoneFormShape === 'ellipse'
+                        ? 'border-amber-500 bg-amber-900/20'
+                        : 'border-gray-600 hover:border-gray-500'
+                    )}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-gray-300">
+                      <ellipse cx="12" cy="12" rx="9" ry="7" stroke="currentColor" strokeWidth="2" />
+                    </svg>
+                    <span className="text-[10px] text-gray-400">Ellipse</span>
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <Label className="text-xs text-gray-400">Zone Name</Label>
               <Input
