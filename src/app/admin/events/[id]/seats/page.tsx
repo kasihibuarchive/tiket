@@ -264,12 +264,14 @@ export default function SeatEditorPage() {
   }, [seats, parsedLayout])
 
   // ─── Check if GA (General Admission) type ───────────────────────────
+  const gaZones = parsedLayout?.isGA ? (parsedLayout.gaZones || []) : []
   const isGA = useMemo(() => {
-    if (parsedLayout) return false // layoutData means NUMBERED
+    if (parsedLayout?.isGA && gaZones.length > 0) return true
+    if (parsedLayout) return false
     if (seats.length === 0) return false
     const uniqueRows = new Set(seats.map(s => s.row))
     return uniqueRows.size <= 5 && seats.length / uniqueRows.size > 10
-  }, [seats, parsedLayout])
+  }, [seats, parsedLayout, gaZones.length])
 
   // Clear selection when switching days
   useEffect(() => {
@@ -906,9 +908,103 @@ export default function SeatEditorPage() {
             <div
               className="min-w-[320px]"
               id="admin-grid-wrapper"
-              style={!isCanvasMode && stageLayout && stageLayout.hasCustomStagePos ? { paddingTop: stageLayout.paddingTop } : undefined}
+              style={!isCanvasMode && !isGA && stageLayout && stageLayout.hasCustomStagePos ? { paddingTop: stageLayout.paddingTop } : undefined}
             >
-              {parsedLayout ? (
+              {isGA ? (
+                /* ─── GA Layout: zones with capacity cards + seat grid ─── */
+                <div className="space-y-6">
+                  {/* Stage */}
+                  <div className="flex justify-center">
+                    <StageRenderer
+                      stageType={parsedLayout?.stageType || 'PROSCENIUM'}
+                      size="lg"
+                      thrustWidth={parsedLayout?.thrustWidth}
+                      thrustDepth={parsedLayout?.thrustDepth}
+                    />
+                  </div>
+
+                  {/* GA Zone Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {gaZones.map((zone) => {
+                      const zoneSeats = seats.filter((s) => s.row === zone.name)
+                      const available = zoneSeats.filter((s) => s.status === 'AVAILABLE').length
+                      const sold = zoneSeats.filter((s) => s.status === 'SOLD').length
+                      const locked = zoneSeats.filter((s) => s.status === 'LOCKED_TEMPORARY').length
+                      const isSelected = zoneSeats.some((s) => selectedSeatCodes.has(s.seatCode))
+
+                      return (
+                        <div
+                          key={zone.id}
+                          className={cn(
+                            'p-4 rounded-xl border-2 transition-all',
+                            isSelected
+                              ? 'border-gold bg-gold/5 shadow-sm'
+                              : 'border-border/50 hover:border-gold/30'
+                          )}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div
+                              className="w-4 h-4 rounded-sm shrink-0"
+                              style={{ backgroundColor: zone.color }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <h3 className="font-semibold text-sm text-charcoal truncate">
+                                {zone.name}
+                              </h3>
+                              <p className="text-xs text-muted-foreground mt-0.5">
+                                Kapasitas: {zone.capacity} orang
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-4 mt-2 text-xs">
+                            <span className="text-green-600">{available} tersedia</span>
+                            <span className="text-red-500">{sold} terjual</span>
+                            <span className="text-amber-600">{locked} terkunci</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* GA Seat Grid — grouped by zone (row) */}
+                  <div className="space-y-4">
+                    {(() => {
+                      const zoneGroups = new Map<string, SeatData[]>()
+                      for (const s of seats) {
+                        const key = s.row || 'Unknown'
+                        if (!zoneGroups.has(key)) zoneGroups.set(key, [])
+                        zoneGroups.get(key)!.push(s)
+                      }
+
+                      return [...zoneGroups.entries()].map(([zoneName, zoneSeats]) => {
+                        const sorted = [...zoneSeats].sort((a, b) => a.col - b.col)
+                        const zoneInfo = gaZones.find(z => z.name === zoneName)
+                        return (
+                          <div key={zoneName}>
+                            <div className="flex items-center gap-2 mb-2">
+                              {zoneInfo && (
+                                <div
+                                  className="w-3 h-3 rounded-sm"
+                                  style={{ backgroundColor: zoneInfo.color }}
+                                />
+                              )}
+                              <span className="text-xs font-semibold font-serif text-muted-foreground">
+                                {zoneName}
+                              </span>
+                              <span className="text-xs text-muted-foreground/60">
+                                ({sorted.length} kursi)
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1 ml-5">
+                              {sorted.map((seat) => renderSeatButton(seat, undefined, undefined))}
+                            </div>
+                          </div>
+                        )
+                      })
+                    })()}
+                  </div>
+                </div>
+              ) : parsedLayout ? (
                 /* Centered wrapper — canvas mode has its own stage/objects inside */
                 <div className={cn(
                   isCanvasMode
