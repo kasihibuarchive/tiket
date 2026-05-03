@@ -26,12 +26,17 @@ export const metadata: Metadata = {
   description: "Official ticketing platform for Teateran. Book your seats for the finest theatrical productions.",
   keywords: ["Teateran", "Theater", "Ticketing", "Tiket Teater", "Pertunjukan"],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: [
+      { url: "/favicon.ico", sizes: "48x48" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
   },
   openGraph: {
     title: "Teateran - Ticketing Platform",
     description: "Book your seats for the finest theatrical productions.",
     type: "website",
+    images: [{ url: "/teateran-logo.png", width: 1024, height: 1024 }],
   },
 };
 

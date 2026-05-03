@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Drama } from 'lucide-react'
+import Image from 'next/image'
 
 export function Footer() {
   return (
@@ -9,7 +9,7 @@ export function Footer() {
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <Drama className="w-6 h-6 text-gold" />
+              <Image src="/teateran-logo.png" alt="Teateran" width={24} height={24} className="rounded" />
               <span className="font-serif text-lg font-semibold text-white">
                 TEATERAN
               </span>

@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
+import Image from 'next/image'
 import { useState } from 'react'
-import { Menu, X, Drama } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTrigger, SheetTitle } from '@/components/ui/sheet'
 
@@ -15,7 +16,7 @@ export function Navbar() {
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 group">
-            <Drama className="w-7 h-7 text-gold" />
+            <Image src="/teateran-logo.png" alt="Teateran" width={32} height={32} className="rounded" />
             <span className="font-serif text-xl font-semibold tracking-wide text-charcoal">
               TEATERAN
             </span>

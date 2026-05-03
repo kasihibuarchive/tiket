@@ -6,7 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Drama, ShieldCheck, ScanLine, Loader2, Eye, EyeOff } from 'lucide-react'
+import { ShieldCheck, ScanLine, Loader2, Eye, EyeOff } from 'lucide-react'
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 
 type Role = 'admin' | 'usher'
@@ -95,8 +96,8 @@ export default function AdminLoginPage() {
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="text-center mb-6">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-charcoal mb-4">
-            <Drama className="w-8 h-8 text-gold" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-charcoal mb-4 overflow-hidden">
+            <Image src="/teateran-logo.png" alt="Teateran" width={48} height={48} className="rounded" />
           </div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">
             Teateran
@@ -226,7 +227,6 @@ export default function AdminLoginPage() {
                   </>
                 ) : (
                   <>
-                    <Drama className="w-4 h-4 mr-2" />
                     Masuk sebagai {selectedRole === 'admin' ? 'Admin' : 'Usher'}
                   </>
                 )}

@@ -3,16 +3,17 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import {
-  Drama, Calendar, LayoutGrid, Mail, ChevronLeft,
+  Calendar, LayoutGrid, Mail, ChevronLeft,
   LogOut, Loader2, ShieldCheck, ShoppingBag, Tag, ScanLine, Users, Gift, Map
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 
 const adminLinks = [
-  { href: '/admin/dashboard', label: 'Dashboard', icon: Drama },
+  { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutGrid },
   { href: '/admin/events', label: 'Kelola Events', icon: Calendar },
   { href: '/admin/seat-maps', label: 'Seat Maps', icon: Map },
   { href: '/admin/ushers', label: 'Manajemen Usher', icon: Users },
@@ -204,7 +205,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   // Determine which sidebar links to show
   const sidebarLinks = isUsherMode ? usherLinks : adminLinks
   const panelLabel = isUsherMode ? 'USHER' : 'ADMIN'
-  const PanelIcon = isUsherMode ? ScanLine : ShieldCheck
 
   return (
     <div className="min-h-screen flex bg-warm-white">
@@ -219,7 +219,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="p-4 border-b border-white/10">
           <div className="flex items-center justify-between">
             <Link href="/admin/dashboard" className="flex items-center gap-2">
-              <PanelIcon className="w-6 h-6 text-gold" />
+              <Image src="/teateran-logo.png" alt="Teateran" width={24} height={24} className="rounded" />
               <span className="font-serif text-sm font-semibold">
                 {panelLabel} <span className="text-gold">PANEL</span>
               </span>
