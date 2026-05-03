@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog'
-import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Ticket, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store } from 'lucide-react'
+import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Ticket, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { savePendingTrx } from '@/lib/pending-trx'
 import { getSessionId } from '@/lib/session-id'
@@ -114,6 +114,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
 
   // Payment method state — now uses specific Tripay channel codes
   const [paymentMethod, setPaymentMethod] = useState<string>('QRIS')
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
 
   // Fetch merchandise for this event
   useEffect(() => {
@@ -478,47 +479,34 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
               </div>
             )}
 
-            {/* Payment Method Selector — Tripay specific channels */}
+            {/* Payment Method — compact selector that opens popup */}
             <div className="space-y-2">
               <Label className="text-sm font-medium text-charcoal flex items-center gap-1.5">
                 <CreditCard className="w-3.5 h-3.5" />
                 Metode Pembayaran
               </Label>
-              <div className="space-y-2">
-                {Object.entries(groupedChannels).map(([group, channels]) => (
-                  <div key={group}>
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1.5">{group}</p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {channels.map((channel) => {
-                        const IconComponent = ICON_MAP[channel.icon] || CreditCard
-                        return (
-                          <button
-                            key={channel.code}
-                            type="button"
-                            onClick={() => setPaymentMethod(channel.code)}
-                            className={cn(
-                              'p-2.5 rounded-lg border-2 text-left transition-all',
-                              paymentMethod === channel.code
-                                ? 'border-gold bg-gold/5'
-                                : 'border-border hover:border-gold/30'
-                            )}
-                          >
-                            <div className="flex items-center gap-1.5">
-                              <IconComponent className={cn('w-3.5 h-3.5', paymentMethod === channel.code ? 'text-gold' : 'text-muted-foreground')} />
-                              <p className="text-xs font-semibold text-charcoal leading-tight">{channel.name}</p>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {selectedChannel && (
-                <p className="text-[10px] text-muted-foreground mt-1">
-                  Kamu akan dialihkan ke halaman pembayaran {selectedChannel.name}
-                </p>
-              )}
+              <button
+                type="button"
+                onClick={() => setPaymentDialogOpen(true)}
+                className="w-full flex items-center justify-between p-3 rounded-lg border-2 border-border hover:border-gold/30 bg-white transition-all"
+              >
+                <div className="flex items-center gap-2.5">
+                  {selectedChannel ? (
+                    <>
+                      <div className="w-8 h-8 rounded-md bg-gold/10 flex items-center justify-center">
+                        {(ICON_MAP[selectedChannel.icon] || CreditCard)({ className: 'w-4 h-4 text-gold' })}
+                      </div>
+                      <div className="text-left">
+                        <p className="text-sm font-semibold text-charcoal">{selectedChannel.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{selectedChannel.group}</p>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Pilih metode pembayaran</p>
+                  )}
+                </div>
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </button>
             </div>
 
             {/* Promo Code */}
@@ -667,6 +655,64 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
               </Button>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Payment Method Popup Dialog */}
+      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-lg flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-gold" />
+              Pilih Metode Pembayaran
+            </DialogTitle>
+            <DialogDescription>Pilih metode pembayaran yang kamu inginkan</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            {Object.entries(groupedChannels).map(([group, channels]) => (
+              <div key={group}>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-2 font-semibold">{group}</p>
+                <div className="space-y-1.5">
+                  {channels.map((channel) => {
+                    const IconComponent = ICON_MAP[channel.icon] || CreditCard
+                    const isSelected = paymentMethod === channel.code
+                    return (
+                      <button
+                        key={channel.code}
+                        type="button"
+                        onClick={() => {
+                          setPaymentMethod(channel.code)
+                          setPaymentDialogOpen(false)
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-3 p-3 rounded-lg border-2 text-left transition-all',
+                          isSelected
+                            ? 'border-gold bg-gold/5'
+                            : 'border-border hover:border-gold/30 hover:bg-gold/5'
+                        )}
+                      >
+                        <div className={cn(
+                          'w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0',
+                          isSelected ? 'bg-gold/20' : 'bg-muted'
+                        )}>
+                          <IconComponent className={cn('w-4 h-4', isSelected ? 'text-gold' : 'text-muted-foreground')} />
+                        </div>
+                        <p className={cn(
+                          'text-sm font-medium flex-1',
+                          isSelected ? 'text-charcoal' : 'text-charcoal/70'
+                        )}>
+                          {channel.name}
+                        </p>
+                        {isSelected && (
+                          <CheckCircle2 className="w-5 h-5 text-gold flex-shrink-0" />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
     </div>
