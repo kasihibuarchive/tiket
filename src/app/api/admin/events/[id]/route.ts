@@ -105,19 +105,42 @@ export async function PUT(
       },
     })
 
-    // Update price categories if provided
+    // Update price categories if provided — UPSERT strategy (safe when seats exist)
+    // We match by name to preserve existing IDs that seats reference.
     if (priceCategories && Array.isArray(priceCategories)) {
-      await db.priceCategory.deleteMany({ where: { eventId: id } })
-      await db.priceCategory.createMany({
-        data: priceCategories.map(
-          (pc: { name: string; price: number; colorCode: string }) => ({
-            eventId: id,
-            name: pc.name,
-            price: pc.price,
-            colorCode: pc.colorCode,
+      const existingCats = await db.priceCategory.findMany({ where: { eventId: id } })
+      const existingByName = new Map(existingCats.map((c) => [c.name.toLowerCase(), c]))
+      const incomingNames = new Set(
+        priceCategories.map((pc: { name: string }) => pc.name?.toLowerCase()).filter(Boolean)
+      )
+
+      // 1. Update existing categories (matched by name, preserve ID)
+      for (const pc of priceCategories as Array<{ name: string; price: number; colorCode: string }>) {
+        const existing = existingByName.get(pc.name.toLowerCase())
+        if (existing) {
+          await db.priceCategory.update({
+            where: { id: existing.id },
+            data: { price: pc.price, colorCode: pc.colorCode },
           })
-        ),
-      })
+        } else {
+          await db.priceCategory.create({
+            data: { eventId: id, name: pc.name, price: pc.price, colorCode: pc.colorCode },
+          })
+        }
+      }
+
+      // 2. Delete removed categories — only if no seats reference them
+      const toDeleteCats = existingCats.filter((c) => !incomingNames.has(c.name.toLowerCase()))
+      for (const cat of toDeleteCats) {
+        const refCount = await db.seat.count({ where: { priceCategoryId: cat.id } })
+        if (refCount > 0) {
+          // Cannot delete — seats still reference this category.
+          // Keep it as-is (it will become orphaned but harmless).
+          // Admin can manage it from the seat editor.
+          continue
+        }
+        await db.priceCategory.delete({ where: { id: cat.id } })
+      }
     }
 
     // Update show dates if provided — UPSERT strategy (never cascade-delete existing seats!)
