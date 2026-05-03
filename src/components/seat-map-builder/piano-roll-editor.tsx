@@ -65,7 +65,8 @@ export interface PianoRollZone {
   cols: number
   color: string
   capacity?: number
-  shape?: 'rectangle' | 'rounded-rect' | 'ellipse'
+  shape?: 'rectangle' | 'rounded-rect' | 'ellipse' | 'polygon'
+  points?: { row: number; col: number }[]
 }
 
 interface PianoRollObject {
@@ -138,7 +139,7 @@ const OBJECT_PRESETS = [
   { type: 'food', label: 'F&B', emoji: '🍜', rows: 1, cols: 2, color: '#8B6BAE' },
 ]
 
-type EditorMode = 'select' | 'draw' | 'erase' | 'object'
+type EditorMode = 'select' | 'draw' | 'erase' | 'object' | 'polygon'
 type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se' | null
 
 // ═══════════════════════════════════════════
@@ -212,6 +213,41 @@ function formatTime(date: Date) {
   return date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
 }
 
+// ─── Polygon Helpers ─────────────────────
+function pointInPolygon(row: number, col: number, polygon: { row: number; col: number }[]): boolean {
+  let inside = false
+  const n = polygon.length
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const xi = polygon[i].col, yi = polygon[i].row
+    const xj = polygon[j].col, yj = polygon[j].row
+    if (((yi > row) !== (yj > row)) && (col < (xj - xi) * (row - yi) / (yj - yi) + xi)) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+function getPolygonBounds(points: { row: number; col: number }[]): { row: number; col: number; rows: number; cols: number } {
+  const minRow = Math.min(...points.map(p => p.row))
+  const maxRow = Math.max(...points.map(p => p.row))
+  const minCol = Math.min(...points.map(p => p.col))
+  const maxCol = Math.max(...points.map(p => p.col))
+  return { row: minRow, col: minCol, rows: maxRow - minRow + 1, cols: maxCol - minCol + 1 }
+}
+
+function getPolygonCells(points: { row: number; col: number }[]): Set<string> {
+  const bounds = getPolygonBounds(points)
+  const cells = new Set<string>()
+  for (let r = bounds.row; r < bounds.row + bounds.rows; r++) {
+    for (let c = bounds.col; c < bounds.col + bounds.cols; c++) {
+      if (pointInPolygon(r, c, points)) {
+        cells.add(`${r},${c}`)
+      }
+    }
+  }
+  return cells
+}
+
 // ═══════════════════════════════════════════
 // Main Component
 // ═══════════════════════════════════════════
@@ -267,10 +303,17 @@ export function PianoRollEditor({
   const [zoneFormName, setZoneFormName] = useState('')
   const [zoneFormColor, setZoneFormColor] = useState(ZONE_COLORS[0])
   const [zoneFormCapacity, setZoneFormCapacity] = useState<number | undefined>(undefined)
-  const [zoneFormShape, setZoneFormShape] = useState<'rectangle' | 'rounded-rect' | 'ellipse'>('rectangle')
+  const [zoneFormShape, setZoneFormShape] = useState<'rectangle' | 'rounded-rect' | 'ellipse' | 'polygon'>('rectangle')
 
   // Grid snap (GA only)
   const [snapToGrid, setSnapToGrid] = useState(true)
+
+  // Polygon drawing state
+  const [polygonPoints, setPolygonPoints] = useState<{ row: number; col: number }[]>([])
+  const [isDrawingPolygon, setIsDrawingPolygon] = useState(false)
+
+  // Grid visibility (GA only)
+  const [showGrid, setShowGrid] = useState(true)
 
   // Object palette (GA only)
   const [selectedObjectType, setSelectedObjectType] = useState<string | null>(null)
@@ -290,6 +333,8 @@ export function PianoRollEditor({
   const isResizingRef = useRef(false)
   const isDraggingStageRef = useRef(false)
   const isResizingStageRef = useRef(false)
+  const isDraggingObjectRef = useRef(false)
+  const dragObjectIdRef = useRef<string | null>(null)
 
   // ─── Computed ──────────────────────────
   const { gridRows, gridCols, cellSize, zones, stage, objects } = layoutData
@@ -300,7 +345,12 @@ export function PianoRollEditor({
 
   const totalSeats = useMemo(() => {
     if (isGA) {
-      return zones.reduce((sum, z) => sum + (z.capacity || z.rows * z.cols), 0)
+      return zones.reduce((sum, z) => {
+        if (z.shape === 'polygon' && z.points && z.points.length >= 3) {
+          return sum + (z.capacity || getPolygonCells(z.points).size)
+        }
+        return sum + (z.capacity || z.rows * z.cols)
+      }, 0)
     }
     return zones.reduce((sum, z) => sum + z.rows * z.cols, 0)
   }, [zones, isGA])
@@ -309,9 +359,16 @@ export function PianoRollEditor({
   const zoneCellMap = useMemo(() => {
     const map = new Map<string, string>() // "row,col" → zoneId
     for (const zone of zones) {
-      for (let r = zone.row; r < zone.row + zone.rows; r++) {
-        for (let c = zone.col; c < zone.col + zone.cols; c++) {
-          map.set(`${r},${c}`, zone.id)
+      if (zone.shape === 'polygon' && zone.points && zone.points.length >= 3) {
+        const cells = getPolygonCells(zone.points)
+        for (const cell of cells) {
+          map.set(cell, zone.id)
+        }
+      } else {
+        for (let r = zone.row; r < zone.row + zone.rows; r++) {
+          for (let c = zone.col; c < zone.col + zone.cols; c++) {
+            map.set(`${r},${c}`, zone.id)
+          }
         }
       }
     }
@@ -396,10 +453,25 @@ export function PianoRollEditor({
       if (e.key === '4' && isGA) {
         if ((e.target as HTMLElement).tagName !== 'INPUT') setMode('object')
       }
+      if (e.key === '5' && isGA) {
+        if ((e.target as HTMLElement).tagName !== 'INPUT') setMode('polygon')
+      }
+      // Escape to cancel polygon drawing
+      if (e.key === 'Escape' && isDrawingPolygon) {
+        setPolygonPoints([])
+        setIsDrawingPolygon(false)
+        setMode('select')
+      }
+      // Enter to finish polygon drawing
+      if (e.key === 'Enter' && isDrawingPolygon && polygonPoints.length >= 3) {
+        if ((e.target as HTMLElement).tagName !== 'INPUT') {
+          finishPolygon()
+        }
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, selectedZoneId, isGA])
+  }, [undo, redo, selectedZoneId, isGA, isDrawingPolygon, polygonPoints])
 
   // ─── Auto-Save ─────────────────────────
   const performAutoSave = useCallback(async () => {
@@ -558,6 +630,46 @@ export function PianoRollEditor({
     }))
   }, [updateLayout])
 
+  // ─── Polygon Finish ─────────────────────
+  const finishPolygon = useCallback(() => {
+    if (polygonPoints.length < 3) return
+    const cells = getPolygonCells(polygonPoints)
+    const bounds = getPolygonBounds(polygonPoints)
+    // Check overlap with existing zones
+    let overlaps = false
+    for (const cellKey of cells) {
+      if (zoneCellMap.has(cellKey)) {
+        overlaps = true
+        break
+      }
+    }
+    if (overlaps) {
+      toast({ title: 'Tumpang tindih', description: 'Area polygon ini overlap dengan zona lain.', variant: 'destructive' })
+      setPolygonPoints([])
+      setIsDrawingPolygon(false)
+      return
+    }
+    setPendingZone({ row: bounds.row, col: bounds.col, rows: bounds.rows, cols: bounds.cols })
+    setZoneFormName('')
+    setZoneFormColor(ZONE_COLORS[zones.length % ZONE_COLORS.length])
+    setZoneFormCapacity(cells.size)
+    setZoneFormShape('polygon')
+    setZoneDialogOpen(true)
+    setIsDrawingPolygon(false)
+  }, [polygonPoints, zoneCellMap, toast, zones])
+
+  // ─── Object Hit Testing ─────────────────
+  const getObjectAtCell = useCallback((cell: { row: number; col: number }) => {
+    for (let i = objects.length - 1; i >= 0; i--) {
+      const obj = objects[i]
+      if (cell.row >= obj.row && cell.row < obj.row + obj.rows &&
+          cell.col >= obj.col && cell.col < obj.col + obj.cols) {
+        return obj
+      }
+    }
+    return null
+  }, [objects])
+
   // ─── Mouse Handlers ────────────────────
   const handleGridMouseDown = useCallback((e: React.MouseEvent) => {
     if (isPreview) return
@@ -565,6 +677,21 @@ export function PianoRollEditor({
 
     const cell = getCellFromEvent(e)
     if (!cell) return
+
+    // Polygon mode: click to add vertices
+    if (mode === 'polygon' && cell) {
+      setIsDrawingPolygon(true)
+      // Check if clicking near first point to close polygon (double-click simulation)
+      if (polygonPoints.length >= 3) {
+        const first = polygonPoints[0]
+        if (Math.abs(cell.row - first.row) <= 1 && Math.abs(cell.col - first.col) <= 1) {
+          finishPolygon()
+          return
+        }
+      }
+      setPolygonPoints(prev => [...prev, { row: cell.row, col: cell.col }])
+      return
+    }
 
     if (mode === 'object' && cell && selectedObjectType) {
       const preset = OBJECT_PRESETS.find(p => p.type === selectedObjectType)
@@ -600,11 +727,17 @@ export function PianoRollEditor({
         handleDeleteZone(zoneId)
         toast({ title: 'Zona dihapus', description: 'Zona berhasil dihapus.' })
       }
+      // Also check for objects to erase
+      const obj = getObjectAtCell(cell)
+      if (obj) {
+        updateLayout(prev => ({ ...prev, objects: prev.objects.filter(o => o.id !== obj.id) }))
+        toast({ title: 'Objek dihapus', description: obj.label || obj.type })
+      }
       return
     }
 
     if (mode === 'select') {
-      // Priority: resize handle (zone or stage) > stage > zone > empty
+      // Priority: resize handle (zone or stage) > object > stage > zone > empty
 
       // 1. Check for resize handle on selected stage (highest priority)
       if (selectedStage && stage) {
@@ -621,7 +754,7 @@ export function PianoRollEditor({
       }
 
       // 2. Check for resize handle on selected zone
-      if (selectedZone) {
+      if (selectedZone && selectedZone.shape !== 'polygon') {
         const handle = getResizeHandle(e)
         if (handle) {
           isResizingRef.current = true
@@ -633,7 +766,21 @@ export function PianoRollEditor({
         }
       }
 
-      // 3. Check if clicking on stage
+      // 3. Check if clicking on a decorative object (drag it)
+      const hitObj = getObjectAtCell(cell)
+      if (hitObj) {
+        setSelectedZoneId(null)
+        setSelectedStage(false)
+        isDraggingObjectRef.current = true
+        dragObjectIdRef.current = hitObj.id
+        isDraggingRef.current = true
+        setIsDragging(true)
+        setDragOrigin({ row: hitObj.row, col: hitObj.col })
+        setDragOffset(cell)
+        return
+      }
+
+      // 4. Check if clicking on stage
       if (isOnStage(cell)) {
         setSelectedZoneId(null)
         setSelectedStage(true)
@@ -645,13 +792,13 @@ export function PianoRollEditor({
         return
       }
 
-      // 4. Check if clicking inside a zone
+      // 5. Check if clicking inside a zone
       const zoneId = zoneCellMap.get(`${cell.row},${cell.col}`)
       if (zoneId) {
         setSelectedZoneId(zoneId)
         setSelectedStage(false)
         const zone = zones.find((z) => z.id === zoneId)
-        if (zone) {
+        if (zone && zone.shape !== 'polygon') {
           isDraggingRef.current = true
           setIsDragging(true)
           setDragOrigin({ row: zone.row, col: zone.col })
@@ -662,12 +809,29 @@ export function PianoRollEditor({
         setSelectedStage(false)
       }
     }
-  }, [mode, isPreview, getCellFromEvent, zoneCellMap, handleDeleteZone, selectedZone, getResizeHandle, zones, toast, stage, selectedStage, getStageResizeHandle, isOnStage, handleUpdateStage, selectedObjectType, updateLayout])
+  }, [mode, isPreview, getCellFromEvent, zoneCellMap, handleDeleteZone, selectedZone, getResizeHandle, zones, toast, stage, selectedStage, getStageResizeHandle, isOnStage, handleUpdateStage, selectedObjectType, updateLayout, polygonPoints, finishPolygon, getObjectAtCell])
 
   const handleGridMouseMove = useCallback((e: React.MouseEvent) => {
     if (isDrawingRef.current) {
       const cell = getCellFromEvent(e)
       if (cell) setDrawEnd(cell)
+      return
+    }
+
+    // Object dragging
+    if (isDraggingObjectRef.current && dragObjectIdRef.current && dragOrigin && dragOffset) {
+      const cell = getCellFromEvent(e)
+      if (!cell) return
+      const deltaRow = cell.row - dragOffset.row
+      const deltaCol = cell.col - dragOffset.col
+      const obj = objects.find(o => o.id === dragObjectIdRef.current)
+      if (!obj) return
+      const newRow = clamp(dragOrigin.row + deltaRow, 0, gridRows - obj.rows)
+      const newCol = clamp(dragOrigin.col + deltaCol, 0, gridCols - obj.cols)
+      updateLayout(prev => ({
+        ...prev,
+        objects: prev.objects.map(o => o.id === dragObjectIdRef.current ? { ...o, row: newRow, col: newCol } : o)
+      }))
       return
     }
 
@@ -855,15 +1019,14 @@ export function PianoRollEditor({
       if (rows >= 1 && cols >= 1) {
         // Check overlap with existing zones
         let overlaps = false
-        for (const zone of zones) {
-          const zr1 = zone.row, zr2 = zone.row + zone.rows
-          const zc1 = zone.col, zc2 = zone.col + zone.cols
-          const pr1 = minRow, pr2 = maxRow + 1
-          const pc1 = minCol, pc2 = maxCol + 1
-          if (pr1 < zr2 && pr2 > zr1 && pc1 < zc2 && pc2 > zc1) {
-            overlaps = true
-            break
+        for (let r = minRow; r <= maxRow; r++) {
+          for (let c = minCol; c <= maxCol; c++) {
+            if (zoneCellMap.has(`${r},${c}`)) {
+              overlaps = true
+              break
+            }
           }
+          if (overlaps) break
         }
 
         if (overlaps) {
@@ -873,6 +1036,7 @@ export function PianoRollEditor({
           setZoneFormName('')
           setZoneFormColor(ZONE_COLORS[zones.length % ZONE_COLORS.length])
           setZoneFormCapacity(isGA ? rows * cols : undefined)
+          setZoneFormShape('rectangle')
           setZoneDialogOpen(true)
         }
       }
@@ -886,6 +1050,11 @@ export function PianoRollEditor({
       setIsDragging(false)
       setDragOrigin(null)
       setDragOffset(null)
+    }
+
+    if (isDraggingObjectRef.current) {
+      isDraggingObjectRef.current = false
+      dragObjectIdRef.current = null
     }
 
     if (isDraggingStageRef.current) {
@@ -915,7 +1084,7 @@ export function PianoRollEditor({
         setDragOffset(null)
       }
     }
-  }, [drawStart, drawEnd, zones, toast])
+  }, [drawStart, drawEnd, zones, toast, zoneCellMap, isGA])
 
   // ─── Zone Dialog Submit ────────────────
   const handleZoneDialogSubmit = useCallback(() => {
@@ -931,6 +1100,8 @@ export function PianoRollEditor({
       color: zoneFormColor,
       ...(isGA && zoneFormCapacity ? { capacity: zoneFormCapacity } : {}),
       ...(isGA ? { shape: zoneFormShape } : {}),
+      // Store polygon points if shape is polygon
+      ...(zoneFormShape === 'polygon' && polygonPoints.length >= 3 ? { points: [...polygonPoints] } : {}),
     }
 
     updateLayout((prev) => ({
@@ -938,6 +1109,8 @@ export function PianoRollEditor({
       zones: [...prev.zones, newZone],
     }))
 
+    // Clear polygon state
+    setPolygonPoints([])
     setZoneDialogOpen(false)
     setPendingZone(null)
     setSelectedZoneId(newZone.id)
@@ -947,7 +1120,7 @@ export function PianoRollEditor({
     } else {
       toast({ title: 'Zona dibuat', description: `${zoneFormName.trim()} (${pendingZone.rows}×${pendingZone.cols})` })
     }
-  }, [pendingZone, zoneFormName, zoneFormColor, zoneFormCapacity, zoneFormShape, updateLayout, toast, isGA])
+  }, [pendingZone, zoneFormName, zoneFormColor, zoneFormCapacity, zoneFormShape, updateLayout, toast, isGA, polygonPoints])
 
   // ─── Grid Settings Handlers ────────────
   const handleGridRowsChange = useCallback((value: number) => {
@@ -1036,7 +1209,21 @@ export function PianoRollEditor({
       ctx.fillStyle = zone.color + '40'
 
       const shape = zone.shape || 'rectangle'
-      if (shape === 'rounded-rect') {
+      if (shape === 'polygon' && zone.points && zone.points.length >= 3) {
+        // Draw polygon shape
+        ctx.beginPath()
+        const firstP = zone.points[0]
+        ctx.moveTo(offsetX + firstP.col * layoutData.cellSize * scale + (layoutData.cellSize * scale) / 2, offsetY + firstP.row * layoutData.cellSize * scale + (layoutData.cellSize * scale) / 2)
+        for (let i = 1; i < zone.points.length; i++) {
+          const p = zone.points[i]
+          ctx.lineTo(offsetX + p.col * layoutData.cellSize * scale + (layoutData.cellSize * scale) / 2, offsetY + p.row * layoutData.cellSize * scale + (layoutData.cellSize * scale) / 2)
+        }
+        ctx.closePath()
+        ctx.fill()
+        ctx.strokeStyle = zone.color + '80'
+        ctx.lineWidth = 2
+        ctx.stroke()
+      } else if (shape === 'rounded-rect') {
         const r = 12 * scale
         ctx.beginPath()
         ctx.roundRect(zx, zy, zw, zh, r)
@@ -1130,6 +1317,7 @@ export function PianoRollEditor({
     if (mode === 'draw') return 'cursor-crosshair'
     if (mode === 'erase') return 'cursor-pointer'
     if (mode === 'object') return 'cursor-copy'
+    if (mode === 'polygon') return 'cursor-crosshair'
     if (mode === 'select') return 'cursor-default'
     return 'cursor-default'
   }, [mode, isPreview])
@@ -1252,8 +1440,52 @@ export function PianoRollEditor({
               </Tooltip>
             )}
 
+            {/* Polygon Mode Button (GA only) */}
+            {isGA && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={mode === 'polygon' ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => {
+                      if (mode === 'polygon') {
+                        setMode('select')
+                        setPolygonPoints([])
+                        setIsDrawingPolygon(false)
+                      } else {
+                        setMode('polygon')
+                      }
+                    }}
+                    className={cn('h-8 px-2 text-[10px] gap-1', mode === 'polygon' && 'bg-purple-900/50 text-purple-300')}
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                    Polygon
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">Draw Polygon (5)</TooltipContent>
+              </Tooltip>
+            )}
+
+            {/* Grid Visibility Toggle (GA only) */}
+            {isGA && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={showGrid ? 'secondary' : 'ghost'}
+                    size="sm"
+                    onClick={() => setShowGrid(s => !s)}
+                    className={cn('h-8 px-2 text-[10px] gap-1', showGrid && 'bg-gray-600 text-white')}
+                  >
+                    {showGrid ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    Grid
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="text-xs">Toggle Grid</TooltipContent>
+              </Tooltip>
+            )}
+
             <Badge variant="outline" className="text-[10px] font-mono text-gray-400 border-gray-700 bg-gray-800">
-              {mode === 'select' ? 'SELECT' : mode === 'draw' ? 'DRAW' : mode === 'erase' ? 'ERASE' : 'OBJECT'}
+              {mode === 'select' ? 'SELECT' : mode === 'draw' ? 'DRAW' : mode === 'erase' ? 'ERASE' : mode === 'object' ? 'OBJECT' : 'POLYGON'}
             </Badge>
           </div>
 
@@ -1388,7 +1620,7 @@ export function PianoRollEditor({
                 }}
               >
                 {/* Column Headers */}
-                {!(isGA && !snapToGrid) && (
+                {!(isGA && !showGrid) && (
                 <div className="absolute left-8 top-0 flex" style={{ height: 28 }}>
                   {Array.from({ length: gridCols }, (_, c) => (
                     <div
@@ -1403,7 +1635,7 @@ export function PianoRollEditor({
                 )}
 
                 {/* Row Labels */}
-                {!(isGA && !snapToGrid) && (
+                {!(isGA && !showGrid) && (
                 <div className="absolute left-0 top-7 flex flex-col">
                   {Array.from({ length: gridRows }, (_, r) => (
                     <div
@@ -1469,7 +1701,7 @@ export function PianoRollEditor({
                         key={`cell-${r}-${c}`}
                         className={cn(
                           'border-r border-b transition-colors duration-75',
-                          isGA && !snapToGrid ? 'border-transparent' : borderColor,
+                          (isGA && !showGrid) ? 'border-transparent' : borderColor,
                           isPreview && mode === 'erase' && zone && 'opacity-80'
                         )}
                         style={{
@@ -1506,6 +1738,13 @@ export function PianoRollEditor({
                     shapeStyle.borderRadius = '50%'
                     shapeStyle.overflow = 'hidden'
                   }
+                  // Calculate capacity display for polygon zones
+                  const displayCapacity = (() => {
+                    if (shape === 'polygon' && zone.points && zone.points.length >= 3) {
+                      return zone.capacity || getPolygonCells(zone.points).size
+                    }
+                    return zone.capacity || zone.rows * zone.cols
+                  })()
                   return (
                     <div
                       key={`label-${zone.id}`}
@@ -1525,13 +1764,100 @@ export function PianoRollEditor({
                     >
                       {zone.name}
                       {isGA ? (
-                        <span className="ml-1 opacity-60 text-[8px]">({zone.capacity || zone.rows * zone.cols} org)</span>
+                        <span className="ml-1 opacity-60 text-[8px]">({displayCapacity} org)</span>
                       ) : (
                         <span className="ml-1 opacity-60 text-[8px]">({zone.rows * zone.cols})</span>
                       )}
                     </div>
                   )
                 })}
+
+                {/* Polygon Zone Outlines (visual overlay for non-rectangular zones) */}
+                {!isPreview && zones.filter(z => z.shape === 'polygon' && z.points && z.points.length >= 3).map(zone => {
+                  const isSelected = selectedZoneId === zone.id
+                  const points = zone.points!
+                  return (
+                    <svg
+                      key={`poly-outline-${zone.id}`}
+                      className="absolute pointer-events-none"
+                      style={{
+                        left: 32,
+                        top: 28,
+                        width: gridCols * cellSize * zoom,
+                        height: gridRows * cellSize * zoom,
+                        zIndex: 4,
+                      }}
+                    >
+                      <polygon
+                        points={points.map(p => `${p.col * cellSize * zoom + cellSize * zoom / 2},${p.row * cellSize * zoom + cellSize * zoom / 2}`).join(' ')}
+                        fill="none"
+                        stroke={isSelected ? '#F59E0B' : zone.color + 'AA'}
+                        strokeWidth={isSelected ? 2.5 : 1.5}
+                        strokeDasharray={isSelected ? '6 3' : 'none'}
+                      />
+                    </svg>
+                  )
+                })}
+
+                {/* Polygon Drawing In-Progress Points */}
+                {isDrawingPolygon && polygonPoints.length > 0 && !isPreview && (
+                  <svg
+                    className="absolute pointer-events-none"
+                    style={{
+                      left: 32,
+                      top: 28,
+                      width: gridCols * cellSize * zoom,
+                      height: gridRows * cellSize * zoom,
+                      zIndex: 20,
+                    }}
+                  >
+                    {/* Lines connecting placed points */}
+                    {polygonPoints.length >= 2 && (
+                      <polyline
+                        points={polygonPoints.map(p => `${p.col * cellSize * zoom + cellSize * zoom / 2},${p.row * cellSize * zoom + cellSize * zoom / 2}`).join(' ')}
+                        fill="none"
+                        stroke="#A855F7"
+                        strokeWidth={2}
+                        strokeDasharray="6 3"
+                      />
+                    )}
+                    {/* Vertex dots */}
+                    {polygonPoints.map((p, i) => (
+                      <circle
+                        key={`vp-${i}`}
+                        cx={p.col * cellSize * zoom + cellSize * zoom / 2}
+                        cy={p.row * cellSize * zoom + cellSize * zoom / 2}
+                        r={i === 0 && polygonPoints.length >= 3 ? 6 : 4}
+                        fill={i === 0 ? '#F59E0B' : '#A855F7'}
+                        stroke="#fff"
+                        strokeWidth={1.5}
+                      />
+                    ))}
+                    {/* Preview polygon fill if >= 3 points */}
+                    {polygonPoints.length >= 3 && (
+                      <polygon
+                        points={polygonPoints.map(p => `${p.col * cellSize * zoom + cellSize * zoom / 2},${p.row * cellSize * zoom + cellSize * zoom / 2}`).join(' ')}
+                        fill="#A855F720"
+                        stroke="none"
+                      />
+                    )}
+                  </svg>
+                )}
+
+                {/* Polygon Drawing Hint */}
+                {mode === 'polygon' && !isDrawingPolygon && !isPreview && (
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-gray-800/90 border border-purple-500/50 rounded-lg px-3 py-2 text-[10px] text-purple-300 z-30 pointer-events-none">
+                    Click to place vertices. Click near first point or press Enter to close. Esc to cancel.
+                    {polygonPoints.length > 0 && ` (${polygonPoints.length} points)`}
+                  </div>
+                )}
+                {mode === 'polygon' && isDrawingPolygon && !isPreview && (
+                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-gray-800/90 border border-purple-500/50 rounded-lg px-3 py-2 text-[10px] text-purple-300 z-30 pointer-events-none">
+                    {polygonPoints.length < 3
+                      ? `Click to add more points (min 3). ${polygonPoints.length} placed.`
+                      : `Click near first point or press Enter to finish. ${polygonPoints.length} points. Esc to cancel.`}
+                  </div>
+                )}
 
                 {/* Stage Overlay */}
                 {stage && (
@@ -1768,9 +2094,12 @@ export function PianoRollEditor({
                     <div><kbd className="bg-gray-700 px-1 rounded">2</kbd> Draw</div>
                     <div><kbd className="bg-gray-700 px-1 rounded">3</kbd> Erase</div>
                     {isGA && <div><kbd className="bg-gray-700 px-1 rounded">4</kbd> Object</div>}
+                    {isGA && <div><kbd className="bg-gray-700 px-1 rounded">5</kbd> Polygon</div>}
                     <div><kbd className="bg-gray-700 px-1 rounded">Del</kbd> Delete</div>
                     <div><kbd className="bg-gray-700 px-1 rounded">⌘Z</kbd> Undo</div>
                     <div><kbd className="bg-gray-700 px-1 rounded">⌘Y</kbd> Redo</div>
+                    {isGA && <div><kbd className="bg-gray-700 px-1 rounded">Esc</kbd> Cancel Poly</div>}
+                    {isGA && <div><kbd className="bg-gray-700 px-1 rounded">Enter</kbd> Close Poly</div>}
                   </div>
                 </div>
                 </>
@@ -1851,6 +2180,21 @@ export function PianoRollEditor({
                       <ellipse cx="12" cy="12" rx="9" ry="7" stroke="currentColor" strokeWidth="2" />
                     </svg>
                     <span className="text-[10px] text-gray-400">Ellipse</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setZoneFormShape('polygon')}
+                    className={cn(
+                      'flex-1 flex flex-col items-center gap-1 py-2 px-2 rounded-lg border-2 transition-all',
+                      zoneFormShape === 'polygon'
+                        ? 'border-amber-500 bg-amber-900/20'
+                        : 'border-gray-600 hover:border-gray-500'
+                    )}
+                  >
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" className="text-gray-300">
+                      <polygon points="12,3 21,10 18,21 6,21 3,10" stroke="currentColor" strokeWidth="2" fill="none" />
+                    </svg>
+                    <span className="text-[10px] text-gray-400">Polygon</span>
                   </button>
                 </div>
               </div>
@@ -2019,6 +2363,14 @@ function ZoneProperties({
   onUpdate: (updates: Partial<PianoRollZone>) => void
   onDelete: () => void
 }) {
+  // Calculate effective capacity for polygon zones
+  const effectiveCapacity = useMemo(() => {
+    if (zone.shape === 'polygon' && zone.points && zone.points.length >= 3) {
+      return zone.capacity || getPolygonCells(zone.points).size
+    }
+    return zone.capacity || zone.rows * zone.cols
+  }, [zone])
+
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -2027,7 +2379,7 @@ function ZoneProperties({
           <span className="text-xs font-semibold">Zone Properties</span>
         </div>
         <Badge variant="outline" className="text-[10px] text-gray-400 border-gray-700 bg-gray-800">
-          {isGA ? `${zone.capacity || zone.rows * zone.cols} orang` : `${zone.rows * zone.cols} seats`}
+          {isGA ? `${effectiveCapacity} orang` : `${zone.rows * zone.cols} seats`}
         </Badge>
       </div>
 
@@ -2040,6 +2392,29 @@ function ZoneProperties({
           className="bg-gray-700 border-gray-600 text-gray-200 h-8 text-xs"
         />
       </div>
+
+      {/* Capacity (GA only) */}
+      {isGA && (
+        <div className="space-y-1">
+          <Label className="text-[10px] text-gray-500">Kapasitas (orang)</Label>
+          <Input
+            type="number"
+            value={zone.capacity ?? ''}
+            onChange={(e) => onUpdate({ capacity: e.target.value ? Number(e.target.value) : undefined })}
+            placeholder={String(effectiveCapacity)}
+            className="bg-gray-700 border-gray-600 text-gray-200 h-8 text-xs"
+            min={1}
+          />
+          <p className="text-[9px] text-gray-600">Kosongkan = auto ({effectiveCapacity})</p>
+        </div>
+      )}
+
+      {/* Shape Info */}
+      {isGA && zone.shape && (
+        <div className="text-[10px] text-gray-500 font-mono bg-gray-700/50 rounded px-2 py-1.5">
+          Shape: {zone.shape === 'polygon' ? `Polygon (${zone.points?.length || 0} vertices)` : zone.shape}
+        </div>
+      )}
 
       {/* Color */}
       <div className="space-y-1">
@@ -2068,7 +2443,8 @@ function ZoneProperties({
         </div>
       </div>
 
-      {/* Position */}
+      {/* Position (hidden for polygon zones) */}
+      {zone.shape !== 'polygon' && (
       <div className="space-y-1">
         <Label className="text-[10px] text-gray-500">Position</Label>
         <div className="grid grid-cols-2 gap-2">
@@ -2118,11 +2494,14 @@ function ZoneProperties({
           </div>
         </div>
       </div>
+      )}
 
-      {/* Row/Col Range Display */}
+      {/* Row/Col Range Display (hidden for polygon) */}
+      {zone.shape !== 'polygon' && (
       <div className="text-[10px] text-gray-500 font-mono bg-gray-700/50 rounded px-2 py-1.5">
         {getRowLabel(zone.row)}{zone.col + 1} → {getRowLabel(zone.row + zone.rows - 1)}{zone.col + zone.cols}
       </div>
+      )}
 
       {/* Delete */}
       <Button
