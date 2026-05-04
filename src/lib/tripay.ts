@@ -29,41 +29,8 @@ export function getTripayConfig() {
 }
 
 /**
- * Build the standard form-encoded body for Tripay transaction creation.
- * Used by both direct and proxy modes to ensure identical formatting.
- */
-function buildTransactionFormBody(params: {
-  method: string
-  merchant_ref: string
-  amount: number
-  customer_name: string
-  customer_email: string
-  customer_phone: string
-  order_items: any[]
-  callback_url: string
-  return_url: string
-  expired_time: number
-  signature: string
-}): string {
-  const formParams = new URLSearchParams({
-    method: params.method,
-    merchant_ref: params.merchant_ref,
-    amount: String(params.amount),
-    customer_name: params.customer_name,
-    customer_email: params.customer_email,
-    customer_phone: params.customer_phone,
-    order_items: JSON.stringify(params.order_items),
-    callback_url: params.callback_url,
-    return_url: params.return_url,
-    expired_time: String(params.expired_time),
-    signature: params.signature,
-  })
-  return formParams.toString()
-}
-
-/**
  * Create a transaction via Tripay (direct or through proxy).
- * Both modes use identical application/x-www-form-urlencoded body.
+ * Uses JSON body with order_items as a real array (Tripay verified format).
  */
 export async function createTripayTransaction(params: {
   method: string
@@ -79,17 +46,16 @@ export async function createTripayTransaction(params: {
   signature: string
 }) {
   const config = getTripayConfig()
-  const bodyStr = buildTransactionFormBody(params)
+  const jsonBody = JSON.stringify(params)
 
   if (config.useProxy) {
-    // Send form-encoded to proxy — proxy forwards raw body to Tripay
     const res = await fetch(config.baseUrl + '/api/transaction/create', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Type': 'application/json',
         'X-Proxy-Auth': config.proxyAuthKey!,
       },
-      body: bodyStr,
+      body: jsonBody,
     })
     return res
   }
@@ -99,9 +65,9 @@ export async function createTripayTransaction(params: {
     method: 'POST',
     headers: {
       'Authorization': 'Bearer ' + config.apiKey,
-      'Content-Type': 'application/x-www-form-urlencoded',
+      'Content-Type': 'application/json',
     },
-    body: bodyStr,
+    body: jsonBody,
   })
   return res
 }
