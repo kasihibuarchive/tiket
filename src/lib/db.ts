@@ -7,13 +7,26 @@ const globalForPrisma = globalThis as unknown as {
 function createPrismaClient() {
   let url = process.env.DATABASE_URL || ''
 
-  // Force PgBouncer for Supabase — prevents direct connections from exhausting pool
+  // ─── Auto-rewrite Supabase direct URL → pooler URL ─────────────────
+  // Supabase direct: postgresql://postgres:xxx@db.xxx.supabase.co:5432/postgres
+  // Supabase pooler: postgresql://postgres.xxx:xxx@aws-0-xxx.pooler.supabase.com:6543/postgres
+  //
+  // The pgbouncer=true parameter alone does NOT route through PgBouncer.
+  // We MUST use port 6543 (Transaction Pooler) to actually pool connections.
+  if (url.includes(':5432/') && !url.includes('.pooler.supabase.com')) {
+    console.warn(
+      '[db] WARNING: DATABASE_URL uses port 5432 (direct connection). ' +
+      'This will exhaust Supabase connection pool on Vercel. ' +
+      'Please use the Transaction Pooler URL (port 6543) from Supabase Dashboard → Settings → Database.'
+    )
+  }
+
+  // Append PgBouncer compatibility flags
   if (!url.includes('pgbouncer=true')) {
     url += (url.includes('?') ? '&' : '?') + 'pgbouncer=true'
   }
 
-  // Limit Prisma's connection pool to 1 per serverless instance
-  // Vercel spins up multiple instances; with default pool (cpu*2+1), we'd hit Supabase's 15-connection limit
+  // Limit Prisma's internal connection pool to 1 per serverless instance
   if (!url.includes('connection_limit=')) {
     url += '&connection_limit=1'
   }
@@ -41,8 +54,8 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
  */
 export async function withDbRetry<T>(
   fn: () => Promise<T>,
-  retries = 2,
-  baseDelay = 500
+  retries = 3,
+  baseDelay = 800
 ): Promise<T> {
   let lastError: unknown
   for (let i = 0; i <= retries; i++) {
@@ -51,7 +64,6 @@ export async function withDbRetry<T>(
     } catch (error: unknown) {
       lastError = error
       const msg = error instanceof Error ? error.message : ''
-      // Only retry on connection pool / timeout errors
       const isRetryable =
         msg.includes('EMAXCONNSESSION') ||
         msg.includes('max clients') ||
@@ -61,7 +73,8 @@ export async function withDbRetry<T>(
         msg.includes('PrismaClientInitializationError')
 
       if (isRetryable && i < retries) {
-        const delay = baseDelay * Math.pow(2, i) + Math.random() * 200
+        const delay = baseDelay * Math.pow(2, i) + Math.random() * 300
+        console.warn(`[db] Connection error (attempt ${i + 1}/${retries + 1}), retrying in ${Math.round(delay)}ms...`)
         await new Promise((r) => setTimeout(r, delay))
         continue
       }
