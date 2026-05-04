@@ -277,15 +277,30 @@ export async function POST(request: NextRequest) {
     if (!tripayRes.ok) {
       const errText = await tripayRes.text().catch(() => 'Unknown error')
       console.error('[checkout] Tripay error:', tripayRes.status, errText)
-      return NextResponse.json({ error: 'Gagal menghubungi payment gateway (error ' + tripayRes.status + ')' }, { status: 502 })
+      // Parse Tripay error response for a more helpful message
+      let userMessage = 'Gagal menghubungi payment gateway (error ' + tripayRes.status + ')'
+      try {
+        const errJson = JSON.parse(errText)
+        const tripayMsg = errJson.message || errJson.error || ''
+        if (tripayRes.status === 401) {
+          userMessage = 'API key Tripay tidak valid. Pastikan TRIPAY_API_KEY sudah benar di environment variables.'
+          if (tripayMsg) userMessage += ' (' + tripayMsg + ')'
+        } else if (tripayRes.status === 403) {
+          userMessage = 'Akses Tripay ditolak. Kemungkinan: (1) Mode production/sandbox tidak sesuai — set TRIPAY_IS_PRODUCTION=true jika menggunakan API key production, (2) Private key atau merchant code salah — cek TRIPAY_PRIVATE_KEY dan TRIPAY_MERCHANT_CODE, (3) IP server belum di-whitelist di dashboard Tripay (production mode).'
+          if (tripayMsg) userMessage += ' Detail: ' + tripayMsg
+        } else if (tripayRes.status === 400) {
+          userMessage = 'Permintaan ke Tripay tidak valid: ' + (tripayMsg || errText)
+        }
+      } catch {}
+      return NextResponse.json({ error: userMessage }, { status: 502 })
     }
 
     const tripayData = await tripayRes.json()
 
     if (!tripayData.success || !tripayData.data) {
       const errMsg = tripayData.message || 'Gagal membuat transaksi pembayaran'
-      console.error('[checkout] Tripay API error:', errMsg)
-      return NextResponse.json({ error: errMsg }, { status: 502 })
+      console.error('[checkout] Tripay API error:', errMsg, JSON.stringify(tripayData).slice(0, 500))
+      return NextResponse.json({ error: 'Tripay: ' + errMsg }, { status: 502 })
     }
 
     const { reference, checkout_url, pay_url, pay_code, status } = tripayData.data
