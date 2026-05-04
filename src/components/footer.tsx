@@ -32,6 +32,15 @@ export function Footer() {
               <Link href="/verify" className="text-sm hover:text-gold transition-colors">
                 Cek Tiket
               </Link>
+              <Link href="/tentang" className="text-sm hover:text-gold transition-colors">
+                Tentang Kami
+              </Link>
+              <Link href="/kebijakan-privasi" className="text-sm hover:text-gold transition-colors">
+                Kebijakan Privasi
+              </Link>
+              <Link href="/ketentuan-layanan" className="text-sm hover:text-gold transition-colors">
+                Ketentuan Layanan
+              </Link>
             </div>
           </div>
 

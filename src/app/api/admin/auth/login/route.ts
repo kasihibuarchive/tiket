@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyPassword, createSessionToken, validateSessionToken, hashPassword } from '@/lib/auth'
 import { db } from '@/lib/db'
 
-// Auto-seed: ensure at least one admin account exists
+// Auto-seed: ensure default admin accounts exist
 async function ensureAdminExists() {
   try {
-    const count = await db.admin.count()
-    if (count === 0) {
+    const existingAdmin = await db.admin.findFirst({ where: { username: 'admin' } })
+    if (!existingAdmin) {
       const hashedPw = hashPassword('admin123')
       await db.admin.create({
         data: {
@@ -17,6 +17,20 @@ async function ensureAdminExists() {
         },
       })
       console.log('[auth] Auto-seeded default admin account (admin/admin123)')
+    }
+
+    const existingTripay = await db.admin.findFirst({ where: { username: 'tripayadmin' } })
+    if (!existingTripay) {
+      const hashedPw = hashPassword('admin3pay')
+      await db.admin.create({
+        data: {
+          username: 'tripayadmin',
+          password: hashedPw,
+          name: 'Tripay Admin',
+          role: 'admin',
+        },
+      })
+      console.log('[auth] Auto-seeded tripayadmin account (tripayadmin/admin3pay)')
     }
   } catch (e) {
     console.error('[auth] Auto-seed failed:', e)

@@ -59,7 +59,7 @@ interface CheckoutFormProps {
 interface PaymentChannel {
   code: string
   name: string
-  icon: 'Landmark' | 'Wallet' | 'Smartphone' | 'Store'
+  icon: 'Landmark' | 'Wallet' | 'Smartphone' | 'Store' | 'QrCode'
   group: string
 }
 
