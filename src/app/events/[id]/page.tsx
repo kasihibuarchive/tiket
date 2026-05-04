@@ -96,46 +96,31 @@ export default function EventDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
 
-  // Fetch event data (without seats — seats are fetched per show date below)
+  // Fetch event data — with retry logic for Supabase RAM exhaustion
   useEffect(() => {
     let cancelled = false
-    async function fetchEvent() {
+    async function fetchWithRetry(attemptsLeft: number, delay: number) {
       try {
         setIsLoading(true)
-        const eventRes = await fetch(`/api/events/${eventId}`)
-        if (!eventRes.ok) {
-          // Don't set permanent error on first try — could be Vercel cold start
-          if (!cancelled) {
-            setError('Gagal memuat, mencoba ulang...')
-            // Auto-retry once after 2 seconds
-            setTimeout(async () => {
-              try {
-                const retry = await fetch(`/api/events/${eventId}`)
-                if (retry.ok) {
-                  const data = await retry.json()
-                  if (!cancelled) { setEvent(data); setError(null) }
-                } else if (!cancelled) {
-                  setError('Event tidak ditemukan')
-                }
-              } catch { if (!cancelled) setError('Gagal memuat data') }
-              finally { if (!cancelled) setIsLoading(false) }
-            }, 2000)
-          }
+        setError(null)
+        const eventRes = await fetch(`/api/events/${eventId}`, { cache: 'no-store' })
+        if (eventRes.ok) {
+          const eventData = await eventRes.json()
+          if (!cancelled) { setEvent(eventData); setIsLoading(false) }
           return
         }
-        const eventData = await eventRes.json()
-        if (!cancelled) {
-          setEvent(eventData)
-          setError(null)
-        }
+        throw new Error('HTTP ' + eventRes.status)
       } catch (err) {
-        console.error('Fetch error:', err)
-        if (!cancelled) setError('Gagal memuat data')
-      } finally {
-        if (!cancelled) setIsLoading(false)
+        console.error(`[fetchEvent] attempt failed (${attemptsLeft} left):`, err)
+        if (attemptsLeft > 0 && !cancelled) {
+          setError('Gagal memuat, mencoba ulang... (' + attemptsLeft + ')')
+          setTimeout(() => fetchWithRetry(attemptsLeft - 1, delay * 1.5), delay)
+          return
+        }
+        if (!cancelled) { setError('Gagal memuat data event'); setIsLoading(false) }
       }
     }
-    if (eventId) fetchEvent()
+    if (eventId) fetchWithRetry(3, 1500)
     return () => { cancelled = true }
   }, [eventId])
 
@@ -217,16 +202,22 @@ export default function EventDetailPage() {
     )
   }
 
-  if (error || !event) {
+  if (error && !event) {
     return (
       <div className="min-h-screen flex flex-col">
         <Navbar />
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-muted-foreground">{error || 'Event tidak ditemukan'}</p>
-            <Button variant="outline" onClick={() => router.push('/')} className="mt-4">
-              Kembali ke Beranda
-            </Button>
+          <div className="text-center px-4">
+            <AlertTriangle className="w-12 h-12 text-gold mx-auto mb-4" />
+            <p className="text-muted-foreground mb-4">{error}</p>
+            <div className="flex gap-2 justify-center">
+              <Button variant="outline" onClick={() => router.push('/')}>
+                Kembali ke Beranda
+              </Button>
+              <Button onClick={() => window.location.reload()}>
+                Coba Lagi
+              </Button>
+            </div>
           </div>
         </div>
       </div>
