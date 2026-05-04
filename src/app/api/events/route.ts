@@ -54,7 +54,7 @@ export async function GET(request: NextRequest) {
           synopsis: event.synopsis,
           isPublished: event.isPublished,
           createdAt: event.createdAt,
-          updatedAt: event.updatedDate,
+          updatedAt: event.updatedAt,
           priceCategories: eventPriceCats,
           showDates: eventShowDates,
           seatSummary: { total: totalSeats, available: availableSeats, sold: soldSeats },
