@@ -155,6 +155,7 @@ export default function AdminEventsPage() {
       })),
       showDates: (event.showDates && event.showDates.length > 0)
         ? event.showDates.map((sd) => ({
+            id: sd.id,
             date: new Date(sd.date).toISOString().slice(0, 16),
             openGate: sd.openGate ? new Date(sd.openGate).toISOString().slice(0, 16) : '',
             label: sd.label || '',
