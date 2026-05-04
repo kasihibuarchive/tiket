@@ -33,8 +33,19 @@ function sendJSON(res, status, data) {
 }
 
 /**
+ * Manually build a URL-encoded form body from a flat key-value object.
+ * Uses encodeURIComponent for both keys and values — avoids any URLSearchParams
+ * edge cases with special characters in JSON strings.
+ */
+function buildFormBody(obj) {
+  return Object.entries(obj)
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(String(v)))
+    .join('&');
+}
+
+/**
  * Forward a raw form-encoded body directly to Tripay.
- * No re-encoding — the body is passed through as-is.
  */
 function tripayForward(path, method, rawBody) {
   return new Promise((resolve, reject) => {
@@ -65,6 +76,27 @@ function tripayForward(path, method, rawBody) {
   });
 }
 
+/**
+ * Build the form-encoded body for Tripay transaction create.
+ * order_items must be a JSON-stringified array — we build it manually
+ * to avoid URLSearchParams issues with nested JSON in form values.
+ */
+function buildTransactionFormBody(params) {
+  return buildFormBody({
+    method: params.method,
+    merchant_ref: params.merchant_ref,
+    amount: String(params.amount),
+    customer_name: params.customer_name || '',
+    customer_email: params.customer_email || '',
+    customer_phone: params.customer_phone || '',
+    order_items: JSON.stringify(params.order_items),
+    callback_url: params.callback_url,
+    return_url: params.return_url,
+    expired_time: String(params.expired_time),
+    signature: params.signature,
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   // CORS preflight
   if (req.method === 'OPTIONS') {
@@ -91,45 +123,77 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, 401, { error: 'Unauthorized' });
   }
 
-  // Create transaction — receive form-encoded, verify signature, forward raw body
+  // Create transaction
   if (req.method === 'POST' && req.url === '/api/transaction/create') {
     try {
       const rawBody = await readRawBody(req);
-      const params = new URLSearchParams(rawBody);
+      const contentType = (req.headers['content-type'] || '').toLowerCase();
+      let method, merchant_ref, amount, signature, order_items;
+      let formBodyToSend;
 
-      const method = params.get('method');
-      const merchant_ref = params.get('merchant_ref');
-      const amount = params.get('amount');
-      const signature = params.get('signature');
+      if (contentType.includes('application/json')) {
+        // JSON from older Next.js versions — parse and re-encode manually
+        const json = JSON.parse(rawBody);
+        method = json.method;
+        merchant_ref = json.merchant_ref;
+        amount = json.amount;
+        signature = json.signature;
+        order_items = json.order_items;
 
-      if (!method || !merchant_ref || !amount || !signature) {
-        return sendJSON(res, 400, { error: 'Missing required params' });
+        if (!method || !merchant_ref || !amount || !signature) {
+          return sendJSON(res, 400, { error: 'Missing required params' });
+        }
+
+        // Build form body manually — this is the critical fix
+        formBodyToSend = buildTransactionFormBody(json);
+      } else {
+        // form-urlencoded from newer Next.js — parse params for verification
+        const params = new URLSearchParams(rawBody);
+        method = params.get('method');
+        merchant_ref = params.get('merchant_ref');
+        amount = params.get('amount');
+        signature = params.get('signature');
+
+        if (!method || !merchant_ref || !amount || !signature) {
+          return sendJSON(res, 400, { error: 'Missing required params' });
+        }
+
+        // Forward raw body as-is
+        formBodyToSend = rawBody;
       }
 
       // Verify signature
       const expected = crypto
         .createHmac('sha256', TRIPAY_PRIVATE_KEY)
-        .update(TRIPAY_MERCHANT_CODE + merchant_ref + amount)
+        .update(TRIPAY_MERCHANT_CODE + merchant_ref + String(amount))
         .digest('hex');
 
       if (signature !== expected) {
         return sendJSON(res, 403, { error: 'Invalid signature' });
       }
 
-      // Forward raw form body to Tripay — zero re-encoding
-      const result = await tripayForward('/transaction/create', 'POST', rawBody);
+      // Forward to Tripay
+      const result = await tripayForward('/transaction/create', 'POST', formBodyToSend);
       return sendJSON(res, result.status, result.data);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Proxy error: ' + err.message });
     }
   }
 
-  // Transaction detail — receive form-encoded, forward raw body
+  // Transaction detail — accept both JSON and form-encoded
   if (req.method === 'POST' && req.url === '/api/transaction/detail') {
     try {
       const rawBody = await readRawBody(req);
-      const params = new URLSearchParams(rawBody);
-      const reference = params.get('reference');
+      const contentType = (req.headers['content-type'] || '').toLowerCase();
+      let reference;
+
+      if (contentType.includes('application/json')) {
+        const json = JSON.parse(rawBody);
+        reference = json.reference;
+      } else {
+        const params = new URLSearchParams(rawBody);
+        reference = params.get('reference');
+      }
 
       if (!reference) {
         return sendJSON(res, 400, { error: 'Missing reference' });
