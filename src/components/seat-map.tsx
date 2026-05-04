@@ -257,7 +257,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     return () => {}
   }, [onSeatLocked, onSeatUnlocked, onSeatSold, onAllSeatsStatus, onSeatLockRejected, onSeatsLockRejected, eventId])
 
-  // Poll seats from API every 2 seconds — uses refs, NOT selectedSeatCodes in deps
+  // Poll seats from API every 3 seconds — balance realtime vs DB load
   useEffect(() => {
     if (!eventId) return
     let cancelled = false
@@ -285,8 +285,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         )
       } catch { /* silent */ }
     }
-    const timeout = setTimeout(() => { pollSeats() }, 1500)
-    const interval = setInterval(pollSeats, 2000)
+    const timeout = setTimeout(() => { pollSeats() }, 2000)
+    const interval = setInterval(pollSeats, 3000)
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
   }, [eventId, showDateId])
 
