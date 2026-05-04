@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { cleanupExpiredLocks } from '@/lib/seat-cleanup'
 
 export async function GET(
   request: NextRequest,
@@ -11,9 +10,16 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const showDateId = searchParams.get('showDateId') || undefined
 
-    // Auto-cleanup expired locks every poll (10 min timeout)
-    // This ensures stale locks are released server-side too
-    try { await cleanupExpiredLocks() } catch { /* non-critical */ }
+    // Only cleanup expired locks ~1 in 30 requests to reduce DB load
+    const shouldCleanup = Math.random() < 0.03
+    if (shouldCleanup) {
+      try {
+        await db.seat.updateMany({
+          where: { status: 'LOCKED_TEMPORARY', lockedUntil: { lt: new Date() } },
+          data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
+        })
+      } catch { /* non-critical */ }
+    }
 
     const event = await db.event.findUnique({
       where: { id },

@@ -98,25 +98,45 @@ export default function EventDetailPage() {
 
   // Fetch event data (without seats — seats are fetched per show date below)
   useEffect(() => {
+    let cancelled = false
     async function fetchEvent() {
       try {
         setIsLoading(true)
         const eventRes = await fetch(`/api/events/${eventId}`)
         if (!eventRes.ok) {
-          setError('Event tidak ditemukan')
-          setIsLoading(false)
+          // Don't set permanent error on first try — could be Vercel cold start
+          if (!cancelled) {
+            setError('Gagal memuat, mencoba ulang...')
+            // Auto-retry once after 2 seconds
+            setTimeout(async () => {
+              try {
+                const retry = await fetch(`/api/events/${eventId}`)
+                if (retry.ok) {
+                  const data = await retry.json()
+                  if (!cancelled) { setEvent(data); setError(null) }
+                } else if (!cancelled) {
+                  setError('Event tidak ditemukan')
+                }
+              } catch { if (!cancelled) setError('Gagal memuat data') }
+              finally { if (!cancelled) setIsLoading(false) }
+            }, 2000)
+          }
           return
         }
         const eventData = await eventRes.json()
-        setEvent(eventData)
+        if (!cancelled) {
+          setEvent(eventData)
+          setError(null)
+        }
       } catch (err) {
         console.error('Fetch error:', err)
-        setError('Gagal memuat data')
+        if (!cancelled) setError('Gagal memuat data')
       } finally {
-        setIsLoading(false)
+        if (!cancelled) setIsLoading(false)
       }
     }
     if (eventId) fetchEvent()
+    return () => { cancelled = true }
   }, [eventId])
 
   // Show dates with fallback
