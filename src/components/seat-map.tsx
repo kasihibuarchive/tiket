@@ -277,16 +277,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             if (myCodes.has(s.seatCode)) return s
             const fresh = data.find((f: any) => f.id === s.id)
             if (!fresh) return s
-            // Smart anti-flicker guard:
-            // If lock is still valid (hasn't expired), keep WebSocket state to prevent flicker.
-            // But if lock HAS expired, trust the DB and release it.
-            if (s.status === 'LOCKED_TEMPORARY' && fresh.status === 'AVAILABLE') {
-              if (s.lockedUntil && Date.now() > new Date(s.lockedUntil).getTime() + 2000) {
-                // Lock expired — trust DB, release the seat
-                return { ...s, status: 'AVAILABLE', lockedUntil: null }
-              }
-              return s // lock still active — keep WebSocket state, ignore stale DB
-            }
             if (fresh.status !== s.status || fresh.lockedUntil !== s.lockedUntil) {
               return { ...s, status: fresh.status, lockedUntil: fresh.lockedUntil }
             }
