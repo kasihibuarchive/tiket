@@ -66,10 +66,13 @@ export interface SeatUnlockRejectedPayload {
 // Connects to the Seat Socket.io service and provides real-time seat operations.
 // ===========================
 
+const MAX_RECONNECT_ATTEMPTS = 5
+
 export function useSeatSocket(eventId: string | null) {
   const socketRef = useRef<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const [userCount, setUserCount] = useState(0)
+  const gaveUpRef = useRef(false) // Circuit breaker: stop retrying after MAX failures
 
   // Stable callback refs to avoid re-attaching listeners
   const onSeatLockedRef = useRef<((payload: SeatLockedPayload) => void) | null>(null)
@@ -83,24 +86,27 @@ export function useSeatSocket(eventId: string | null) {
   // ---- Initialize socket connection ----
   useEffect(() => {
     if (!eventId) return
+    gaveUpRef.current = false
 
     // Create Socket.io connection via Caddy reverse proxy
     const socket: Socket = io('/?XTransformPort=3003', {
       transports: ['websocket', 'polling'],
       forceNew: true,
       reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 10000,
+      reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 8000,
+      timeout: 8000,
     })
 
     socketRef.current = socket
+    let connectFailCount = 0
 
     // ---- Connection events ----
     socket.on('connect', () => {
       console.log(`[useSeatSocket] Connected to seat service, socket.id=${socket.id}`)
       setIsConnected(true)
+      connectFailCount = 0
       // Join the event room — server will send current lock state on join
       socket.emit('join_event', { eventId })
     })
@@ -111,11 +117,15 @@ export function useSeatSocket(eventId: string | null) {
     })
 
     socket.on('connect_error', (error) => {
-      // Gracefully degrade - socket service may not be running
-      if (socketRef.current?.active && !isConnected) {
-        console.warn(`[useSeatSocket] Socket service unavailable, falling back to API-only mode`)
-      }
+      connectFailCount++
       setIsConnected(false)
+      if (connectFailCount >= MAX_RECONNECT_ATTEMPTS) {
+        // Circuit breaker: stop retrying to prevent connection storm
+        console.warn(`[useSeatSocket] Socket service unavailable after ${MAX_RECONNECT_ATTEMPTS} attempts, switching to API-only mode permanently`)
+        gaveUpRef.current = true
+        socket.io.opts.reconnection = false
+        socket.disconnect()
+      }
     })
 
     // ---- Seat events ----
@@ -153,6 +163,8 @@ export function useSeatSocket(eventId: string | null) {
 
     // ---- Cleanup on unmount ----
     return () => {
+      gaveUpRef.current = true
+      socket.io.opts.reconnection = false
       socket.removeAllListeners()
       socket.disconnect()
       socketRef.current = null

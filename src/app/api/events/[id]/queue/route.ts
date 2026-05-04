@@ -52,9 +52,13 @@ export async function GET(
 
     const maxConcurrent = queueConfig.maxConcurrent
 
-    // Run cleanup and promotion logic
-    await cleanupExpiredTokens(eventId)
-    await promoteWaitingTokens(eventId, maxConcurrent)
+    // Run cleanup and promotion probabilistically (~5% of requests) to reduce DB load.
+    // On Supabase free tier (0.5GB RAM), running these on every poll causes connection exhaustion.
+    const shouldRunMaintenance = Math.random() < 0.05
+    if (shouldRunMaintenance) {
+      await cleanupExpiredTokens(eventId)
+      await promoteWaitingTokens(eventId, maxConcurrent)
+    }
 
     // Find or create token for this sessionId
     let token = await db.eventQueueToken.findFirst({
@@ -202,20 +206,22 @@ async function promoteWaitingTokens(eventId: string, maxConcurrent: number) {
 
   if (waitingTokens.length === 0) return
 
-  // Recalculate active count after cleanup for accurate position
-  const currentActiveCount = await db.eventQueueToken.count({
-    where: { eventId, status: 'ACTIVE', expiresAt: { gt: now } },
+  // Batch update all waiting tokens to ACTIVE in ONE query instead of N individual updates
+  const waitingIds = waitingTokens.map(t => t.id)
+  await db.eventQueueToken.updateMany({
+    where: { id: { in: waitingIds } },
+    data: {
+      status: 'ACTIVE',
+      activatedAt: now,
+      expiresAt: new Date(Date.now() + ACTIVE_TIMEOUT_MS),
+    },
   })
 
+  // Update individual positions (required for ordering — but only for the promoted tokens)
   for (let i = 0; i < waitingTokens.length; i++) {
     await db.eventQueueToken.update({
       where: { id: waitingTokens[i].id },
-      data: {
-        status: 'ACTIVE',
-        position: currentActiveCount + i + 1,
-        activatedAt: now,
-        expiresAt: new Date(Date.now() + ACTIVE_TIMEOUT_MS),
-      },
+      data: { position: activeCount + i + 1 },
     })
   }
 }

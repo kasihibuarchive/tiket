@@ -69,7 +69,7 @@ export function QueueGate({ eventId, children }: QueueGateProps) {
         // Start heartbeat every 15 seconds
         heartbeatRef.current = setInterval(checkQueueStatus, 15_000)
       } else if (status.enabled && status.status === 'WAITING') {
-        // Start polling every 3 seconds
+        // Start polling every 5 seconds (reduced from 3s to lower DB load on Supabase free tier)
         pollRef.current = setInterval(async () => {
           const newStatus = await checkQueueStatus()
           if (newStatus && newStatus.status === 'ACTIVE') {
@@ -79,7 +79,7 @@ export function QueueGate({ eventId, children }: QueueGateProps) {
             setTimeout(() => setIsPromoting(false), 800)
             heartbeatRef.current = setInterval(checkQueueStatus, 15_000)
           }
-        }, 3_000)
+        }, 5_000)
       }
     }
 
