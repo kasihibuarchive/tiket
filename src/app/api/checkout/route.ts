@@ -57,9 +57,9 @@ export async function POST(request: NextRequest) {
       resolvedMethod = LEGACY_METHOD_MAP[resolvedMethod]
     }
 
-    // Calculate seat prices
+    // Calculate seat prices (use same showDateId filter as validation above)
     const priceCats = await db.priceCategory.findMany({ where: { eventId } })
-    const seatPrices = await db.seat.findMany({ where: { eventId, seatCode: { in: seatCodes } }, select: { seatCode: true, priceCategoryId: true } })
+    const seatPrices = await db.seat.findMany({ where: seatWhere, select: { seatCode: true, priceCategoryId: true } })
 
     let seatTotal = 0
     const items: any[] = []
