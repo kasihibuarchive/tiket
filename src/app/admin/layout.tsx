@@ -7,7 +7,7 @@ import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import {
   Calendar, LayoutGrid, Mail, ChevronLeft,
-  LogOut, Loader2, ShieldCheck, ShoppingBag, Tag, ScanLine, Users, Gift, Map
+  LogOut, Loader2, ShieldCheck, ShoppingBag, Tag, ScanLine, Users, Gift, Zap, Map
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,6 +18,7 @@ const adminLinks = [
   { href: '/admin/seat-maps', label: 'Seat Maps', icon: Map },
   { href: '/admin/ushers', label: 'Manajemen Usher', icon: Users },
   { href: '/admin/tickets/complimentary', label: 'Tiket Komplimen', icon: Gift },
+  { href: '/admin/usher/complimentary', label: 'OTS Ticket', icon: Zap },
   { href: '/admin/email-template', label: 'Email Template', icon: Mail },
   { href: '/admin/merchandise', label: 'Merchandise', icon: ShoppingBag },
   { href: '/admin/promo-codes', label: 'Kode Promo', icon: Tag },
@@ -27,7 +28,7 @@ const adminLinks = [
 const usherLinks = [
   { href: '/admin/scanner', label: 'Scanner Tiket', icon: ScanLine },
   { href: '/admin/usher/events', label: 'Database Penonton', icon: Users },
-  { href: '/admin/usher/complimentary', label: 'Tiket Komplimen', icon: Gift },
+  { href: '/admin/usher/complimentary', label: 'OTS Ticket', icon: Zap },
   { href: '/admin/usher/merchandise', label: 'Merchandise Orders', icon: ShoppingBag },
 ]
 
