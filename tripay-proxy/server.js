@@ -148,6 +148,16 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // Payment channels (GET, proxy forwards to Tripay)
+  if (req.method === 'GET' && req.url === '/api/merchant/payment-channel') {
+    try {
+      const result = await tripayRequest('/merchant/payment-channel', 'GET');
+      return sendJSON(res, result.status, result.data);
+    } catch (err) {
+      return sendJSON(res, 500, { error: 'Proxy error: ' + err.message });
+    }
+  }
+
   sendJSON(res, 404, { error: 'Not found' });
 });
 

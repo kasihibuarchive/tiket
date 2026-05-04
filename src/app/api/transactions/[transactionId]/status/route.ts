@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getTripayConfig } from '@/lib/tripay'
+import { getTripayTransactionDetail } from '@/lib/tripay'
 import QRCode from 'qrcode'
 
 /**
@@ -45,12 +45,7 @@ export async function GET(
       })
     }
 
-    const tripayConfig = getTripayConfig()
-    const statusUrl = tripayConfig.baseUrl + '/transaction/detail?reference=' + transaction.midtransId
-
-    const tripayRes = await fetch(statusUrl, {
-      headers: { 'Authorization': 'Bearer ' + tripayConfig.apiKey },
-    })
+    const tripayRes = await getTripayTransactionDetail(transaction.midtransId)
 
     if (!tripayRes.ok) {
       console.error(`[status-check] Tripay API error: ${tripayRes.status}`)

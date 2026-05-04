@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getTripayConfig, createTransactionSignature } from '@/lib/tripay'
+import { getTripayConfig, createTransactionSignature, getTripayPaymentChannels } from '@/lib/tripay'
 
 /**
  * GET /api/admin/tripay-test — Diagnose Tripay configuration
@@ -36,24 +36,22 @@ export async function GET(request: NextRequest) {
     issues.push('Gagal generate signature: ' + e.message)
   }
 
-  // 5. Test actual API connectivity (make a minimal request to Tripay)
+  // 5. Test actual API connectivity
   let apiReachable = false
   let apiError = ''
   if (isConfigured) {
     try {
-      const targetUrl = config.useProxy
-        ? config.baseUrl + '/health'
-        : config.baseUrl + '/merchant/payment-channel'
-
-      const headers: Record<string, string> = config.useProxy
-        ? { 'X-Proxy-Auth': config.proxyAuthKey! }
-        : { 'Authorization': 'Bearer ' + config.apiKey }
-
-      const res = await fetch(targetUrl, {
-        method: config.useProxy ? 'GET' : 'GET',
-        headers,
-        signal: AbortSignal.timeout(10000),
-      })
+      let res: Response
+      if (config.useProxy) {
+        // Test proxy via health check endpoint
+        res = await fetch(config.baseUrl + '/health', {
+          method: 'GET',
+          signal: AbortSignal.timeout(10000),
+        })
+      } else {
+        // Test direct Tripay connection via payment channels endpoint
+        res = await getTripayPaymentChannels()
+      }
 
       apiReachable = res.ok
       if (!res.ok) {

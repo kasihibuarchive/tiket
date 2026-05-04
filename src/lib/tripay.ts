@@ -11,7 +11,9 @@ export function getTripayConfig() {
     : 'https://tripay.co.id/api-sandbox'
 
   // If proxy is configured, route through it instead of direct Tripay API
-  const proxyUrl = process.env.TRIPAY_PROXY_URL || null
+  const proxyUrl = process.env.TRIPAY_PROXY_URL
+    ? process.env.TRIPAY_PROXY_URL.replace(/\/+$/, '')
+    : null
   const proxyAuthKey = process.env.TRIPAY_PROXY_AUTH_KEY || null
   const useProxy = !!proxyUrl && !!proxyAuthKey
 
@@ -96,6 +98,60 @@ export function createTransactionSignature(
     .createHmac('sha256', config.privateKey)
     .update(config.merchantCode + merchantRef + String(amount))
     .digest('hex')
+}
+
+/**
+ * Get transaction detail from Tripay (direct or through proxy).
+ */
+export async function getTripayTransactionDetail(reference: string): Promise<Response> {
+  const config = getTripayConfig()
+
+  if (config.useProxy) {
+    // Proxy expects POST with JSON body
+    const res = await fetch(config.baseUrl + '/api/transaction/detail', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Proxy-Auth': config.proxyAuthKey!,
+      },
+      body: JSON.stringify({ reference }),
+    })
+    return res
+  }
+
+  // Direct call to Tripay
+  const res = await fetch(config.baseUrl + '/transaction/detail?reference=' + encodeURIComponent(reference), {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer ' + config.apiKey,
+    },
+  })
+  return res
+}
+
+/**
+ * Get payment channels from Tripay (direct or through proxy).
+ */
+export async function getTripayPaymentChannels(): Promise<Response> {
+  const config = getTripayConfig()
+
+  if (config.useProxy) {
+    const res = await fetch(config.baseUrl + '/api/merchant/payment-channel', {
+      method: 'GET',
+      headers: {
+        'X-Proxy-Auth': config.proxyAuthKey!,
+      },
+    })
+    return res
+  }
+
+  const res = await fetch(config.baseUrl + '/merchant/payment-channel', {
+    method: 'GET',
+    headers: {
+      'Authorization': 'Bearer ' + config.apiKey,
+    },
+  })
+  return res
 }
 
 /**

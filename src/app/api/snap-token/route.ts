@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getTripayConfig, createTransactionSignature } from '@/lib/tripay'
+import { createTransactionSignature, createTripayTransaction } from '@/lib/tripay'
 
 /**
  * POST /api/snap-token
@@ -34,7 +34,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'No payment method associated with this transaction' }, { status: 400 })
     }
 
-    const tripayConfig = getTripayConfig()
     const expiredTime = Math.floor(Date.now() / 1000) + (24 * 60 * 60)
     const signature = createTransactionSignature(transactionId, transaction.totalAmount)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
@@ -46,29 +45,20 @@ export async function POST(request: Request) {
       quantity: 1,
     }]
 
-    const tripayParams = new URLSearchParams({
+    console.log('[snap-token] Re-creating Tripay transaction for:', transactionId, 'method:', transaction.paymentMethod)
+
+    const tripayRes = await createTripayTransaction({
       method: transaction.paymentMethod,
       merchant_ref: transactionId,
-      amount: String(transaction.totalAmount),
+      amount: transaction.totalAmount,
       customer_name: transaction.customerName,
       customer_email: transaction.customerEmail,
       customer_phone: transaction.customerWa,
-      order_items: JSON.stringify(orderItems),
+      order_items: orderItems,
       callback_url: appUrl + '/api/webhooks/tripay',
       return_url: appUrl + '/verify/' + transactionId,
-      expired_time: String(expiredTime),
+      expired_time: expiredTime,
       signature,
-    })
-
-    console.log('[snap-token] Re-creating Tripay transaction for:', transactionId, 'method:', transaction.paymentMethod)
-
-    const tripayRes = await fetch(tripayConfig.baseUrl + '/transaction/create', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + tripayConfig.apiKey,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: tripayParams.toString(),
     })
 
     if (!tripayRes.ok) {
