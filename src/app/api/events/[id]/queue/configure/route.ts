@@ -13,12 +13,14 @@ export async function PUT(
     // Admin authentication check
     const adminToken = request.cookies.get('admin_session')?.value
     if (!adminToken) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      console.warn('[queue/configure PUT] No admin_session cookie')
+      return NextResponse.json({ error: 'Unauthorized — silakan login ulang' }, { status: 401 })
     }
 
     const adminResult = validateSessionToken(adminToken)
     if (!adminResult.valid) {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 })
+      console.warn('[queue/configure PUT] Invalid session, user:', adminResult.username)
+      return NextResponse.json({ error: 'Session expired — silakan login ulang' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -101,12 +103,14 @@ export async function GET(
     // Admin authentication check
     const adminToken = request.cookies.get('admin_session')?.value
     if (!adminToken) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      console.warn('[queue/configure GET] No admin_session cookie')
+      return NextResponse.json({ error: 'Unauthorized — silakan login ulang' }, { status: 401 })
     }
 
     const adminResult = validateSessionToken(adminToken)
     if (!adminResult.valid) {
-      return NextResponse.json({ error: 'Session expired' }, { status: 401 })
+      console.warn('[queue/configure GET] Invalid session, user:', adminResult.username)
+      return NextResponse.json({ error: 'Session expired — silakan login ulang' }, { status: 401 })
     }
 
     const config = await db.eventQueue.findUnique({ where: { eventId } })

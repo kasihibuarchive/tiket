@@ -106,9 +106,10 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    const isProduction = process.env.NODE_ENV === 'production'
     response.cookies.set('admin_session', token, {
       httpOnly: true,
-      secure: false,
+      secure: isProduction,
       sameSite: 'lax',
       maxAge: 24 * 60 * 60,
       path: '/',
@@ -117,7 +118,7 @@ export async function POST(request: NextRequest) {
     // Set role cookie (non-httpOnly so middleware can read it)
     response.cookies.set('admin_role', admin.role || 'admin', {
       httpOnly: false,
-      secure: false,
+      secure: isProduction,
       sameSite: 'lax',
       maxAge: 24 * 60 * 60,
       path: '/',
@@ -164,16 +165,17 @@ export async function GET(request: NextRequest) {
             role: admin.role,
           },
         })
+        const isProd = process.env.NODE_ENV === 'production'
         response.cookies.set('admin_session', newToken, {
           httpOnly: true,
-          secure: false,
+          secure: isProd,
           sameSite: 'lax',
           maxAge: 24 * 60 * 60,
           path: '/',
         })
         response.cookies.set('admin_role', admin.role || 'admin', {
           httpOnly: false,
-          secure: false,
+          secure: isProd,
           sameSite: 'lax',
           maxAge: 24 * 60 * 60,
           path: '/',
