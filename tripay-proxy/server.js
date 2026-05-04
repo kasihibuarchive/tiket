@@ -1,5 +1,6 @@
 const http = require('http');
 const https = require('https');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const PROXY_AUTH_KEY = process.env.PROXY_AUTH_KEY || 'changeme';
@@ -12,14 +13,11 @@ const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 const TRIPAY_HOST = 'tripay.co.id';
 const TRIPAY_BASE_PATH = TRIPAY_IS_PRODUCTION ? '/api' : '/api-sandbox';
 
-function readBody(req) {
+function readRawBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
     req.on('data', chunk => data += chunk);
-    req.on('end', () => {
-      try { resolve(JSON.parse(data)); }
-      catch { reject(new Error('Invalid JSON')); }
-    });
+    req.on('end', () => resolve(data));
     req.on('error', reject);
   });
 }
@@ -34,13 +32,13 @@ function sendJSON(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-function tripayRequest(path, method, body) {
+/**
+ * Forward a raw form-encoded body directly to Tripay.
+ * No re-encoding — the body is passed through as-is.
+ */
+function tripayForward(path, method, rawBody) {
   return new Promise((resolve, reject) => {
     const isPost = method === 'POST';
-    let bodyStr = '';
-    if (isPost && body) {
-      bodyStr = new URLSearchParams(body).toString();
-    }
     const options = {
       hostname: TRIPAY_HOST,
       port: 443,
@@ -49,7 +47,7 @@ function tripayRequest(path, method, body) {
       headers: {
         'Authorization': 'Bearer ' + TRIPAY_API_KEY,
         'Content-Type': 'application/x-www-form-urlencoded',
-        ...(isPost ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {}),
+        ...(isPost && rawBody ? { 'Content-Length': Buffer.byteLength(rawBody) } : {}),
       },
     };
 
@@ -62,7 +60,7 @@ function tripayRequest(path, method, body) {
       });
     });
     req.on('error', reject);
-    if (isPost && bodyStr) req.write(bodyStr);
+    if (isPost && rawBody) req.write(rawBody);
     req.end();
   });
 }
@@ -93,55 +91,51 @@ const server = http.createServer(async (req, res) => {
     return sendJSON(res, 401, { error: 'Unauthorized' });
   }
 
-  // Create transaction
+  // Create transaction — receive form-encoded, verify signature, forward raw body
   if (req.method === 'POST' && req.url === '/api/transaction/create') {
     try {
-      const body = await readBody(req);
-      const { method, merchant_ref, amount, customer_name, customer_email, customer_phone, order_items, callback_url, return_url, expired_time, signature } = body;
+      const rawBody = await readRawBody(req);
+      const params = new URLSearchParams(rawBody);
+
+      const method = params.get('method');
+      const merchant_ref = params.get('merchant_ref');
+      const amount = params.get('amount');
+      const signature = params.get('signature');
 
       if (!method || !merchant_ref || !amount || !signature) {
         return sendJSON(res, 400, { error: 'Missing required params' });
       }
 
       // Verify signature
-      const crypto = require('crypto');
       const expected = crypto
         .createHmac('sha256', TRIPAY_PRIVATE_KEY)
-        .update(TRIPAY_MERCHANT_CODE + merchant_ref + String(amount))
+        .update(TRIPAY_MERCHANT_CODE + merchant_ref + amount)
         .digest('hex');
 
       if (signature !== expected) {
         return sendJSON(res, 403, { error: 'Invalid signature' });
       }
 
-      const result = await tripayRequest('/transaction/create', 'POST', {
-        method,
-        merchant_ref,
-        amount: String(amount),
-        customer_name: customer_name || '',
-        customer_email: customer_email || '',
-        customer_phone: customer_phone || '',
-        order_items: JSON.stringify(order_items),
-        callback_url,
-        return_url,
-        expired_time: String(expired_time),
-        signature,
-      });
-
+      // Forward raw form body to Tripay — zero re-encoding
+      const result = await tripayForward('/transaction/create', 'POST', rawBody);
       return sendJSON(res, result.status, result.data);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Proxy error: ' + err.message });
     }
   }
 
-  // Transaction detail
+  // Transaction detail — receive form-encoded, forward raw body
   if (req.method === 'POST' && req.url === '/api/transaction/detail') {
     try {
-      const body = await readBody(req);
-      if (!body.reference) {
+      const rawBody = await readRawBody(req);
+      const params = new URLSearchParams(rawBody);
+      const reference = params.get('reference');
+
+      if (!reference) {
         return sendJSON(res, 400, { error: 'Missing reference' });
       }
-      const result = await tripayRequest('/transaction/detail?reference=' + encodeURIComponent(body.reference), 'GET');
+
+      const result = await tripayForward('/transaction/detail?reference=' + encodeURIComponent(reference), 'GET');
       return sendJSON(res, result.status, result.data);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Proxy error: ' + err.message });
@@ -151,7 +145,7 @@ const server = http.createServer(async (req, res) => {
   // Payment channels (GET, proxy forwards to Tripay)
   if (req.method === 'GET' && req.url === '/api/merchant/payment-channel') {
     try {
-      const result = await tripayRequest('/merchant/payment-channel', 'GET');
+      const result = await tripayForward('/merchant/payment-channel', 'GET');
       return sendJSON(res, result.status, result.data);
     } catch (err) {
       return sendJSON(res, 500, { error: 'Proxy error: ' + err.message });
