@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 
 export async function GET(
   request: NextRequest,
@@ -8,50 +8,79 @@ export async function GET(
   try {
     const { id } = await params
 
-    // Separate queries — NO include (crashes Next.js 16)
-    const event = await db.event.findUnique({ where: { id } })
-    if (!event) {
+    const data = await withDbRetry(async () => {
+      // Single query to get event — use select to avoid unnecessary fields
+      const event = await db.event.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          title: true,
+          category: true,
+          showDate: true,
+          openGate: true,
+          location: true,
+          posterUrl: true,
+          synopsis: true,
+          isPublished: true,
+          description: true,
+          termsAndConditions: true,
+          seatMapId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+
+      if (!event) return null
+
+      // Run price categories and show dates in parallel (only 2 queries)
+      const [priceCategories, showDates, seatStats] = await Promise.all([
+        db.priceCategory.findMany({
+          where: { eventId: id },
+        }),
+        db.eventShowDate.findMany({
+          where: { eventId: id },
+          orderBy: { date: 'asc' },
+        }),
+        // Aggregate query instead of fetching all seats
+        db.seat.groupBy({
+          by: ['status'],
+          where: { eventId: id },
+          _count: { status: true },
+        }),
+      ])
+
+      const totalSeats = seatStats.reduce((sum, s) => sum + s._count.status, 0)
+      const availableSeats = seatStats.find((s) => s.status === 'AVAILABLE')?._count.status ?? 0
+      const soldSeats = seatStats.find((s) => s.status === 'SOLD')?._count.status ?? 0
+
+      // Fetch seat map layout if event has one
+      let seatMapLayout: unknown = null
+      if (event.seatMapId) {
+        const seatMap = await db.seatMap.findUnique({
+          where: { id: event.seatMapId },
+          select: { layoutData: true },
+        })
+        if (seatMap) seatMapLayout = seatMap.layoutData
+      }
+
+      return {
+        ...event,
+        priceCategories,
+        showDates,
+        seatSummary: { total: totalSeats, available: availableSeats, sold: soldSeats },
+        seatMapLayout,
+      }
+    })
+
+    if (!data) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    const priceCategories = await db.priceCategory.findMany({ where: { eventId: id } })
-    const seats = await db.seat.findMany({ where: { eventId: id }, select: { status: true } })
-    const showDates = await db.eventShowDate.findMany({
-      where: { eventId: id },
-      orderBy: { date: 'asc' },
-    })
-
-    const totalSeats = seats.length
-    const availableSeats = seats.filter((s) => s.status === 'AVAILABLE').length
-    const soldSeats = seats.filter((s) => s.status === 'SOLD').length
-
-    // Fetch seat map layout if event has one
-    let seatMapLayout: any = null
-    if (event.seatMapId) {
-      const seatMap = await db.seatMap.findUnique({
-        where: { id: event.seatMapId },
-        select: { layoutData: true },
-      })
-      if (seatMap) {
-        seatMapLayout = seatMap.layoutData
-      }
-    }
-
-    return NextResponse.json({
-      ...event,
-      priceCategories,
-      showDates,
-      seatSummary: {
-        total: totalSeats,
-        available: availableSeats,
-        sold: soldSeats,
-      },
-      seatMapLayout,
-    })
+    return NextResponse.json(data)
   } catch (error) {
     console.error('Error fetching event:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch event' },
+      { error: 'Gagal memuat event. Coba refresh halaman.' },
       { status: 500 }
     )
   }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,63 +8,65 @@ export async function GET(request: NextRequest) {
     const published = searchParams.get('published')
 
     const where: Record<string, unknown> = {}
+    if (category) where.category = category
+    if (published !== null) where.isPublished = published === 'true'
 
-    if (category) {
-      where.category = category
-    }
-    if (published !== null) {
-      where.isPublished = published === 'true'
-    }
+    const eventsWithSummary = await withDbRetry(async () => {
+      const events = await db.event.findMany({
+        where,
+        orderBy: { showDate: 'asc' },
+      })
 
-    // Separate queries — NO include (crashes Next.js 16)
-    const events = await db.event.findMany({
-      where,
-      orderBy: { showDate: 'asc' },
-    })
+      if (events.length === 0) return []
 
-    const eventIds = events.map((e) => e.id)
-    const allPriceCategories = await db.priceCategory.findMany({ where: { eventId: { in: eventIds } } })
-    const allSeats = await db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } })
-    const allShowDates = await db.eventShowDate.findMany({
-      where: { eventId: { in: eventIds } },
-      orderBy: { date: 'asc' },
-    })
+      const eventIds = events.map((e) => e.id)
 
-    const eventsWithSummary = events.map((event) => {
-      const eventSeats = allSeats.filter((s) => s.eventId === event.id)
-      const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
-      const eventShowDates = allShowDates.filter((sd) => sd.eventId === event.id)
-      const totalSeats = eventSeats.length
-      const availableSeats = eventSeats.filter((s) => s.status === 'AVAILABLE').length
-      const soldSeats = eventSeats.filter((s) => s.status === 'SOLD').length
+      // Run all 3 queries in parallel
+      const [allPriceCategories, allSeats, allShowDates] = await Promise.all([
+        db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
+        db.seat.groupBy({
+          by: ['eventId', 'status'],
+          where: { eventId: { in: eventIds } },
+          _count: { status: true },
+        }),
+        db.eventShowDate.findMany({
+          where: { eventId: { in: eventIds } },
+          orderBy: { date: 'asc' },
+        }),
+      ])
 
-      return {
-        id: event.id,
-        title: event.title,
-        category: event.category,
-        showDate: event.showDate,
-        openGate: event.openGate,
-        location: event.location,
-        posterUrl: event.posterUrl,
-        synopsis: event.synopsis,
-        isPublished: event.isPublished,
-        createdAt: event.createdAt,
-        updatedAt: event.updatedAt,
-        priceCategories: eventPriceCats,
-        showDates: eventShowDates,
-        seatSummary: {
-          total: totalSeats,
-          available: availableSeats,
-          sold: soldSeats,
-        },
-      }
+      return events.map((event) => {
+        const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
+        const eventShowDates = allShowDates.filter((sd) => sd.eventId === event.id)
+        const eventSeats = allSeats.filter((s) => s.eventId === event.id)
+        const totalSeats = eventSeats.reduce((sum, s) => sum + s._count.status, 0)
+        const availableSeats = eventSeats.find((s) => s.status === 'AVAILABLE')?._count.status ?? 0
+        const soldSeats = eventSeats.find((s) => s.status === 'SOLD')?._count.status ?? 0
+
+        return {
+          id: event.id,
+          title: event.title,
+          category: event.category,
+          showDate: event.showDate,
+          openGate: event.openGate,
+          location: event.location,
+          posterUrl: event.posterUrl,
+          synopsis: event.synopsis,
+          isPublished: event.isPublished,
+          createdAt: event.createdAt,
+          updatedAt: event.updatedDate,
+          priceCategories: eventPriceCats,
+          showDates: eventShowDates,
+          seatSummary: { total: totalSeats, available: availableSeats, sold: soldSeats },
+        }
+      })
     })
 
     return NextResponse.json({ events: eventsWithSummary })
   } catch (error) {
     console.error('Error fetching events:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch events' },
+      { error: 'Gagal memuat daftar event.' },
       { status: 500 }
     )
   }

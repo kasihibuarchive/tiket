@@ -1,41 +1,54 @@
 import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
 import { EventCard } from '@/components/event-card'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 import { formatEventDate } from '@/lib/date'
 
 export const dynamic = 'force-dynamic'
+export const revalidate = 30 // Cache homepage for 30 seconds to reduce DB hits
 
 export default async function HomePage() {
-  const events = await db.event.findMany({
-    where: { isPublished: true },
-    orderBy: { showDate: 'asc' },
-  })
+  const eventsWithSummary = await withDbRetry(async () => {
+    const events = await db.event.findMany({
+      where: { isPublished: true },
+      orderBy: { showDate: 'asc' },
+    })
 
-  const eventIds = events.map((e) => e.id)
-  const priceCategories = await db.priceCategory.findMany({ where: { eventId: { in: eventIds } } })
-  const seats = await db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } })
+    if (events.length === 0) return []
 
-  const eventsWithSummary = events.map((event) => {
-    const eventSeats = seats.filter((s) => s.eventId === event.id)
-    const eventPriceCats = priceCategories.filter((pc) => pc.eventId === event.id)
-    return {
-      id: event.id,
-      title: event.title,
-      category: event.category,
-      showDate: event.showDate.toISOString(),
-      openGate: event.openGate?.toISOString(),
-      location: event.location,
-      posterUrl: event.posterUrl,
-      synopsis: event.synopsis,
-      isPublished: event.isPublished,
-      priceCategories: eventPriceCats,
-      seatSummary: {
-        total: eventSeats.length,
-        available: eventSeats.filter((s) => s.status === 'AVAILABLE').length,
-        sold: eventSeats.filter((s) => s.status === 'SOLD').length,
-      },
-    }
+    const eventIds = events.map((e) => e.id)
+
+    // Run both queries in parallel
+    const [priceCategories, seatStats] = await Promise.all([
+      db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
+      db.seat.groupBy({
+        by: ['eventId', 'status'],
+        where: { eventId: { in: eventIds } },
+        _count: { status: true },
+      }),
+    ])
+
+    return events.map((event) => {
+      const eventPriceCats = priceCategories.filter((pc) => pc.eventId === event.id)
+      const eventSeats = seatStats.filter((s) => s.eventId === event.id)
+      const total = eventSeats.reduce((sum, s) => sum + s._count.status, 0)
+      const available = eventSeats.find((s) => s.status === 'AVAILABLE')?._count.status ?? 0
+      const sold = eventSeats.find((s) => s.status === 'SOLD')?._count.status ?? 0
+
+      return {
+        id: event.id,
+        title: event.title,
+        category: event.category,
+        showDate: event.showDate.toISOString(),
+        openGate: event.openGate?.toISOString(),
+        location: event.location,
+        posterUrl: event.posterUrl,
+        synopsis: event.synopsis,
+        isPublished: event.isPublished,
+        priceCategories: eventPriceCats,
+        seatSummary: { total, available, sold },
+      }
+    })
   })
 
   return (

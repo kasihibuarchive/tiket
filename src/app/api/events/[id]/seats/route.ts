@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 
 export async function GET(
   request: NextRequest,
@@ -10,79 +10,75 @@ export async function GET(
     const { searchParams } = new URL(request.url)
     const showDateId = searchParams.get('showDateId') || undefined
 
-    // Only cleanup expired locks ~1 in 30 requests to reduce DB load
-    const shouldCleanup = Math.random() < 0.03
-    if (shouldCleanup) {
-      try {
-        await db.seat.updateMany({
-          where: { status: 'LOCKED_TEMPORARY', lockedUntil: { lt: new Date() } },
-          data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
-        })
-      } catch { /* non-critical */ }
-    }
+    const data = await withDbRetry(async () => {
+      // Cleanup expired locks ~1 in 30 requests (3%) to reduce DB load
+      if (Math.random() < 0.03) {
+        try {
+          await db.seat.updateMany({
+            where: { status: 'LOCKED_TEMPORARY', lockedUntil: { lt: new Date() } },
+            data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
+          })
+        } catch { /* non-critical */ }
+      }
 
-    const event = await db.event.findUnique({
-      where: { id },
-      select: { id: true },
-    })
+      // Quick event existence check
+      const event = await db.event.findUnique({
+        where: { id },
+        select: { id: true },
+      })
+      if (!event) return null
 
-    if (!event) {
-      return NextResponse.json({ error: 'Event not found' }, { status: 404 })
-    }
+      // Build where clause
+      const seatWhere: Record<string, unknown> = { eventId: id }
+      if (showDateId) seatWhere.eventShowDateId = showDateId
 
-    // Separate queries — NO include (crashes Next.js 16)
-    // Build where clause — filter by showDateId if provided
-    // If no showDateId, return ALL seats for the event (used by admin/usher views)
-    const seatWhere: any = { eventId: id }
-    if (showDateId) {
-      seatWhere.eventShowDateId = showDateId
-    }
+      // Run in parallel — 2 queries instead of sequential
+      const [seats, priceCategories] = await Promise.all([
+        db.seat.findMany({
+          where: seatWhere,
+          select: {
+            id: true,
+            seatCode: true,
+            status: true,
+            row: true,
+            col: true,
+            lockedUntil: true,
+            priceCategoryId: true,
+            eventShowDateId: true,
+          },
+          orderBy: [{ row: 'asc' }, { col: 'asc' }],
+        }),
+        db.priceCategory.findMany({
+          where: { eventId: id },
+          select: { id: true, name: true, price: true, colorCode: true },
+        }),
+      ])
 
-    const seats = await db.seat.findMany({
-      where: seatWhere,
-      select: {
-        id: true,
-        seatCode: true,
-        status: true,
-        row: true,
-        col: true,
-        lockedUntil: true,
-        priceCategoryId: true,
-        eventShowDateId: true,
-      },
-      orderBy: [{ row: 'asc' }, { col: 'asc' }],
-    })
-
-    const priceCategories = await db.priceCategory.findMany({
-      where: { eventId: id },
-      select: {
-        id: true,
-        name: true,
-        price: true,
-        colorCode: true,
-      },
-    })
-
-    // Manually attach priceCategory to each seat
-    const seatMap = seats.map((seat) => {
-      const cat = priceCategories.find((pc) => pc.id === seat.priceCategoryId) || null
-      return {
+      // Manually attach priceCategory to each seat
+      const priceMap = new Map(priceCategories.map((pc) => [pc.id, pc]))
+      const seatMap = seats.map((seat) => ({
         id: seat.id,
         seatCode: seat.seatCode,
         status: seat.status,
         row: seat.row,
         col: seat.col,
         lockedUntil: seat.lockedUntil,
-        priceCategory: cat,
+        priceCategory: priceMap.get(seat.priceCategoryId) || null,
         eventShowDateId: seat.eventShowDateId,
-      }
+      }))
+
+      return { seats: seatMap, priceCategories }
     })
 
-    return NextResponse.json({ seats: seatMap, priceCategories })
+    if (!data) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+    }
+
+    return NextResponse.json(data)
   } catch (error) {
     console.error('Error fetching seats:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch seats' },
+      { error: 'Gagal memuat kursi. Coba refresh.' },
       { status: 500 }
     )
   }
