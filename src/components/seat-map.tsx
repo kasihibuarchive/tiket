@@ -257,16 +257,16 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     return () => {}
   }, [onSeatLocked, onSeatUnlocked, onSeatSold, onAllSeatsStatus, onSeatLockRejected, onSeatsLockRejected, eventId])
 
-  // Poll seats from API every 6 seconds — uses refs, NOT selectedSeatCodes in deps
-  // This prevents polling restart on every seat click (which caused flickering)
+  // Poll seats from API every 2 seconds — uses refs, NOT selectedSeatCodes in deps
   useEffect(() => {
     if (!eventId) return
     let cancelled = false
     const pollSeats = async () => {
       try {
         const myCodes = selectedSeatCodesRef.current
-        const url = '/api/events/' + eventId + '/seats' + (showDateId ? '?showDateId=' + showDateId : '')
-        const res = await fetch(url)
+        const bust = '_t=' + Date.now()
+        const url = '/api/events/' + eventId + '/seats?' + (showDateId ? 'showDateId=' + showDateId + '&' : '') + bust
+        const res = await fetch(url, { cache: 'no-store' })
         if (!res.ok || cancelled) return
         const json = await res.json()
         if (cancelled) return
@@ -285,8 +285,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         )
       } catch { /* silent */ }
     }
-    const timeout = setTimeout(() => { pollSeats() }, 5000)
-    const interval = setInterval(pollSeats, 6000)
+    const timeout = setTimeout(() => { pollSeats() }, 1500)
+    const interval = setInterval(pollSeats, 2000)
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
   }, [eventId, showDateId])
 
