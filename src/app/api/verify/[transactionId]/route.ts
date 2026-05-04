@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { getTripayConfig } from '@/lib/tripay'
+import { getTripayTransactionDetail } from '@/lib/tripay'
 import QRCode from 'qrcode'
 
 export async function GET(
@@ -41,13 +41,7 @@ export async function GET(
     // If still PENDING, check Tripay directly for latest status
     if (transaction.paymentStatus === 'PENDING' && transaction.midtransId) {
       try {
-        const tripayConfig = getTripayConfig()
-
-        const statusUrl = tripayConfig.baseUrl + '/transaction/detail?reference=' + transaction.midtransId
-
-        const statusRes = await fetch(statusUrl, {
-          headers: { 'Authorization': 'Bearer ' + tripayConfig.apiKey },
-        })
+        const statusRes = await getTripayTransactionDetail(transaction.midtransId)
 
         if (statusRes.ok) {
           const tripayData = await statusRes.json()

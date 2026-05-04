@@ -8,7 +8,23 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatEventDateTime } from '@/lib/date'
 import { clearPendingTrx } from '@/lib/pending-trx'
-import { Loader2, CheckCircle2, XCircle, Ticket, Calendar, MapPin, User, QrCode, ArrowLeft, RefreshCw } from 'lucide-react'
+import {
+  Loader2,
+  CheckCircle2,
+  XCircle,
+  Ticket,
+  Calendar,
+  MapPin,
+  User,
+  QrCode,
+  ArrowLeft,
+  RefreshCw,
+  CreditCard,
+  ExternalLink,
+  Ban,
+  Clock,
+  AlertTriangle,
+} from 'lucide-react'
 
 interface TransactionData {
   transactionId: string
@@ -21,6 +37,7 @@ interface TransactionData {
   qrCodeUrl: string | null
   paidAt: string | null
   createdAt: string
+  paymentUrl?: string | null
   merchandiseData: string | null
   adminFeeApplied: number
   promoCodeId: string | null
@@ -45,7 +62,13 @@ export default function VerifyPage() {
   const [error, setError] = useState<string | null>(null)
   const [pollCount, setPollCount] = useState(0)
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const [payLoading, setPayLoading] = useState(false)
+  const [cancelLoading, setCancelLoading] = useState(false)
+  const [showCancelConfirm, setShowCancelConfirm] = useState(false)
+  const [cancelError, setCancelError] = useState<string | null>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const autoCancelTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [countdown, setCountdown] = useState<number | null>(null)
 
   const fetchTransaction = useCallback(async (showLoading = false) => {
     if (showLoading) setIsRefreshing(true)
@@ -75,14 +98,15 @@ export default function VerifyPage() {
     }
   }, [transaction?.paymentStatus])
 
-  // Initial fetch
+  // Initial fetch + auto-cancel timer
   useEffect(() => {
     if (transactionId) {
       fetchTransaction().then((data) => {
         setIsLoading(false)
-        // If pending, start polling
+        // If pending, start polling + auto-cancel timer
         if (data?.transaction?.paymentStatus === 'PENDING') {
           startPolling()
+          startAutoCancelCountdown()
         }
         // Clear localStorage if already paid
         if (data?.transaction?.paymentStatus === 'PAID') {
@@ -90,7 +114,10 @@ export default function VerifyPage() {
         }
       })
     }
-    return () => stopPolling()
+    return () => {
+      stopPolling()
+      clearAutoCancelTimeout()
+    }
   }, [transactionId, fetchTransaction])
 
   const startPolling = useCallback(() => {
@@ -102,6 +129,8 @@ export default function VerifyPage() {
         // Stop polling if no longer pending
         if (data.transaction.paymentStatus !== 'PENDING') {
           stopPolling()
+          clearAutoCancelTimeout()
+          setCountdown(null)
         }
       }
     }, 3000) // Poll every 3 seconds
@@ -114,21 +143,138 @@ export default function VerifyPage() {
     }
   }, [])
 
+  // 10-minute auto-cancel countdown
+  const startAutoCancelCountdown = useCallback(() => {
+    clearAutoCancelTimeout()
+    // 10 minutes = 600 seconds
+    const tenMinutes = 10 * 60
+    setCountdown(tenMinutes)
+
+    autoCancelTimeoutRef.current = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          // Time's up — auto cancel
+          autoCancelTransaction()
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+  }, [])
+
+  const clearAutoCancelTimeout = useCallback(() => {
+    if (autoCancelTimeoutRef.current) {
+      clearInterval(autoCancelTimeoutRef.current)
+      autoCancelTimeoutRef.current = null
+    }
+  }, [])
+
   // Stop polling when component unmounts
   useEffect(() => {
-    return () => stopPolling()
-  }, [stopPolling])
+    return () => {
+      stopPolling()
+      clearAutoCancelTimeout()
+    }
+  }, [stopPolling, clearAutoCancelTimeout])
 
   const handleManualRefresh = async () => {
     await fetchTransaction(true)
+  }
+
+  // Pay now — redirect to Tripay checkout page
+  const handlePayNow = async () => {
+    if (!transaction) return
+    setPayLoading(true)
+    try {
+      // Re-create Tripay transaction to get fresh checkout URL
+      const res = await fetch('/api/snap-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactionId: transaction.transactionId }),
+      })
+
+      if (!res.ok) {
+        setError('Gagal mendapatkan halaman pembayaran')
+        setPayLoading(false)
+        return
+      }
+
+      const data = await res.json()
+      if (!data.checkoutUrl) {
+        setError('Gagal mendapatkan halaman pembayaran')
+        setPayLoading(false)
+        return
+      }
+
+      // Redirect to Tripay checkout page
+      window.location.href = data.checkoutUrl
+    } catch {
+      setError('Terjadi kesalahan. Coba lagi.')
+      setPayLoading(false)
+    }
+  }
+
+  // Open existing payment URL
+  const handleOpenPayment = () => {
+    if (transaction?.paymentUrl) {
+      window.open(transaction.paymentUrl, '_blank')
+    }
+  }
+
+  // Cancel transaction
+  const autoCancelTransaction = async () => {
+    if (!transaction) return
+    try {
+      await fetch('/api/cancel/' + transaction.transactionId, { method: 'POST' })
+      // Refetch to show cancelled state
+      await fetchTransaction()
+      clearPendingTrx()
+    } catch (err) {
+      console.error('[auto-cancel] failed:', err)
+    }
+  }
+
+  const handleCancel = async () => {
+    if (!transaction) return
+    setCancelLoading(true)
+    setCancelError(null)
+    try {
+      const res = await fetch('/api/cancel/' + transaction.transactionId, { method: 'POST' })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        setCancelError(data.error || 'Gagal membatalkan transaksi')
+        setCancelLoading(false)
+        setShowCancelConfirm(false)
+        return
+      }
+      // Success — refetch and stop polling
+      stopPolling()
+      clearAutoCancelTimeout()
+      setCountdown(null)
+      await fetchTransaction()
+      clearPendingTrx()
+      setShowCancelConfirm(false)
+    } catch {
+      setCancelError('Terjadi kesalahan. Coba lagi.')
+      setCancelLoading(false)
+      setShowCancelConfirm(false)
+    }
   }
 
   const isPaid = transaction?.paymentStatus === 'PAID'
   const isPending = transaction?.paymentStatus === 'PENDING'
   const isExpired = transaction?.paymentStatus === 'EXPIRED'
   const isFailed = transaction?.paymentStatus === 'FAILED'
+  const isCancelled = transaction?.paymentStatus === 'CANCELLED'
   const seatCodes = transaction?.seatCodes ? JSON.parse(transaction.seatCodes) : []
   const merchItems = transaction?.merchandiseData ? JSON.parse(transaction.merchandiseData) : []
+
+  // Format countdown
+  const formatCountdown = (seconds: number) => {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return m + ':' + String(s).padStart(2, '0')
+  }
 
   if (isLoading) {
     return (
@@ -141,7 +287,7 @@ export default function VerifyPage() {
     )
   }
 
-  if (error || !transaction) {
+  if (error && !transaction) {
     return (
       <div className="min-h-screen flex flex-col">
         <Navbar />
@@ -195,6 +341,16 @@ export default function VerifyPage() {
                   PEMBAYARAN EXPIRED
                 </h1>
                 <p className="text-sm text-muted-foreground text-center mt-1">Batas waktu pembayaran telah habis</p>
+              </div>
+            ) : isCancelled ? (
+              <div className="animate-fade-in">
+                <Ban className="w-24 h-24 text-danger mx-auto" />
+                <h1 className="font-serif text-2xl font-bold text-danger text-center mt-3">
+                  TRANSAKSI DIBATALKAN
+                </h1>
+                <p className="text-sm text-muted-foreground text-center mt-1">
+                  Transaksi telah dibatalkan oleh pengguna
+                </p>
               </div>
             ) : isFailed ? (
               <div className="animate-fade-in">
@@ -342,25 +498,127 @@ export default function VerifyPage() {
             </CardContent>
           </Card>
 
+          {/* Action Buttons */}
+          <div className="mt-6 space-y-3">
+            {isPending && (
+              <>
+                {/* Countdown Timer */}
+                {countdown !== null && countdown > 0 && (
+                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Clock className="w-4 h-4 text-gold" />
+                    <span>Batas pembayaran: </span>
+                    <span className="font-mono font-semibold text-charcoal">{formatCountdown(countdown)}</span>
+                    <span className="text-xs text-muted-foreground/50">lagi</span>
+                  </div>
+                )}
+
+                {/* Pay Now Button */}
+                <Button
+                  onClick={handlePayNow}
+                  disabled={payLoading}
+                  className="w-full bg-charcoal hover:bg-charcoal/90 text-gold font-semibold py-5"
+                >
+                  {payLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Memuat Payment...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard className="w-4 h-4 mr-2" />
+                      Bayar Sekarang
+                    </>
+                  )}
+                </Button>
+
+                {/* Open existing payment page */}
+                {transaction.paymentUrl && (
+                  <Button
+                    onClick={handleOpenPayment}
+                    variant="outline"
+                    className="w-full border-gold/20 text-charcoal hover:bg-warm-white"
+                  >
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    Buka Halaman Pembayaran
+                  </Button>
+                )}
+
+                {/* Cancel Button */}
+                {!showCancelConfirm ? (
+                  <Button
+                    onClick={() => setShowCancelConfirm(true)}
+                    variant="outline"
+                    className="w-full border-danger/20 text-danger hover:bg-danger/5"
+                  >
+                    <Ban className="w-4 h-4 mr-2" />
+                    Batalkan Transaksi
+                  </Button>
+                ) : (
+                  <div className="border border-danger/30 rounded-lg p-4 space-y-3 animate-fade-in">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-danger mt-0.5 shrink-0" />
+                      <p className="text-sm text-charcoal">
+                        Yakin ingin membatalkan transaksi ini? Kursi yang dipilih akan dilepaskan dan transaksi tidak bisa dikembalikan.
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        onClick={handleCancel}
+                        disabled={cancelLoading}
+                        className="flex-1 bg-danger hover:bg-danger/90 text-white"
+                      >
+                        {cancelLoading ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <Ban className="w-4 h-4 mr-2" />
+                        )}
+                        Ya, Batalkan
+                      </Button>
+                      <Button
+                        onClick={() => setShowCancelConfirm(false)}
+                        variant="outline"
+                        className="flex-1"
+                      >
+                        Batal
+                      </Button>
+                    </div>
+                    {cancelError && (
+                      <p className="text-xs text-danger text-center">{cancelError}</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Cancelled info */}
+            {isCancelled && (
+              <div className="border border-muted rounded-lg p-4 text-center">
+                <p className="text-sm text-muted-foreground">
+                  Transaksi ini telah dibatalkan. Kursi yang dipilih sudah dilepaskan dan tersedia kembali untuk pemesanan lain.
+                </p>
+              </div>
+            )}
+
+            <div className="text-center mt-2">
+              <Button variant="ghost" size="sm" asChild>
+                <a href="/">
+                  <ArrowLeft className="w-4 h-4 mr-1" />
+                  Kembali ke Beranda
+                </a>
+              </Button>
+            </div>
+          </div>
+
           {/* Pending notice */}
           {isPending && (
             <div className="mt-4 text-center">
               <p className="text-xs text-muted-foreground/70 bg-gold/5 rounded-lg px-4 py-3">
                 Halaman ini otomatis mengecek status pembayaran setiap 3 detik.
                 <br />
-                Setelah pembayaran berhasil, e-tiket akan langsung muncul.
+                Transaksi akan otomatis dibatalkan jika tidak ada pembayaran dalam 10 menit.
               </p>
             </div>
           )}
-
-          <div className="text-center mt-6">
-            <Button variant="ghost" size="sm" asChild>
-              <a href="/">
-                <ArrowLeft className="w-4 h-4 mr-1" />
-                Kembali ke Beranda
-              </a>
-            </Button>
-          </div>
         </div>
       </main>
     </div>
