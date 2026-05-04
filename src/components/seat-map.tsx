@@ -277,11 +277,15 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             if (myCodes.has(s.seatCode)) return s
             const fresh = data.find((f: any) => f.id === s.id)
             if (!fresh) return s
-            // Don't downgrade LOCKED_TEMPORARY to AVAILABLE from a stale poll.
-            // The WebSocket reports locks instantly; the DB may lag behind.
-            // Only override LOCKED_TEMPORARY if the DB says it's SOLD or UNAVAILABLE.
+            // Smart anti-flicker guard:
+            // If lock is still valid (hasn't expired), keep WebSocket state to prevent flicker.
+            // But if lock HAS expired, trust the DB and release it.
             if (s.status === 'LOCKED_TEMPORARY' && fresh.status === 'AVAILABLE') {
-              return s // keep the WebSocket lock, ignore stale DB
+              if (s.lockedUntil && Date.now() > new Date(s.lockedUntil).getTime() + 2000) {
+                // Lock expired — trust DB, release the seat
+                return { ...s, status: 'AVAILABLE', lockedUntil: null }
+              }
+              return s // lock still active — keep WebSocket state, ignore stale DB
             }
             if (fresh.status !== s.status || fresh.lockedUntil !== s.lockedUntil) {
               return { ...s, status: fresh.status, lockedUntil: fresh.lockedUntil }
@@ -296,9 +300,9 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
   }, [eventId, showDateId])
 
-  // Cleanup expired locks locally — with 5s clock skew tolerance to prevent flickering
+  // Cleanup expired locks locally — with 2s clock skew tolerance to prevent flickering
   useEffect(() => {
-    const CLOCK_SKEW_TOLERANCE = 5000 // 5 seconds buffer
+    const CLOCK_SKEW_TOLERANCE = 2000 // 2 seconds buffer
     const interval = setInterval(() => {
       const myCodes = selectedSeatCodesRef.current
       setSeats((prev) =>
