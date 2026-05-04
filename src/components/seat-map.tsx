@@ -74,6 +74,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   const [hasPendingLock, setHasPendingLock] = useState(false)
 
   const sessionId = useRef(getSessionId())
+  const selectedSeatCodesRef = useRef<Set<string>>(new Set())
 
   // GA-specific state
   const [selectedGAZoneId, setSelectedGAZoneId] = useState<string | null>(null)
@@ -129,10 +130,17 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     onSeatsLockRejected,
   } = useSeatSocket(eventId)
 
-  // Socket event handlers
+  // Keep ref in sync with state (no re-register needed)
+  useEffect(() => {
+    selectedSeatCodesRef.current = selectedSeatCodes
+  }, [selectedSeatCodes])
+
+  // Socket event handlers — use refs, NOT selectedSeatCodes in deps
+  // This prevents re-registering listeners on every seat click (which caused flickering)
   useEffect(() => {
     onSeatLocked((payload) => {
-      if (payload.sessionId !== sessionId.current && selectedSeatCodes.has(payload.seatCode)) {
+      const myCodes = selectedSeatCodesRef.current
+      if (payload.sessionId !== sessionId.current && myCodes.has(payload.seatCode)) {
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
           next.delete(payload.seatCode)
@@ -148,7 +156,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             : s
         )
       )
-      // seatLookup is derived from `seats` state, so it auto-updates
     })
 
     onSeatUnlocked((payload) => {
@@ -159,11 +166,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             : s
         )
       )
-      // seatLookup auto-updates via seats state
     })
 
     onSeatSold((payload) => {
-      if (selectedSeatCodes.has(payload.seatCode)) {
+      const myCodes = selectedSeatCodesRef.current
+      if (myCodes.has(payload.seatCode)) {
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
           next.delete(payload.seatCode)
@@ -179,18 +186,28 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             : s
         )
       )
-      // seatLookup auto-updates via seats state
     })
 
     onAllSeatsStatus((payload) => {
       if (payload.eventId !== eventId) return
+      const myCodes = selectedSeatCodesRef.current
       const stolenSeats: string[] = []
       setSeats((prev) => {
         const updated = prev.map((s) => {
           const lockInfo = payload.seats.find((ls) => ls.seatCode === s.seatCode)
           if (!lockInfo) return s
+          // Handle all status transitions, not just LOCKED_TEMPORARY
+          if (lockInfo.status === 'SOLD') {
+            if (myCodes.has(s.seatCode)) stolenSeats.push(s.seatCode)
+            return { ...s, status: 'SOLD', lockedUntil: null }
+          }
+          if (lockInfo.status === 'AVAILABLE') {
+            // Only update to AVAILABLE if the seat wasn't just locked by us
+            if (myCodes.has(s.seatCode)) return s
+            return { ...s, status: 'AVAILABLE', lockedUntil: null }
+          }
           if (lockInfo.status === 'LOCKED_TEMPORARY' && lockInfo.lockedUntil > Date.now()) {
-            if (lockInfo.sessionId !== sessionId.current && selectedSeatCodes.has(s.seatCode)) {
+            if (lockInfo.sessionId !== sessionId.current && myCodes.has(s.seatCode)) {
               stolenSeats.push(s.seatCode)
               return s
             }
@@ -212,7 +229,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     })
 
     onSeatLockRejected((payload) => {
-      if (selectedSeatCodes.has(payload.seatCode)) {
+      const myCodes = selectedSeatCodesRef.current
+      if (myCodes.has(payload.seatCode)) {
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
           next.delete(payload.seatCode)
@@ -237,14 +255,16 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     })
 
     return () => {}
-  }, [onSeatLocked, onSeatUnlocked, onSeatSold, onAllSeatsStatus, onSeatLockRejected, onSeatsLockRejected, eventId, selectedSeatCodes])
+  }, [onSeatLocked, onSeatUnlocked, onSeatSold, onAllSeatsStatus, onSeatLockRejected, onSeatsLockRejected, eventId])
 
-  // Poll seats from API every 4 seconds
+  // Poll seats from API every 6 seconds — uses refs, NOT selectedSeatCodes in deps
+  // This prevents polling restart on every seat click (which caused flickering)
   useEffect(() => {
     if (!eventId) return
     let cancelled = false
     const pollSeats = async () => {
       try {
+        const myCodes = selectedSeatCodesRef.current
         const url = '/api/events/' + eventId + '/seats' + (showDateId ? '?showDateId=' + showDateId : '')
         const res = await fetch(url)
         if (!res.ok || cancelled) return
@@ -254,7 +274,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         if (!Array.isArray(data)) return
         setSeats((prev) =>
           prev.map((s) => {
-            if (selectedSeatCodes.has(s.seatCode)) return s
+            if (myCodes.has(s.seatCode)) return s
             const fresh = data.find((f: any) => f.id === s.id)
             if (!fresh) return s
             // Don't downgrade LOCKED_TEMPORARY to AVAILABLE from a stale poll.
@@ -271,18 +291,21 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         )
       } catch { /* silent */ }
     }
-    const timeout = setTimeout(() => { pollSeats() }, 3000)
-    const interval = setInterval(pollSeats, 4000)
+    const timeout = setTimeout(() => { pollSeats() }, 5000)
+    const interval = setInterval(pollSeats, 6000)
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
-  }, [eventId, selectedSeatCodes, showDateId])
+  }, [eventId, showDateId])
 
-  // Cleanup expired locks locally
+  // Cleanup expired locks locally — with 5s clock skew tolerance to prevent flickering
   useEffect(() => {
+    const CLOCK_SKEW_TOLERANCE = 5000 // 5 seconds buffer
     const interval = setInterval(() => {
+      const myCodes = selectedSeatCodesRef.current
       setSeats((prev) =>
         prev.map((s) => {
+          if (myCodes.has(s.seatCode)) return s // never expire own locks locally
           if (s.status === 'LOCKED_TEMPORARY' && s.lockedUntil) {
-            if (Date.now() > new Date(s.lockedUntil).getTime()) {
+            if (Date.now() > new Date(s.lockedUntil).getTime() + CLOCK_SKEW_TOLERANCE) {
               return { ...s, status: 'AVAILABLE', lockedUntil: null }
             }
           }
