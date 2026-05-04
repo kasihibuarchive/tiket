@@ -1,55 +1,34 @@
+'use client'
+
+import { useState, useEffect } from 'react'
 import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
 import { EventCard } from '@/components/event-card'
-import { db, withDbRetry } from '@/lib/db'
 import { formatEventDate } from '@/lib/date'
+import { Loader2 } from 'lucide-react'
 
-export const dynamic = 'force-dynamic'
-export const revalidate = 30 // Cache homepage for 30 seconds to reduce DB hits
+// Homepage uses client-side fetching to avoid exhausting Supabase connection pool.
+// Server-side Prisma connections on every homepage visit was the main cause of EMAXCONNSESSION.
 
-export default async function HomePage() {
-  const eventsWithSummary = await withDbRetry(async () => {
-    const events = await db.event.findMany({
-      where: { isPublished: true },
-      orderBy: { showDate: 'asc' },
-    })
+export default function HomePage() {
+  const [events, setEvents] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
 
-    if (events.length === 0) return []
-
-    const eventIds = events.map((e) => e.id)
-
-    // Run both queries in parallel
-    const [priceCategories, seatStats] = await Promise.all([
-      db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
-      db.seat.groupBy({
-        by: ['eventId', 'status'],
-        where: { eventId: { in: eventIds } },
-        _count: { status: true },
-      }),
-    ])
-
-    return events.map((event) => {
-      const eventPriceCats = priceCategories.filter((pc) => pc.eventId === event.id)
-      const eventSeats = seatStats.filter((s) => s.eventId === event.id)
-      const total = eventSeats.reduce((sum, s) => sum + s._count.status, 0)
-      const available = eventSeats.find((s) => s.status === 'AVAILABLE')?._count.status ?? 0
-      const sold = eventSeats.find((s) => s.status === 'SOLD')?._count.status ?? 0
-
-      return {
-        id: event.id,
-        title: event.title,
-        category: event.category,
-        showDate: event.showDate.toISOString(),
-        openGate: event.openGate?.toISOString(),
-        location: event.location,
-        posterUrl: event.posterUrl,
-        synopsis: event.synopsis,
-        isPublished: event.isPublished,
-        priceCategories: eventPriceCats,
-        seatSummary: { total, available, sold },
-      }
-    })
-  })
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      try {
+        const res = await fetch('/api/events?published=true', { cache: 'no-store' })
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          setEvents(data.events || [])
+        }
+      } catch { /* ignore */ }
+      if (!cancelled) setLoading(false)
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -79,16 +58,16 @@ export default async function HomePage() {
             </p>
 
             {/* Featured Event */}
-            {eventsWithSummary.length > 0 && (
+            {!loading && events.length > 0 && (
               <div className="mt-10 animate-fade-in">
                 <h2 className="font-serif text-2xl sm:text-3xl text-white font-semibold">
-                  {eventsWithSummary[0].title}
+                  {events[0].title}
                 </h2>
                 <p className="text-white/40 text-sm mt-1">
-                  {formatEventDate(eventsWithSummary[0].showDate)}
+                  {formatEventDate(events[0].showDate)}
                 </p>
                 <a
-                  href={`/events/${eventsWithSummary[0].id}`}
+                  href={`/events/${events[0].id}`}
                   className="inline-flex items-center mt-6 px-6 py-3 bg-gold text-charcoal rounded-full text-sm font-semibold hover:bg-gold-light transition-colors"
                 >
                   Beli Tiket Sekarang
@@ -113,14 +92,18 @@ export default async function HomePage() {
             <div className="zen-divider w-16 mx-auto mt-4" />
           </div>
 
-          {eventsWithSummary.length === 0 ? (
+          {loading ? (
+            <div className="flex justify-center py-16">
+              <Loader2 className="w-6 h-6 text-gold animate-spin" />
+            </div>
+          ) : events.length === 0 ? (
             <div className="text-center py-16">
               <p className="text-muted-foreground text-sm">Belum ada pertunjukan yang tersedia</p>
               <p className="text-muted-foreground/50 text-xs mt-2">Silakan cek kembali nanti</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {eventsWithSummary.map((event) => (
+              {events.map((event: any) => (
                 <EventCard key={event.id} {...event} />
               ))}
             </div>
