@@ -153,7 +153,7 @@ export default function TentangPage() {
               <div className="bg-warm-white rounded-lg p-4 text-sm space-y-2">
                 <p><strong>Teateran by YC Media</strong></p>
                 <p>Email: yunchaaruna@gmail.com</p>
-                <p>Lokasi: Jakarta, Indonesia</p>
+                <p>Lokasi: Yogyakarta, Indonesia</p>
                 <p>Owner: Yuncha</p>
               </div>
             </div>

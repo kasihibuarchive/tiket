@@ -242,7 +242,7 @@ export default function EmailTemplatePage() {
                   <div className="bg-warm-white rounded-lg p-4 border-l-4 border-gold">
                     <h3 className="font-serif text-lg font-bold text-charcoal">Hamlet - Pertunjukan Spesial</h3>
                     <p className="text-sm text-muted-foreground mt-1">Sabtu, 15 Mei 2026 • 19:00 WIB</p>
-                    <p className="text-sm text-muted-foreground">Teateran, Jakarta</p>
+                    <p className="text-sm text-muted-foreground">Teateran, Yogyakarta</p>
                   </div>
 
                   {/* Seats */}

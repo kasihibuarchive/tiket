@@ -623,7 +623,7 @@ export default function AdminEventsPage() {
                 <Input
                   value={formData.location}
                   onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                  placeholder="Teateran, Jakarta"
+                  placeholder="Teateran, Yogyakarta"
                 />
               </div>
             </div>

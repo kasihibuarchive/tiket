@@ -51,7 +51,7 @@ export function Footer() {
             </h4>
             <div className="flex flex-col gap-2 text-sm">
               <p>📧 yunchaaruna@gmail.com</p>
-              <p>📍 Teateran, Jakarta</p>
+              <p>📍 Teateran, Yogyakarta</p>
               <p>🏢 PH: YC Media</p>
               <p>👤 Owner: Yuncha</p>
               <p className="text-white/40 text-xs mt-4">

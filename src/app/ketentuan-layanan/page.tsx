@@ -174,7 +174,7 @@ export default function KetentuanLayananPage() {
             <div className="bg-white rounded-xl p-6 border border-border/50">
               <h2 className="font-serif text-lg font-semibold text-charcoal mb-3">12. Hukum yang Berlaku</h2>
               <p>
-                Ketentuan Layanan ini diatur dan ditafsirkan sesuai dengan hukum Republik Indonesia. Setiap perselisihan yang timbul akan diselesaikan secara musyawarah terlebih dahulu. Jika musyawarah tidak mencapai kesepakatan, perselisihan akan diselesaikan melalui Pengadilan Negeri Jakarta Selatan.
+                Ketentuan Layanan ini diatur dan ditafsirkan sesuai dengan hukum Republik Indonesia. Setiap perselisihan yang timbul akan diselesaikan secara musyawarah terlebih dahulu. Jika musyawarah tidak mencapai kesepakatan, perselisihan akan diselesaikan melalui Pengadilan Negeri Yogyakarta.
               </p>
             </div>
 
@@ -186,7 +186,7 @@ export default function KetentuanLayananPage() {
               <div className="bg-warm-white rounded-lg p-4 text-sm space-y-1">
                 <p><strong>Teateran</strong></p>
                 <p>Email: yunchaaruna@gmail.com</p>
-                <p>Lokasi: Jakarta, Indonesia</p>
+                <p>Lokasi: Yogyakarta, Indonesia</p>
                 <p>PH: YC Media</p>
               </div>
             </div>

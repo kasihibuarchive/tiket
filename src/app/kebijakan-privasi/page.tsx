@@ -140,7 +140,7 @@ export default function KebijakanPrivasiPage() {
               <div className="bg-warm-white rounded-lg p-4 text-sm space-y-1">
                 <p><strong>Teateran</strong></p>
                 <p>Email: yunchaaruna@gmail.com</p>
-                <p>Lokasi: Jakarta, Indonesia</p>
+                <p>Lokasi: Yogyakarta, Indonesia</p>
                 <p>PH: YC Media</p>
               </div>
             </div>
