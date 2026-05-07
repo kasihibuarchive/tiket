@@ -49,6 +49,7 @@ import {
   Maximize2,
   LayoutGrid,
   DoorOpen,
+  Download,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -1593,6 +1594,24 @@ export function PianoRollEditor({
               <span className="text-[10px] text-gray-600">Saved {formatTime(autoSaveTime)}</span>
             )}
 
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                const dataUrl = exportLayoutAsImage()
+                if (dataUrl) {
+                  const link = document.createElement('a')
+                  link.download = `seatmap-${seatMapId}-${Date.now()}.png`
+                  link.href = dataUrl
+                  link.click()
+                }
+              }}
+              className="h-8 text-gray-400 hover:text-white gap-1.5"
+              title="Download Gambar"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-xs">Download Gambar</span>
+            </Button>
             <Button
               size="sm"
               onClick={handleSaveAndExit}

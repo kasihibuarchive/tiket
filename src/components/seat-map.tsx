@@ -42,6 +42,8 @@ interface SeatMapProps {
   seats: SeatData[]
   priceCategories: PriceCategoryData[]
   layoutData?: any
+  layoutImage?: string | null
+  gaZoneConfig?: string | null
   onSelectionChange?: (selectedSeats: SeatData[], totalPrice: number) => void
   onProceedToCheckout?: (selectedSeats: SeatData[]) => void
 }
@@ -62,7 +64,7 @@ const SEAT_GAP = 3 // px gap between seats in a block
 // =====================
 // Seat Map Component
 // =====================
-export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
+export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, layoutImage, gaZoneConfig, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
   const [seats, setSeats] = useState<SeatData[]>(initialSeats)
   const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
   const [lockCountdown, setLockCountdown] = useState<number | null>(null)
@@ -522,8 +524,30 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // ═══════════════════════════════════════════════════════════
   // GA (General Admission) Hooks — always called, used conditionally
   // ═══════════════════════════════════════════════════════════
-  const gaZones = parsedLayout?.isGA ? (parsedLayout.gaZones || []) : []
-  const isGA = parsedLayout?.isGA && gaZones.length > 0
+
+  // Manual GA zones from gaZoneConfig JSON (for events without a linked seatMap)
+  const manualGAZones = useMemo(() => {
+    if (parsedLayout?.isGA) return null // Use existing layout-based GA mode
+    if (!gaZoneConfig) return null
+    try {
+      const zones = JSON.parse(gaZoneConfig)
+      if (!Array.isArray(zones) || zones.length === 0) return null
+      return zones.map((z: any, i: number) => ({
+        id: `ga-${i}`,
+        name: z.name,
+        capacity: z.capacity,
+        color: z.color || '#22c55e',
+        price: z.price || 0,
+        priceCategoryName: z.priceCategoryName || '',
+      }))
+    } catch { return null }
+  }, [gaZoneConfig, parsedLayout?.isGA])
+
+  const isManualGA = !!manualGAZones
+
+  // Unified GA zones: manual gaZoneConfig takes precedence, then layout-based GA
+  const gaZones = manualGAZones || (parsedLayout?.isGA ? (parsedLayout.gaZones || []) : [])
+  const isGA = gaZones.length > 0
 
   const zoneAvailability = useMemo(() => {
     if (!isGA) return new Map<string, { total: number; available: number; price: number; priceCatId: string | null }>()
@@ -717,6 +741,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // ═══════════════════════════════════════════════════════════
   if (isGA) {
     const gaStageType = parsedLayout?.stageType || 'PROSCENIUM'
+    // For manual GA, use the layoutImage prop; for layout-based GA, use parsedLayout.layoutImageUrl
+    const effectiveLayoutImage = isManualGA ? (layoutImage || null) : (parsedLayout?.layoutImageUrl || null)
 
     return (
       <div className="w-full space-y-4">
@@ -728,16 +754,18 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           </div>
         )}
 
-        {/* Stage */}
-        <div className="flex justify-center">
-          <StageRenderer stageType={gaStageType} size="lg" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
-        </div>
+        {/* Stage — only for layout-based GA */}
+        {!isManualGA && (
+          <div className="flex justify-center">
+            <StageRenderer stageType={gaStageType} size="lg" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
+          </div>
+        )}
 
-        {/* Layout Image (if exported) */}
-        {parsedLayout?.layoutImageUrl && (
+        {/* Layout Image */}
+        {effectiveLayoutImage && (
           <div className="w-full rounded-xl overflow-hidden border border-gray-200">
             <img
-              src={parsedLayout.layoutImageUrl}
+              src={effectiveLayoutImage}
               alt="Layout Venue"
               className="w-full h-auto"
             />

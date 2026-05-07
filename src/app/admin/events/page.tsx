@@ -42,6 +42,7 @@ interface EventData {
   synopsis?: string
   teaserVideoUrl?: string | null
   adminFee?: number
+  seatType?: string | null
 }
 
 interface SeatMapOption {
@@ -61,6 +62,7 @@ interface EventFormData {
   synopsis: string
   isPublished: boolean
   adminFee: number
+  seatType: string
   priceCategories: Array<{ name: string; price: number; colorCode: string }>
   showDates: Array<{ date: string; openGate: string; label: string }>
 }
@@ -76,6 +78,7 @@ const emptyForm: EventFormData = {
   synopsis: '',
   isPublished: false,
   adminFee: 0,
+  seatType: 'NUMBERED',
   priceCategories: [
     { name: 'VIP', price: 150000, colorCode: '#C8A951' },
     { name: 'Regular', price: 75000, colorCode: '#8B8680' },
@@ -148,6 +151,7 @@ export default function AdminEventsPage() {
       synopsis: event.synopsis || '',
       isPublished: event.isPublished,
       adminFee: event.adminFee || 0,
+      seatType: event.seatType || 'NUMBERED',
       priceCategories: event.priceCategories.map((pc) => ({
         name: pc.name,
         price: pc.price,
@@ -627,6 +631,38 @@ export default function AdminEventsPage() {
                   placeholder="Teateran, Yogyakarta"
                 />
               </div>
+            </div>
+
+            {/* Seat Type */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Tipe Kursi</Label>
+              <Select
+                value={formData.seatType}
+                onValueChange={(val) => setFormData({ ...formData, seatType: val })}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder="Pilih tipe kursi" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="NUMBERED">
+                    <div className="flex items-center gap-2">
+                      <LayoutGrid className="w-3.5 h-3.5" />
+                      <span>Kursi Nomor (Numbered)</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="GENERAL_ADMISSION">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-3.5 h-3.5" />
+                      <span>General Admission (GA)</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {formData.seatType === 'GENERAL_ADMISSION'
+                  ? 'GA: Pengunjung memilih zona, bukan kursi individu. Upload layout gambar & definisi zona di halaman Seat Editor.'
+                  : 'Kursi Nomor: Pengunjung memilih kursi individual dari seat map.'}
+              </p>
             </div>
 
             {/* Dates */}

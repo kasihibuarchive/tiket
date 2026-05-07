@@ -58,6 +58,7 @@ import {
   Paintbrush,
   Magnet,
   MousePointer2,
+  Download,
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay, type StageType } from '@/lib/stage-renderer'
 import { DraggableObject, boundsOverlap, type Bounds } from '@/lib/draggable-object'
@@ -1427,6 +1428,73 @@ export function CanvasEditor({
     return exportData
   }, [layoutData, objects, stageType, thrustWidth, thrustDepth, stagePosition])
 
+  // ─── Export Canvas as PNG ─────────────
+  const exportCanvasAsImage = useCallback(() => {
+    if (safeLayoutData.type !== 'NUMBERED') return null
+    const numData = safeLayoutData as NumberedLayout
+    const cols = numData.seatColumns || []
+    if (cols.length === 0 && (!numData.seats || numData.seats.length === 0)) return null
+
+    const cw = Number(numData.canvasWidth) || DEFAULT_CANVAS_W
+    const ch = Number(numData.canvasHeight) || DEFAULT_CANVAS_H
+    const scale = 2
+    const padding = 40
+
+    const canvas = document.createElement('canvas')
+    canvas.width = (cw + padding * 2) * scale
+    canvas.height = (ch + padding * 2 + 60) * scale
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+
+    ctx.scale(scale, scale)
+    ctx.fillStyle = '#F8F6F3'
+    ctx.fillRect(0, 0, cw + padding * 2, ch + padding * 2 + 60)
+
+    // Stage
+    const sp = stagePosition
+    ctx.fillStyle = '#1F1F1F'
+    ctx.fillRect(padding + sp.x, padding + sp.y, sp.width, sp.height)
+    ctx.fillStyle = '#C8A951'
+    ctx.font = 'bold 12px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('STAGE', padding + sp.x + sp.width / 2, padding + sp.y + sp.height / 2)
+
+    // Objects
+    for (const obj of objects) {
+      if (obj.x === undefined || obj.y === undefined) continue
+      const ox = padding + obj.x
+      const oy = padding + obj.y
+      const ow = obj.pixelW || obj.w * (CELL_SIZE + 2)
+      const oh = obj.pixelH || obj.h * (CELL_SIZE + 2)
+      ctx.fillStyle = '#E5C07B'
+      ctx.fillRect(ox, oy, ow, oh)
+      ctx.fillStyle = '#1F1F1F'
+      ctx.font = '9px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.fillText(obj.label || obj.type, ox + ow / 2, oy + oh / 2)
+    }
+
+    // Seats
+    const seatSize = PAINTED_SEAT_SIZE
+    for (const col of cols) {
+      for (const seat of col.seats) {
+        ctx.fillStyle = col.color || '#8B8680'
+        ctx.beginPath()
+        ctx.roundRect(padding + seat.x - seatSize / 2, padding + seat.y - seatSize / 2, seatSize, seatSize, 4)
+        ctx.fill()
+        ctx.fillStyle = '#FFFFFF'
+        ctx.font = 'bold 8px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        ctx.fillText(String(seat.seatNum), padding + seat.x, padding + seat.y)
+      }
+    }
+
+    return canvas.toDataURL('image/png')
+  }, [safeLayoutData, stagePosition, objects])
+
   // ═════════════════════════════════════════
   // Render helpers
   // ═════════════════════════════════════════
@@ -2108,6 +2176,21 @@ export function CanvasEditor({
                 <span className="inline-block w-2 h-2 rounded-full bg-gold animate-pulse" />Menyimpan...
               </div>
             )}
+            <Button
+              variant="outline"
+              onClick={() => {
+                const dataUrl = exportCanvasAsImage()
+                if (dataUrl) {
+                  const link = document.createElement('a')
+                  link.download = `seatmap-${seatMapId}-${Date.now()}.png`
+                  link.href = dataUrl
+                  link.click()
+                }
+              }}
+              className="w-full border-gold/30 text-gold hover:bg-gold/10 font-medium gap-2 h-9 text-sm"
+            >
+              <Download className="w-4 h-4" />Download Gambar
+            </Button>
             <Button onClick={() => { onSaveAndExit(getExportLayoutData(), stageType) }}
               className="w-full bg-gold hover:bg-gold-dark text-charcoal font-medium gap-2 h-9 text-sm">
               <Save className="w-4 h-4" />Simpan & Keluar

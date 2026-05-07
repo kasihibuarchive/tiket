@@ -6,6 +6,12 @@ export async function GET() {
     // Separate queries — NO include
     const events = await db.event.findMany({
       orderBy: { createdAt: 'desc' },
+      select: {
+        id: true, title: true, category: true, showDate: true,
+        location: true, posterUrl: true, isPublished: true,
+        adminFee: true, seatMapId: true, seatType: true,
+        createdAt: true, updatedAt: true,
+      },
     })
 
     const eventIds = events.map((e) => e.id)
@@ -71,6 +77,7 @@ export async function POST(request: NextRequest) {
       priceCategories,
       showDates,
       teaserVideoUrl,
+      seatType,
     } = body
 
     if (!title || !showDate || !location || !synopsis) {
@@ -109,6 +116,7 @@ export async function POST(request: NextRequest) {
         synopsis,
         isPublished: isPublished || false,
         adminFee: adminFee || 0,
+        seatType: seatType || null,
       },
     })
 

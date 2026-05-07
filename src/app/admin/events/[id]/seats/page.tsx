@@ -1157,10 +1157,10 @@ export default function SeatEditorPage() {
     )
   }
 
-  // ─── Determine if this event is GA type (from event info or seat map) ──
-  const isEventGA = eventInfo?.seatType === 'GENERAL_ADMISSION' ||
-    eventInfo?.seatType === 'PIANO_ROLL' ||
-    !!eventInfo?.gaZoneConfig
+  // ─── Determine if this event is GA type ──
+  // GA if: event has seatType GENERAL_ADMISSION, OR has manual zone config
+  // PIANO_ROLL must NOT be treated as GA — it has its own panel flow.
+  const isEventGA = eventInfo?.seatType === 'GENERAL_ADMISSION' || !!eventInfo?.gaZoneConfig
 
   if (allSeats.length === 0) {
     // ─── GA-specific management panel when no seats exist ─────────────

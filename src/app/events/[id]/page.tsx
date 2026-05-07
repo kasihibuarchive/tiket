@@ -15,7 +15,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import {
   Calendar, MapPin, Clock, Tag,
-  Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck, Play
+  Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck, Play,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -30,6 +30,9 @@ interface EventData {
   teaserVideoUrl: string | null
   synopsis: string
   isPublished: boolean
+  seatType?: string | null
+  layoutImage?: string | null
+  gaZoneConfig?: string | null
   priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
   seatSummary: { total: number; available: number; sold: number }
   seatMapLayout?: any
@@ -188,6 +191,8 @@ export default function EventDetailPage() {
 
   const handleBackToSeats = () => {
     setShowCheckout(false)
+    setSelectedSeats([])
+    setTotalPrice(0)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -398,16 +403,18 @@ export default function EventDetailPage() {
               </div>
 
               {!showCheckout ? (
-                <SeatMap
-                  key={activeShowDate?.id || 'default'}
-                  eventId={eventId}
-                  showDateId={activeShowDate?.id || null}
-                  seats={filteredSeats}
-                  priceCategories={event.priceCategories}
-                  layoutData={event.seatMapLayout}
-                  onSelectionChange={handleSelectionChange}
-                  onProceedToCheckout={handleProceedToCheckout}
-                />
+                  <SeatMap
+                    key={activeShowDate?.id || 'default'}
+                    eventId={eventId}
+                    showDateId={activeShowDate?.id || null}
+                    seats={filteredSeats}
+                    priceCategories={event.priceCategories}
+                    layoutData={event.seatMapLayout}
+                    layoutImage={event.layoutImage}
+                    gaZoneConfig={event.gaZoneConfig}
+                    onSelectionChange={handleSelectionChange}
+                    onProceedToCheckout={handleProceedToCheckout}
+                  />
               ) : (
                 <CheckoutForm
                   eventId={eventId}

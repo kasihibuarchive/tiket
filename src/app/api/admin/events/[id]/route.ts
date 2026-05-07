@@ -68,6 +68,7 @@ export async function PUT(
       teaserVideoUrl,
       layoutImage,
       gaZoneConfig,
+      seatType,
     } = body
 
     const event = await db.event.findUnique({ where: { id } })
@@ -106,6 +107,7 @@ export async function PUT(
         adminFeeNonQris: adminFeeNonQris !== undefined ? adminFeeNonQris : event.adminFeeNonQris,
         layoutImage: layoutImage !== undefined ? layoutImage : event.layoutImage,
         gaZoneConfig: gaZoneConfig !== undefined ? gaZoneConfig : event.gaZoneConfig,
+        seatType: seatType !== undefined ? seatType : event.seatType,
       },
     })
 
