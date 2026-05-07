@@ -1174,7 +1174,7 @@ export function PianoRollEditor({
     canvas.height = h + padding * 2
     const ctx = canvas.getContext('2d')!
 
-    ctx.fillStyle = '#1a1a2e'
+    ctx.fillStyle = isGA ? '#ffffff' : '#1a1a2e'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
     const offsetX = padding
@@ -1187,11 +1187,17 @@ export function PianoRollEditor({
       const sw = s.cols * layoutData.cellSize * scale
       const sh = (s.rows || 2) * layoutData.cellSize * scale
       const grad = ctx.createLinearGradient(sx, sy, sx, sy + sh)
-      grad.addColorStop(0, '#4A4A4A')
-      grad.addColorStop(1, '#333333')
+      if (isGA) {
+        grad.addColorStop(0, '#818CF8')
+        grad.addColorStop(0.5, '#6366F1')
+        grad.addColorStop(1, '#4F46E5')
+      } else {
+        grad.addColorStop(0, '#4A4A4A')
+        grad.addColorStop(1, '#333333')
+      }
       ctx.fillStyle = grad
       ctx.fillRect(sx, sy, sw, sh)
-      ctx.strokeStyle = '#666'
+      ctx.strokeStyle = isGA ? '#4338CA' : '#666'
       ctx.lineWidth = 2
       ctx.strokeRect(sx, sy, sw, sh)
       ctx.fillStyle = '#fff'
@@ -1245,17 +1251,7 @@ export function PianoRollEditor({
         ctx.lineWidth = 2
         ctx.strokeRect(zx, zy, zw, zh)
       }
-      ctx.restore()
-
-      ctx.fillStyle = '#fff'
-      ctx.font = `bold ${11 * scale}px sans-serif`
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      ctx.shadowColor = 'rgba(0,0,0,0.8)'
-      ctx.shadowBlur = 4
-      ctx.fillText(zone.name, zx + zw / 2, zy + zh / 2 - 7 * scale)
-      ctx.font = `${9 * scale}px sans-serif`
-      ctx.fillStyle = '#ccc'
+      ctx.fillStyle = isGA ? zone.color + '35' : zone.color + '40'
       const cap = zone.capacity || zone.rows * zone.cols
       ctx.fillText(`${cap} org`, zx + zw / 2, zy + zh / 2 + 7 * scale)
       ctx.shadowBlur = 0
@@ -1267,13 +1263,13 @@ export function PianoRollEditor({
       const ow = obj.cols * layoutData.cellSize * scale
       const oh = obj.rows * layoutData.cellSize * scale
 
-      ctx.fillStyle = '#2A3A5C'
+      ctx.fillStyle = isGA ? '#059669' : '#2A3A5C'
       ctx.fillRect(ox, oy, ow, oh)
-      ctx.strokeStyle = '#4A6FA5'
+      ctx.strokeStyle = isGA ? '#10B981' : '#4A6FA5'
       ctx.lineWidth = 1
       ctx.strokeRect(ox, oy, ow, oh)
 
-      ctx.fillStyle = '#8BB8E8'
+      ctx.fillStyle = isGA ? '#ffffff' : '#8BB8E8'
       ctx.font = `${8 * scale}px sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
@@ -1626,7 +1622,7 @@ export function PianoRollEditor({
         {/* ─── Main Content ─── */}
         <div className="flex flex-1 overflow-hidden">
           {/* ─── Grid Area ─── */}
-          <div className="flex-1 overflow-auto p-4" onMouseUp={handleGridMouseUp} onMouseLeave={handleGridMouseUp}>
+          <div className={cn('flex-1 overflow-auto p-4', isGA ? 'bg-gray-100' : '')} onMouseUp={handleGridMouseUp} onMouseLeave={handleGridMouseUp}>
             <div className="inline-block">
               <div
                 ref={gridRef}
@@ -1644,8 +1640,8 @@ export function PianoRollEditor({
                   {Array.from({ length: gridCols }, (_, c) => (
                     <div
                       key={`col-${c}`}
-                      className="flex items-center justify-center text-gray-500 font-mono text-[10px]"
-                      style={{ width: cellSize * zoom, height: 28 }}
+                      className="flex items-center justify-center font-mono text-[10px]"
+                      style={{ width: cellSize * zoom, height: 28, color: isGA ? '#6B7280' : '#6B7280' }}
                     >
                       {c + 1}
                     </div>
@@ -1660,7 +1656,7 @@ export function PianoRollEditor({
                     <div
                       key={`row-${r}`}
                       className="flex items-center justify-end pr-2 font-mono text-[10px] text-gray-500"
-                      style={{ width: 32, height: cellSize * zoom }}
+                      style={{ width: 32, height: cellSize * zoom, color: isGA ? '#6B7280' : undefined }}
                     >
                       {getRowLabel(r)}
                     </div>
@@ -1692,27 +1688,27 @@ export function PianoRollEditor({
                         c >= drawPreview.col && c < drawPreview.col + drawPreview.cols
                       : false
 
-                    let bgColor = 'transparent'
-                    let borderColor = 'border-gray-700/30'
+                    let bgColor = isGA ? '#ffffff' : 'transparent'
+                    let borderColor = isGA ? 'border-gray-300/60' : 'border-gray-700/30'
 
                     if (zone) {
-                      bgColor = zone.color + '40'
-                      borderColor = zone.color + '80'
+                      bgColor = isGA ? zone.color + '35' : zone.color + '40'
+                      borderColor = isGA ? zone.color + '90' : zone.color + '80'
                     }
 
                     if (isStageCell) {
-                      bgColor = '#3D3D3D'
-                      borderColor = '#555'
+                      bgColor = isGA ? '#4F46E5' : '#3D3D3D'
+                      borderColor = isGA ? '#6366F1' : '#555'
                     }
 
                     if (isObjectCell) {
-                      bgColor = '#2A3A5C'
-                      borderColor = '#4A6FA5'
+                      bgColor = isGA ? '#059669' : '#2A3A5C'
+                      borderColor = isGA ? '#10B981' : '#4A6FA5'
                     }
 
                     if (isDrawPreviewCell) {
-                      bgColor = '#F59E0B30'
-                      borderColor = '#F59E0B80'
+                      bgColor = '#F59E0B'
+                      borderColor = '#D97706'
                     }
 
                     return (
@@ -1720,7 +1716,7 @@ export function PianoRollEditor({
                         key={`cell-${r}-${c}`}
                         className={cn(
                           'border-r border-b transition-colors duration-75',
-                          (isGA && !showGrid) ? 'border-transparent' : borderColor,
+                          (isGA && !showGrid) ? 'border-gray-200/40' : borderColor,
                           isPreview && mode === 'erase' && zone && 'opacity-80'
                         )}
                         style={{
@@ -1769,7 +1765,7 @@ export function PianoRollEditor({
                       key={`label-${zone.id}`}
                       className={cn(
                         'absolute pointer-events-none flex items-center justify-center text-[9px] font-medium truncate px-1',
-                        isSelected ? 'text-white font-bold' : 'text-gray-300'
+                        isSelected ? (isGA ? 'text-white font-bold' : 'text-white font-bold') : (isGA ? 'text-gray-800 font-semibold' : 'text-gray-300')
                       )}
                       style={{
                         left: 32 + zone.col * cellSize * zoom,
@@ -1777,7 +1773,7 @@ export function PianoRollEditor({
                         width: zone.cols * cellSize * zoom,
                         height: zone.rows * cellSize * zoom,
                         zIndex: 5,
-                        textShadow: '0 1px 3px rgba(0,0,0,0.8)',
+                        textShadow: isGA ? '0 1px 2px rgba(255,255,255,0.8)' : '0 1px 3px rgba(0,0,0,0.8)',
                         ...shapeStyle,
                       }}
                     >
@@ -1865,13 +1861,13 @@ export function PianoRollEditor({
 
                 {/* Polygon Drawing Hint */}
                 {mode === 'polygon' && !isDrawingPolygon && !isPreview && (
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-gray-800/90 border border-purple-500/50 rounded-lg px-3 py-2 text-[10px] text-purple-300 z-30 pointer-events-none">
+                  <div className={cn('absolute bottom-4 left-1/2 -translate-x-1/2 border rounded-lg px-3 py-2 text-[10px] z-30 pointer-events-none', isGA ? 'bg-white/90 border-purple-400 text-purple-700' : 'bg-gray-800/90 border-purple-500/50 text-purple-300')}>
                     Click to place vertices. Click near first point or press Enter to close. Esc to cancel.
                     {polygonPoints.length > 0 && ` (${polygonPoints.length} points)`}
                   </div>
                 )}
                 {mode === 'polygon' && isDrawingPolygon && !isPreview && (
-                  <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-gray-800/90 border border-purple-500/50 rounded-lg px-3 py-2 text-[10px] text-purple-300 z-30 pointer-events-none">
+                  <div className={cn('absolute bottom-4 left-1/2 -translate-x-1/2 border rounded-lg px-3 py-2 text-[10px] z-30 pointer-events-none', isGA ? 'bg-white/90 border-purple-400 text-purple-700' : 'bg-gray-800/90 border-purple-500/50 text-purple-300')}>
                     {polygonPoints.length < 3
                       ? `Click to add more points (min 3). ${polygonPoints.length} placed.`
                       : `Click near first point or press Enter to finish. ${polygonPoints.length} points. Esc to cancel.`}
@@ -1883,7 +1879,9 @@ export function PianoRollEditor({
                   <div
                     className={cn(
                       'absolute flex items-center justify-center text-xs font-bold pointer-events-none',
-                      selectedStage ? 'text-white' : 'text-gray-300'
+                      selectedStage
+                        ? (isGA ? 'text-white' : 'text-white')
+                        : (isGA ? 'text-white' : 'text-gray-300')
                     )}
                     style={{
                       left: 32 + stage.col * cellSize * zoom,
@@ -1891,14 +1889,18 @@ export function PianoRollEditor({
                       width: stage.cols * cellSize * zoom,
                       height: (stage.rows || 2) * cellSize * zoom,
                       zIndex: 6,
-                      textShadow: '0 1px 3px rgba(0,0,0,0.8)',
-                      background: selectedStage
-                        ? 'linear-gradient(180deg, #5A5A5A 0%, #4A4A4A 50%, #3D3D3D 100%)'
-                        : 'linear-gradient(180deg, #4A4A4A 0%, #3D3D3D 50%, #333 100%)',
-                      borderTop: selectedStage ? '2px solid #F59E0B' : '2px solid #666',
-                      borderLeft: selectedStage ? '2px solid #F59E0B' : '1px solid #555',
-                      borderRight: selectedStage ? '2px solid #F59E0B' : '1px solid #555',
-                      borderBottom: selectedStage ? '2px solid #F59E0B' : '1px solid #555',
+                      textShadow: isGA ? '0 1px 2px rgba(0,0,0,0.3)' : '0 1px 3px rgba(0,0,0,0.8)',
+                      background: isGA
+                        ? (selectedStage
+                          ? 'linear-gradient(180deg, #6366F1 0%, #4F46E5 50%, #4338CA 100%)'
+                          : 'linear-gradient(180deg, #818CF8 0%, #6366F1 50%, #4F46E5 100%)')
+                        : (selectedStage
+                          ? 'linear-gradient(180deg, #5A5A5A 0%, #4A4A4A 50%, #3D3D3D 100%)'
+                          : 'linear-gradient(180deg, #4A4A4A 0%, #3D3D3D 50%, #333 100%)'),
+                      borderTop: selectedStage ? '2px solid #F59E0B' : (isGA ? '2px solid #4338CA' : '2px solid #666'),
+                      borderLeft: selectedStage ? '2px solid #F59E0B' : (isGA ? '1px solid #6366F1' : '1px solid #555'),
+                      borderRight: selectedStage ? '2px solid #F59E0B' : (isGA ? '1px solid #6366F1' : '1px solid #555'),
+                      borderBottom: selectedStage ? '2px solid #F59E0B' : (isGA ? '1px solid #6366F1' : '1px solid #555'),
                       ...(selectedStage ? {
                         outline: '2px dashed #F59E0B',
                         outlineOffset: '-1px',
