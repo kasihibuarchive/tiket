@@ -412,6 +412,7 @@ export default function EventDetailPage() {
                     layoutData={event.seatMapLayout}
                     layoutImage={event.layoutImage}
                     gaZoneConfig={event.gaZoneConfig}
+                    seatType={event.seatType}
                     onSelectionChange={handleSelectionChange}
                     onProceedToCheckout={handleProceedToCheckout}
                   />

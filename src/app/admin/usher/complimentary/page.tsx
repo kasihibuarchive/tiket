@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select'
 import {
   Send, Loader2, Ticket, Users, X, MapPin, Clock, Mail,
-  AlertCircle, CheckCircle2, Calendar, Zap,
+  AlertCircle, CheckCircle2, Calendar, Zap, Image,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatShortDate, formatEventDateTime } from '@/lib/date'
@@ -87,6 +87,8 @@ export default function OTSTicketPage() {
   const [selectedSeats, setSelectedSeats] = useState<string[]>([])
   const [seatMapInfo, setSeatMapInfo] = useState<SeatMapInfo | null>(null)
   const [layoutData, setLayoutData] = useState<any>(null)
+  const [eventSeatType, setEventSeatType] = useState<string | null>(null)
+  const [eventLayoutImage, setEventLayoutImage] = useState<string | null>(null)
   const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
 
   // Form
@@ -112,7 +114,7 @@ export default function OTSTicketPage() {
   // ─── Derived ──────────────────────────────────────────────────────────
 
   const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId) || null, [events, selectedEventId])
-  const isNumberedSeatMap = seatMapInfo?.seatType === 'NUMBERED'
+  const isNumberedSeatMap = eventSeatType === 'NUMBERED' || seatMapInfo?.seatType === 'NUMBERED'
   const useCanvasMode = !!(parsedLayout?.canvasSeats && parsedLayout.canvasSeats.length > 0)
   const availableSeatsCount = useMemo(() => seats.filter((s) => s.status === 'AVAILABLE').length, [seats])
 
@@ -202,6 +204,8 @@ export default function OTSTicketPage() {
     setSelectedSeats([])
     setSeatMapInfo(null)
     setLayoutData(null)
+    setEventSeatType(null)
+    setEventLayoutImage(null)
 
     try {
       const seatsUrl = `/api/events/${eventId}/seats${showDateFilter ? `?showDateId=${showDateFilter}` : ''}`
@@ -214,6 +218,8 @@ export default function OTSTicketPage() {
       const eventRes = await fetch(`/api/events/${eventId}`)
       if (eventRes.ok) {
         const eventData = await eventRes.json()
+        setEventSeatType(eventData.seatType || null)
+        setEventLayoutImage(eventData.layoutImage || null)
         if (eventData.seatMapId) {
           const mapRes = await fetch('/api/admin/seat-maps')
           if (mapRes.ok) {
@@ -631,6 +637,23 @@ export default function OTSTicketPage() {
               ) : (
                 /* ─── GA (General Admission) Zone Selector ─── */
                 <div className="space-y-4">
+                  {/* Layout Image for GA events */}
+                  {eventLayoutImage && (
+                    <div className="bg-muted/20 rounded-xl p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <Image className="w-3.5 h-3.5 text-gold" />
+                        <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+                      </div>
+                      <div className="w-full rounded-lg overflow-hidden border border-border/30">
+                        <img
+                          src={eventLayoutImage}
+                          alt="Layout venue"
+                          className="w-full h-auto max-h-64 object-contain"
+                        />
+                      </div>
+                    </div>
+                  )}
+
                   {/* Zone info cards */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {zoneGroupKeys.map((zone) => {

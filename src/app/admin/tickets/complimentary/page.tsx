@@ -15,7 +15,7 @@ import {
 } from '@/components/ui/select'
 import {
   Gift, Send, Loader2, Ticket, Users, X, MapPin, Clock, Mail, Phone,
-  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp, RotateCcw, Calendar,
+  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp, RotateCcw, Calendar, Image,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { formatShortDate, formatEventDateTime } from '@/lib/date'
@@ -88,6 +88,8 @@ export default function ComplimentaryTicketsPage() {
   const [selectedSeats, setSelectedSeats] = useState<string[]>([])
   const [seatMapInfo, setSeatMapInfo] = useState<SeatMapInfo | null>(null)
   const [layoutData, setLayoutData] = useState<any>(null)
+  const [eventSeatType, setEventSeatType] = useState<string | null>(null)
+  const [eventLayoutImage, setEventLayoutImage] = useState<string | null>(null)
   const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
 
   // Form
@@ -120,7 +122,7 @@ export default function ComplimentaryTicketsPage() {
     [events, selectedEventId]
   )
 
-  const isNumberedSeatMap = seatMapInfo?.seatType === 'NUMBERED'
+  const isNumberedSeatMap = eventSeatType === 'NUMBERED' || seatMapInfo?.seatType === 'NUMBERED'
   const isGeneralAdmission = !isNumberedSeatMap || !seatMapInfo
 
   // Seat lookup for canvas mode
@@ -216,6 +218,8 @@ export default function ComplimentaryTicketsPage() {
     setSelectedSeats([])
     setSeatMapInfo(null)
     setLayoutData(null)
+    setEventSeatType(null)
+    setEventLayoutImage(null)
     setGaQuantity(1)
     setGaZone('')
 
@@ -229,10 +233,13 @@ export default function ComplimentaryTicketsPage() {
         setPriceCategories(data.priceCategories || [])
       }
 
-      // Fetch event detail to get seatMapId and showDates
+      // Fetch event detail to get seatMapId, showDates, seatType, layoutImage
       const eventRes = await fetch(`/api/events/${eventId}`)
       if (eventRes.ok) {
         const eventData = await eventRes.json()
+        // Store seatType and layoutImage for GA detection and display
+        setEventSeatType(eventData.seatType || null)
+        setEventLayoutImage(eventData.layoutImage || null)
         if (eventData.seatMapId) {
           // Fetch seat map info
           const mapRes = await fetch('/api/admin/seat-maps')
@@ -807,6 +814,23 @@ export default function ComplimentaryTicketsPage() {
                 <p className="text-xs text-muted-foreground">
                   Event ini menggunakan sistem General Admission. Masukkan jumlah tiket yang diinginkan.
                 </p>
+
+                {/* Layout Image for GA events */}
+                {eventLayoutImage && (
+                  <div className="bg-muted/20 rounded-xl p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Image className="w-3.5 h-3.5 text-gold" />
+                      <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+                    </div>
+                    <div className="w-full rounded-lg overflow-hidden border border-border/30">
+                      <img
+                        src={eventLayoutImage}
+                        alt="Layout venue"
+                        className="w-full h-auto max-h-64 object-contain"
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {zones.length > 0 && (
                   <div className="space-y-2 sm:max-w-md">

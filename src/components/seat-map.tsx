@@ -44,6 +44,7 @@ interface SeatMapProps {
   layoutData?: any
   layoutImage?: string | null
   gaZoneConfig?: string | null
+  seatType?: string | null
   onSelectionChange?: (selectedSeats: SeatData[], totalPrice: number) => void
   onProceedToCheckout?: (selectedSeats: SeatData[]) => void
 }
@@ -64,7 +65,7 @@ const SEAT_GAP = 3 // px gap between seats in a block
 // =====================
 // Seat Map Component
 // =====================
-export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, layoutImage, gaZoneConfig, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
+export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, layoutImage, gaZoneConfig, seatType, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
   const [seats, setSeats] = useState<SeatData[]>(initialSeats)
   const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
   const [lockCountdown, setLockCountdown] = useState<number | null>(null)
@@ -525,6 +526,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // GA (General Admission) Hooks — always called, used conditionally
   // ═══════════════════════════════════════════════════════════
 
+  // When event seatType is GENERAL_ADMISSION, always enter GA mode
+  // even if gaZoneConfig hasn't been set yet (show layout image, no zones)
+  const isSeatTypeGA = seatType === 'GENERAL_ADMISSION'
+
   // Manual GA zones from gaZoneConfig JSON (for events without a linked seatMap)
   const manualGAZones = useMemo(() => {
     if (parsedLayout?.isGA) return null // Use existing layout-based GA mode
@@ -543,11 +548,12 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     } catch { return null }
   }, [gaZoneConfig, parsedLayout?.isGA])
 
-  const isManualGA = !!manualGAZones
+  // isManualGA: true when we should show layout image + zone cards (not numbered grid)
+  const isManualGA = !!manualGAZones || (isSeatTypeGA && !parsedLayout?.isGA)
 
   // Unified GA zones: manual gaZoneConfig takes precedence, then layout-based GA
   const gaZones = manualGAZones || (parsedLayout?.isGA ? (parsedLayout.gaZones || []) : [])
-  const isGA = gaZones.length > 0
+  const isGA = isSeatTypeGA || gaZones.length > 0
 
   const zoneAvailability = useMemo(() => {
     if (!isGA) return new Map<string, { total: number; available: number; price: number; priceCatId: string | null }>()
