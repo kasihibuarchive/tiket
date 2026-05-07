@@ -68,7 +68,7 @@ export default function AdminLoginPage() {
         return
       }
 
-      setError(data.error || 'Login gagal')
+      setError((data.debug ? data.debug + ' — ' : '') + (data.error || 'Login gagal'))
     } catch {
       setError('Terjadi kesalahan koneksi')
     } finally {
