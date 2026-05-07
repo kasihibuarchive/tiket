@@ -11,7 +11,8 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import {
-  Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays
+  Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
+  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
@@ -58,6 +59,490 @@ interface EventInfo {
   seatMapId: string | null
   seatType?: string
   showDates?: ShowDateData[]
+  layoutImage?: string | null
+  gaZoneConfig?: string | null
+}
+
+interface GaZoneDef {
+  name: string
+  capacity: number
+  price: number
+  color: string
+  priceCategoryName: string
+}
+
+// ─── GA Zone Management Panel (shown when no seats exist for GA events) ──
+function GaZoneManagementPanel({
+  eventId,
+  eventInfo,
+  gaZonesDef,
+  setGaZonesDef,
+  layoutImage,
+  layoutImagePreview,
+  setLayoutImage,
+  setLayoutImagePreview,
+  isUploading,
+  setIsUploading,
+  isSavingZones,
+  setIsSavingZones,
+  isGeneratingFromZones,
+  setIsGeneratingFromZones,
+  newZone,
+  setNewZone,
+  priceCategories,
+  fileInputRef,
+}: {
+  eventId: string
+  eventInfo: EventInfo | null
+  gaZonesDef: GaZoneDef[]
+  setGaZonesDef: React.Dispatch<React.SetStateAction<GaZoneDef[]>>
+  layoutImage: string | null
+  layoutImagePreview: string | null
+  setLayoutImage: React.Dispatch<React.SetStateAction<string | null>>
+  setLayoutImagePreview: React.Dispatch<React.SetStateAction<string | null>>
+  isUploading: boolean
+  setIsUploading: React.Dispatch<React.SetStateAction<boolean>>
+  isSavingZones: boolean
+  setIsSavingZones: React.Dispatch<React.SetStateAction<boolean>>
+  isGeneratingFromZones: boolean
+  setIsGeneratingFromZones: React.Dispatch<React.SetStateAction<boolean>>
+  newZone: GaZoneDef
+  setNewZone: React.Dispatch<React.SetStateAction<GaZoneDef>>
+  priceCategories: PriceCategoryData[]
+  fileInputRef: React.RefObject<HTMLInputElement | null>
+}) {
+  // ─── Image upload handler ───────────────────────────────────────────
+  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Check file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Ukuran file maksimal 5MB')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = async (ev) => {
+      const base64 = ev.target?.result as string
+      setLayoutImagePreview(base64)
+
+      setIsUploading(true)
+      try {
+        const res = await fetch(`/api/admin/events/${eventId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ layoutImage: base64 }),
+        })
+        if (res.ok) {
+          setLayoutImage(base64)
+        } else {
+          alert('Gagal mengupload gambar')
+          setLayoutImagePreview(layoutImage)
+        }
+      } catch {
+        alert('Gagal mengupload gambar')
+        setLayoutImagePreview(layoutImage)
+      } finally {
+        setIsUploading(false)
+      }
+    }
+    reader.readAsDataURL(file)
+  }
+
+  async function handleRemoveImage() {
+    setIsUploading(true)
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ layoutImage: null }),
+      })
+      if (res.ok) {
+        setLayoutImage(null)
+        setLayoutImagePreview(null)
+      } else {
+        alert('Gagal menghapus gambar')
+      }
+    } catch {
+      alert('Gagal menghapus gambar')
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  // ─── Zone management handlers ───────────────────────────────────────
+  function handleAddZone() {
+    if (!newZone.name.trim()) {
+      alert('Nama zona wajib diisi')
+      return
+    }
+    if (newZone.capacity <= 0) {
+      alert('Kapasitas harus lebih dari 0')
+      return
+    }
+    if (gaZonesDef.some(z => z.name.toLowerCase() === newZone.name.trim().toLowerCase())) {
+      alert('Nama zona sudah digunakan')
+      return
+    }
+    setGaZonesDef([...gaZonesDef, { ...newZone, name: newZone.name.trim() }])
+    setNewZone({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '' })
+  }
+
+  function handleRemoveZone(index: number) {
+    setGaZonesDef(gaZonesDef.filter((_, i) => i !== index))
+  }
+
+  async function handleSaveZones() {
+    setIsSavingZones(true)
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gaZoneConfig: JSON.stringify(gaZonesDef) }),
+      })
+      if (res.ok) {
+        alert('Zona berhasil disimpan!')
+      } else {
+        alert('Gagal menyimpan zona')
+      }
+    } catch {
+      alert('Gagal menyimpan zona')
+    } finally {
+      setIsSavingZones(false)
+    }
+  }
+
+  async function handleGenerateSeats() {
+    if (gaZonesDef.length === 0) {
+      alert('Tambahkan minimal 1 zona terlebih dahulu')
+      return
+    }
+    const totalCapacity = gaZonesDef.reduce((sum, z) => sum + z.capacity, 0)
+    const confirmed = confirm(
+      `Generate ${totalCapacity} kursi dari ${gaZonesDef.length} zona?\n\nZona:\n${gaZonesDef.map(z => `• ${z.name}: ${z.capacity} kursi`).join('\n')}`
+    )
+    if (!confirmed) return
+
+    // Save zones first, then generate
+    setIsSavingZones(true)
+    try {
+      const saveRes = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gaZoneConfig: JSON.stringify(gaZonesDef) }),
+      })
+      if (!saveRes.ok) {
+        alert('Gagal menyimpan zona')
+        return
+      }
+    } catch {
+      alert('Gagal menyimpan zona')
+      return
+    } finally {
+      setIsSavingZones(false)
+    }
+
+    setIsGeneratingFromZones(true)
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/generate-seats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useGaZoneConfig: true }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        alert(data.message)
+        // Reload to show generated seats
+        window.location.reload()
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Gagal generate kursi')
+      }
+    } catch {
+      alert('Gagal generate kursi')
+    } finally {
+      setIsGeneratingFromZones(false)
+    }
+  }
+
+  const totalCapacity = gaZonesDef.reduce((sum, z) => sum + z.capacity, 0)
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h1 className="font-serif text-2xl font-bold text-charcoal">GA Zone Setup</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          {eventInfo?.title && <span className="font-medium">{eventInfo.title}</span>}
+          {' — Konfigurasi zona General Admission'}
+        </p>
+      </div>
+
+      {/* 1. Layout Image Upload */}
+      <Card className="border-gold/20">
+        <CardContent className="p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <ImagePlus className="w-4 h-4 text-gold" />
+            <h2 className="font-serif text-lg font-semibold text-charcoal">Layout Image</h2>
+            <span className="text-xs text-muted-foreground">(Opsional)</span>
+          </div>
+
+          {(layoutImagePreview || layoutImage) ? (
+            <div className="space-y-3">
+              <div className="relative rounded-lg overflow-hidden border border-border/50 bg-gray-50">
+                <img
+                  src={layoutImagePreview || layoutImage || ''}
+                  alt="Layout"
+                  className="max-h-64 w-full object-contain"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  <Upload className="w-3.5 h-3.5 mr-1.5" />
+                  Ganti Gambar
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRemoveImage}
+                  disabled={isUploading}
+                  className="text-red-500 border-red-200 hover:bg-red-50"
+                >
+                  <TrashIcon className="w-3.5 h-3.5 mr-1.5" />
+                  Hapus Gambar
+                </Button>
+                {isUploading && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
+              </div>
+            </div>
+          ) : (
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="border-2 border-dashed border-border/60 rounded-lg p-8 text-center cursor-pointer hover:border-gold/40 hover:bg-gold/5 transition-all"
+            >
+              <Upload className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">
+                Klik untuk upload gambar layout venue
+              </p>
+              <p className="text-xs text-muted-foreground/50 mt-1">
+                PNG, JPG, SVG — Maks. 5MB
+              </p>
+            </div>
+          )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleImageUpload}
+          />
+        </CardContent>
+      </Card>
+
+      {/* 2. Manual Zone Definition */}
+      <Card className="border-gold/20">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-gold" />
+              <h2 className="font-serif text-lg font-semibold text-charcoal">Definisi Zona</h2>
+            </div>
+            <Button
+              size="sm"
+              onClick={handleSaveZones}
+              disabled={isSavingZones || gaZonesDef.length === 0}
+              className="bg-gold hover:bg-gold/90 text-charcoal font-semibold text-xs"
+            >
+              {isSavingZones ? (
+                <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+              ) : (
+                <Save className="w-3 h-3 mr-1.5" />
+              )}
+              Simpan Zona
+            </Button>
+          </div>
+
+          {/* Existing zones */}
+          {gaZonesDef.length > 0 && (
+            <div className="space-y-2 mb-4 max-h-96 overflow-y-auto">
+              {gaZonesDef.map((zone, idx) => (
+                <div
+                  key={idx}
+                  className="flex items-center gap-3 p-3 rounded-lg border border-border/50 bg-white"
+                >
+                  <div
+                    className="w-4 h-4 rounded-sm shrink-0"
+                    style={{ backgroundColor: zone.color }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium text-sm text-charcoal">{zone.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">
+                      {zone.capacity} kursi
+                    </span>
+                    {zone.priceCategoryName && (
+                      <Badge variant="secondary" className="text-[10px] ml-2">
+                        {zone.priceCategoryName}
+                      </Badge>
+                    )}
+                  </div>
+                  <span className="text-xs font-medium text-charcoal">
+                    Rp {zone.price.toLocaleString('id-ID')}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleRemoveZone(idx)}
+                    className="text-red-400 hover:text-red-600 h-7 w-7 p-0"
+                  >
+                    <TrashIcon className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <div className="text-xs text-muted-foreground pt-1">
+                Total Kapasitas: <span className="font-semibold text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi
+              </div>
+            </div>
+          )}
+
+          {/* Add new zone form */}
+          <div className="border border-dashed border-border/60 rounded-lg p-4">
+            <p className="text-xs font-medium text-muted-foreground mb-3">Tambah Zona Baru</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Nama Zona</label>
+                <input
+                  type="text"
+                  value={newZone.name}
+                  onChange={(e) => setNewZone({ ...newZone, name: e.target.value })}
+                  placeholder="cth: VIP, Festival A"
+                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Kapasitas</label>
+                <input
+                  type="number"
+                  value={newZone.capacity}
+                  onChange={(e) => setNewZone({ ...newZone, capacity: parseInt(e.target.value) || 0 })}
+                  placeholder="100"
+                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Harga (Rp)</label>
+                <input
+                  type="number"
+                  value={newZone.price}
+                  onChange={(e) => setNewZone({ ...newZone, price: parseInt(e.target.value) || 0 })}
+                  placeholder="85000"
+                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Warna</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={newZone.color}
+                    onChange={(e) => setNewZone({ ...newZone, color: e.target.value })}
+                    className="w-8 h-8 rounded cursor-pointer border border-border"
+                  />
+                  <span className="text-xs text-muted-foreground">{newZone.color}</span>
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Kategori Harga</label>
+                <Select
+                  value={newZone.priceCategoryName}
+                  onValueChange={(val) => setNewZone({ ...newZone, priceCategoryName: val })}
+                >
+                  <SelectTrigger className="h-8 text-sm">
+                    <SelectValue placeholder="Pilih kategori" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {priceCategories.map((pc) => (
+                      <SelectItem key={pc.id} value={pc.name}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: pc.colorCode }} />
+                          {pc.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAddZone}
+                  className="w-full"
+                >
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+                  Tambah Zona
+                </Button>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 3. Generate Seats */}
+      <Card className="border-gold/20 bg-gold/5">
+        <CardContent className="p-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Zap className="w-4 h-4 text-gold" />
+                <h2 className="font-serif text-lg font-semibold text-charcoal">Generate Kursi</h2>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                {gaZonesDef.length > 0 ? (
+                  <>
+                    <span className="font-medium text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi dari{' '}
+                    <span className="font-medium text-charcoal">{gaZonesDef.length}</span> zona akan di-generate.
+                  </>
+                ) : (
+                  'Tambahkan minimal 1 zona untuk generate kursi.'
+                )}
+              </p>
+            </div>
+            <Button
+              size="lg"
+              onClick={handleGenerateSeats}
+              disabled={isGeneratingFromZones || gaZonesDef.length === 0}
+              className="bg-gold hover:bg-gold/90 text-charcoal font-semibold"
+            >
+              {isGeneratingFromZones ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 mr-2" />
+                  Generate Kursi
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Back link */}
+      <div className="text-center pt-4">
+        <a href="/admin/events" className="text-gold underline text-sm inline-block">
+          ← Kembali ke Events
+        </a>
+      </div>
+    </div>
+  )
 }
 
 export default function SeatEditorPage() {
@@ -75,6 +560,16 @@ export default function SeatEditorPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [isDeletingSeats, setIsDeletingSeats] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+
+  // ─── GA Zone Config state ──────────────────────────────────────────
+  const [gaZonesDef, setGaZonesDef] = useState<GaZoneDef[]>([])
+  const [layoutImage, setLayoutImage] = useState<string | null>(null)
+  const [layoutImagePreview, setLayoutImagePreview] = useState<string | null>(null)
+  const [isUploading, setIsUploading] = useState(false)
+  const [isSavingZones, setIsSavingZones] = useState(false)
+  const [isGeneratingFromZones, setIsGeneratingFromZones] = useState(false)
+  const [newZone, setNewZone] = useState<GaZoneDef>({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '' })
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isDraggingRef = useRef(false)
   const dragModeRef = useRef<'select' | 'deselect'>('select')
@@ -125,6 +620,16 @@ export default function SeatEditorPage() {
           if (ev?.showDates && ev.showDates.length > 1) {
             setShowDates(ev.showDates)
             setSelectedShowDateIdx(0)
+          }
+          // Load GA zone config and layout image
+          if (ev?.gaZoneConfig) {
+            try {
+              setGaZonesDef(JSON.parse(ev.gaZoneConfig))
+            } catch { /* ignore */ }
+          }
+          if (ev?.layoutImage) {
+            setLayoutImage(ev.layoutImage)
+            setLayoutImagePreview(ev.layoutImage)
           }
           // Fetch layoutData from the seat map
           if (ev?.seatMapId) {
@@ -652,7 +1157,36 @@ export default function SeatEditorPage() {
     )
   }
 
+  // ─── Determine if this event is GA type (from event info or seat map) ──
+  const isEventGA = eventInfo?.seatType === 'GENERAL_ADMISSION' ||
+    eventInfo?.seatType === 'PIANO_ROLL' ||
+    !!eventInfo?.gaZoneConfig
+
   if (allSeats.length === 0) {
+    // ─── GA-specific management panel when no seats exist ─────────────
+    if (isEventGA) {
+      return <GaZoneManagementPanel
+        eventId={eventId}
+        eventInfo={eventInfo}
+        gaZonesDef={gaZonesDef}
+        setGaZonesDef={setGaZonesDef}
+        layoutImage={layoutImage}
+        layoutImagePreview={layoutImagePreview}
+        setLayoutImage={setLayoutImage}
+        setLayoutImagePreview={setLayoutImagePreview}
+        isUploading={isUploading}
+        setIsUploading={setIsUploading}
+        isSavingZones={isSavingZones}
+        setIsSavingZones={setIsSavingZones}
+        isGeneratingFromZones={isGeneratingFromZones}
+        setIsGeneratingFromZones={setIsGeneratingFromZones}
+        newZone={newZone}
+        setNewZone={setNewZone}
+        priceCategories={priceCategories}
+        fileInputRef={fileInputRef}
+      />
+    }
+
     return (
       <div className="text-center py-20">
         <p className="text-muted-foreground">Belum ada kursi untuk event ini.</p>
@@ -670,6 +1204,11 @@ export default function SeatEditorPage() {
       <div className="flex items-center justify-between sticky top-0 z-10 bg-[#F8F6F3] py-2 -mt-2">
         <div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">Seat Map Editor</h1>
+          {isEventGA && eventInfo?.layoutImage && (
+            <div className="mt-3 rounded-lg overflow-hidden border border-border/50 inline-block">
+              <img src={eventInfo.layoutImage} alt="Layout" className="max-h-40 object-contain" />
+            </div>
+          )}
           <p className="text-sm text-muted-foreground mt-1">
             {eventInfo?.title && <span className="font-medium">{eventInfo.title}</span>}
             {' — '}

@@ -197,7 +197,7 @@ export async function POST(
   try {
     const { id } = await params
     const body = await request.json()
-    const { seatMapId } = body
+    const { seatMapId, useGaZoneConfig } = body
 
     const event = await db.event.findUnique({ where: { id } })
     if (!event) {
@@ -206,20 +206,6 @@ export async function POST(
 
     // ─── Clean up existing seats if any (safety net) ────────────────────
     await db.seat.deleteMany({ where: { eventId: id } })
-
-    // ─── Must provide a seatMapId ──────────────────────────────────────
-    if (!seatMapId) {
-      return NextResponse.json(
-        { error: 'Pilih Seat Map terlebih dahulu.' },
-        { status: 400 }
-      )
-    }
-
-    // Fetch the seat map
-    const seatMap = await db.seatMap.findUnique({ where: { id: seatMapId } })
-    if (!seatMap) {
-      return NextResponse.json({ error: 'Seat Map tidak ditemukan' }, { status: 404 })
-    }
 
     // Get price categories for this event
     const priceCategories = await db.priceCategory.findMany({ where: { eventId: id } })
@@ -234,12 +220,66 @@ export async function POST(
       orderBy: { date: 'asc' },
     })
 
-    // Generate seats from seat map layout (base seat records)
-    const seatData = generateSeatsFromLayout(seatMap.layoutData, id, priceCategoryMap)
+    let seatData: { seatCode: string; status: string; row: string; col: number; priceCategoryId: string | null; zoneName: string | null }[] = []
+    let seatMapName = 'Manual GA Zones'
+    let seatMapType = 'GENERAL_ADMISSION'
+
+    // ─── Alternative path: use gaZoneConfig from event ──────────────────
+    if (useGaZoneConfig && event.gaZoneConfig) {
+      try {
+        const manualZones = JSON.parse(event.gaZoneConfig)
+        if (Array.isArray(manualZones)) {
+          for (const zone of manualZones) {
+            const capacity = zone.capacity || 0
+            const zoneName = zone.name || 'GA'
+            const priceCatId = zone.priceCategoryName && priceCategoryMap[zone.priceCategoryName] ? priceCategoryMap[zone.priceCategoryName] : null
+
+            if (capacity <= 0) continue
+
+            for (let i = 1; i <= capacity; i++) {
+              seatData.push({
+                seatCode: `${zoneName}-${i}`,
+                status: 'AVAILABLE',
+                row: zoneName,
+                col: i,
+                priceCategoryId: priceCatId,
+                zoneName,
+              })
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error parsing gaZoneConfig:', err)
+        return NextResponse.json(
+          { error: 'Format gaZoneConfig tidak valid.' },
+          { status: 400 }
+        )
+      }
+    } else {
+      // ─── Original path: use seatMapId ────────────────────────────────
+      if (!seatMapId) {
+        return NextResponse.json(
+          { error: 'Pilih Seat Map terlebih dahulu.' },
+          { status: 400 }
+        )
+      }
+
+      // Fetch the seat map
+      const seatMap = await db.seatMap.findUnique({ where: { id: seatMapId } })
+      if (!seatMap) {
+        return NextResponse.json({ error: 'Seat Map tidak ditemukan' }, { status: 404 })
+      }
+
+      seatMapName = seatMap.name
+      seatMapType = seatMap.seatType
+
+      // Generate seats from seat map layout (base seat records)
+      seatData = generateSeatsFromLayout(seatMap.layoutData, id, priceCategoryMap)
+    }
 
     if (seatData.length === 0) {
       return NextResponse.json(
-        { error: 'Seat Map kosong atau format tidak dikenali. Edit seat map dan tambahkan kursi terlebih dahulu.' },
+        { error: useGaZoneConfig ? 'Belum ada zona yang didefinisikan. Tambahkan zona terlebih dahulu.' : 'Seat Map kosong atau format tidak dikenali. Edit seat map dan tambahkan kursi terlebih dahulu.' },
         { status: 400 }
       )
     }
@@ -291,23 +331,27 @@ export async function POST(
       totalCreated = result.count
     }
 
-    // Link event to seat map
-    await db.event.update({
-      where: { id },
-      data: { seatMapId },
-    })
+    // Link event to seat map (only if using seatMapId path)
+    if (!useGaZoneConfig && seatMapId) {
+      await db.event.update({
+        where: { id },
+        data: { seatMapId },
+      })
+    }
 
     const perDayLabel = showDates.length > 1
       ? ` (${showDates.length} hari × ${uniqueSeatData.length} kursi/hari)`
       : ''
 
     return NextResponse.json({
-      message: `${totalCreated} kursi berhasil di-generate dari Seat Map "${seatMap.name}"${perDayLabel}`,
+      message: useGaZoneConfig
+        ? `${totalCreated} kursi berhasil di-generate dari Manual GA Zones${perDayLabel}`
+        : `${totalCreated} kursi berhasil di-generate dari Seat Map "${seatMapName}"${perDayLabel}`,
       totalSeats: totalCreated,
       seatsPerDay: uniqueSeatData.length,
       showDatesCount: showDates.length,
-      seatMapName: seatMap.name,
-      seatMapType: seatMap.seatType,
+      seatMapName,
+      seatMapType,
     })
   } catch (error) {
     console.error('Error generating seats:', error)

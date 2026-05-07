@@ -85,6 +85,8 @@ model Event {
   promoCodes      PromoCode[]
   seatMapId       String?
   seatMap         SeatMap?  @relation(fields: [seatMapId], references: [id], onDelete: SetNull)
+  layoutImage     String?   // base64 or URL for uploaded layout image for GA
+  gaZoneConfig    String?   // JSON string for manually defined GA zones: [{name, capacity, price, color, priceCategoryName}]
 }
 
 // =====================
