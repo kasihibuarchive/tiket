@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
   onDemandEntries: {
     maxInactiveAge: 0,
   },
+  serverExternalPackages: ['@prisma/client', '@prisma/engines'],
 };
 
 export default nextConfig;

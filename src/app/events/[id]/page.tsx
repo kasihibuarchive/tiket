@@ -350,7 +350,9 @@ export default function EventDetailPage() {
 
                 <div className="bg-white/5 rounded-lg p-4 mb-6">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-white/70">Ketersediaan Kursi</span>
+                    <span className="text-sm text-white/70">
+                      {event.seatType === 'GENERAL_ADMISSION' ? 'Ketersediaan Tiket' : 'Ketersediaan Kursi'}
+                    </span>
                     <span className="text-sm font-semibold text-gold">
                       {seatSummary.available} / {seatSummary.total}
                     </span>
@@ -395,9 +397,11 @@ export default function EventDetailPage() {
           <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 abstract-bg">
             <div className="max-w-7xl mx-auto">
               <div className="text-center mb-8">
-                <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">Pilih kursi Anda</p>
+                <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">
+                  {event.seatType === 'GENERAL_ADMISSION' ? 'Pilih zona Anda' : 'Pilih kursi Anda'}
+                </p>
                 <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">
-                  PILIH KURSI
+                  {event.seatType === 'GENERAL_ADMISSION' ? 'PILIH ZONA' : 'PILIH KURSI'}
                 </h2>
                 <div className="zen-divider w-16 mx-auto mt-4" />
               </div>

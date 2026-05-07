@@ -530,9 +530,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // even if gaZoneConfig hasn't been set yet (show layout image, no zones)
   const isSeatTypeGA = seatType === 'GENERAL_ADMISSION'
 
-  // Manual GA zones from gaZoneConfig JSON (for events without a linked seatMap)
+  // Manual GA zones from gaZoneConfig JSON (admin-defined zones take priority over layout-based)
   const manualGAZones = useMemo(() => {
-    if (parsedLayout?.isGA) return null // Use existing layout-based GA mode
     if (!gaZoneConfig) return null
     try {
       const zones = JSON.parse(gaZoneConfig)
@@ -549,7 +548,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   }, [gaZoneConfig, parsedLayout?.isGA])
 
   // isManualGA: true when we should show layout image + zone cards (not numbered grid)
-  const isManualGA = !!manualGAZones || (isSeatTypeGA && !parsedLayout?.isGA)
+  // Priority: gaZoneConfig (manual admin config) > layout-based GA
+  const isManualGA = !!manualGAZones || isSeatTypeGA
 
   // Unified GA zones: manual gaZoneConfig takes precedence, then layout-based GA
   const gaZones = manualGAZones || (parsedLayout?.isGA ? (parsedLayout.gaZones || []) : [])
@@ -747,8 +747,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // ═══════════════════════════════════════════════════════════
   if (isGA) {
     const gaStageType = parsedLayout?.stageType || 'PROSCENIUM'
-    // For manual GA, use the layoutImage prop; for layout-based GA, use parsedLayout.layoutImageUrl
-    const effectiveLayoutImage = isManualGA ? (layoutImage || null) : (parsedLayout?.layoutImageUrl || null)
+    // Use the uploaded layoutImage prop (from Event.layoutImage), fall back to parsedLayout URL
+    const effectiveLayoutImage = layoutImage || parsedLayout?.layoutImageUrl || null
 
     return (
       <div className="w-full space-y-4">

@@ -301,11 +301,12 @@ export async function POST(
       // Multi-day event: create seats for EACH show date
       for (const sd of showDates) {
         const result = await db.seat.createMany({
+          skipDuplicates: true,
           data: uniqueSeatData.map((s) => ({
             eventId: id,
             eventShowDateId: sd.id,
             seatCode: s.seatCode,
-            status: s.status as any,
+            status: s.status as 'AVAILABLE',
             row: s.row,
             col: s.col,
             priceCategoryId: s.priceCategoryId,
@@ -317,15 +318,16 @@ export async function POST(
     } else {
       // Single-day event: create seats without showDateId
       const result = await db.seat.createMany({
+        skipDuplicates: true,
         data: uniqueSeatData.map((s) => ({
           eventId: id,
           eventShowDateId: showDates.length === 1 ? showDates[0].id : null,
           seatCode: s.seatCode,
-          status: s.status as any,
+          status: s.status as 'AVAILABLE',
           row: s.row,
-            col: s.col,
-            priceCategoryId: s.priceCategoryId,
-            zoneName: s.zoneName,
+          col: s.col,
+          priceCategoryId: s.priceCategoryId,
+          zoneName: s.zoneName,
         })),
       })
       totalCreated = result.count

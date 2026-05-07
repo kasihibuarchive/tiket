@@ -1213,7 +1213,7 @@ export function PianoRollEditor({
       const zh = zone.rows * layoutData.cellSize * scale
 
       ctx.save()
-      ctx.fillStyle = zone.color + '40'
+      ctx.fillStyle = isGA ? zone.color + '35' : zone.color + '40'
 
       const shape = zone.shape || 'rectangle'
       if (shape === 'polygon' && zone.points && zone.points.length >= 3) {
@@ -1251,7 +1251,18 @@ export function PianoRollEditor({
         ctx.lineWidth = 2
         ctx.strokeRect(zx, zy, zw, zh)
       }
-      ctx.fillStyle = isGA ? zone.color + '35' : zone.color + '40'
+      ctx.restore()
+
+      // Zone label
+      ctx.fillStyle = isGA ? '#1f2937' : '#fff'
+      ctx.font = `bold ${11 * scale}px sans-serif`
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      ctx.shadowColor = isGA ? 'rgba(255,255,255,0.8)' : 'rgba(0,0,0,0.8)'
+      ctx.shadowBlur = 4
+      ctx.fillText(zone.name, zx + zw / 2, zy + zh / 2 - 7 * scale)
+      ctx.font = `${9 * scale}px sans-serif`
+      ctx.fillStyle = isGA ? '#4b5563' : '#ccc'
       const cap = zone.capacity || zone.rows * zone.cols
       ctx.fillText(`${cap} org`, zx + zw / 2, zy + zh / 2 + 7 * scale)
       ctx.shadowBlur = 0
