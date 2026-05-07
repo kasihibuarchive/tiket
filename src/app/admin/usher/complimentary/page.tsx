@@ -41,6 +41,7 @@ interface SeatData {
   row: string
   col: number
   lockedUntil: string | null
+  zoneName: string | null
   priceCategory: { id: string; name: string; price: number; colorCode: string } | null
 }
 
@@ -101,6 +102,10 @@ export default function OTSTicketPage() {
   const [recentTickets, setRecentTickets] = useState<ComplimentaryTicket[]>([])
   const [isLoadingRecent, setIsLoadingRecent] = useState(true)
 
+  // GA (General Admission)
+  const [selectedGaZone, setSelectedGaZone] = useState<string>('')
+  const [gaQuantity, setGaQuantity] = useState<number>(1)
+
   // Admin info
   const [adminInfo, setAdminInfo] = useState<{ id: string; name: string; role: string } | null>(null)
 
@@ -128,6 +133,26 @@ export default function OTSTicketPage() {
   }, [seats])
 
   const sortedRowKeys = useMemo(() => Object.keys(seatsByRow).sort(), [seatsByRow])
+
+  // GA zone groups: group AVAILABLE seats by zoneName
+  const zoneGroups = useMemo(() => {
+    const groups: Record<string, { seats: SeatData[]; priceCategory: SeatData['priceCategory'] }> = {}
+    for (const seat of seats) {
+      if (seat.status !== 'AVAILABLE') continue
+      const zone = seat.zoneName || 'General'
+      if (!groups[zone]) groups[zone] = { seats: [], priceCategory: seat.priceCategory }
+      groups[zone].seats.push(seat)
+    }
+    return groups
+  }, [seats])
+
+  const zoneGroupKeys = useMemo(() => Object.keys(zoneGroups).sort(), [zoneGroups])
+
+  // GA selected zone available count
+  const selectedGaZoneInfo = useMemo(() => {
+    if (!selectedGaZone || !zoneGroups[selectedGaZone]) return null
+    return zoneGroups[selectedGaZone]
+  }, [selectedGaZone, zoneGroups])
 
   // ─── Init ─────────────────────────────────────────────────────────────
 
@@ -229,6 +254,38 @@ export default function OTSTicketPage() {
 
   function removeSeat(seatCode: string) {
     setSelectedSeats((prev) => prev.filter((s) => s !== seatCode))
+  }
+
+  function addGaTickets() {
+    if (!selectedGaZone || !selectedGaZoneInfo || gaQuantity < 1) return
+    const available = selectedGaZoneInfo.seats
+    const qty = Math.min(gaQuantity, available.length)
+
+    // Find existing seat codes for this zone that are already selected
+    const existingInZone = selectedSeats.filter((s) => s.startsWith(`${selectedGaZone}-`))
+    const existingNumbers = existingInZone.map((s) => {
+      const parts = s.split('-')
+      return parseInt(parts[parts.length - 1], 10) || 0
+    })
+    const maxExisting = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0
+
+    // Also check existing seat codes in the available seats for this zone to avoid duplicates
+    const allExistingCodes = new Set(seats.map((s) => s.seatCode))
+    const nextStart = Math.max(maxExisting, ...Array.from(allExistingCodes)
+      .filter((c) => c.startsWith(`${selectedGaZone}-`))
+      .map((c) => parseInt(c.split('-').pop() || '0', 10) || 0)) + 1
+
+    const newCodes: string[] = []
+    for (let i = 0; i < qty; i++) {
+      newCodes.push(`${selectedGaZone}-${nextStart + i}`)
+    }
+
+    setSelectedSeats((prev) => [...prev, ...newCodes])
+    setGaQuantity(1)
+  }
+
+  function removeGaTicketsForZone(zoneName: string) {
+    setSelectedSeats((prev) => prev.filter((s) => !s.startsWith(`${zoneName}-`)))
   }
 
   function getSeatColorClass(seat: SeatData): string {
@@ -572,8 +629,163 @@ export default function OTSTicketPage() {
                   )}
                 </div>
               ) : (
-                /* ─── GA (no seat map) ─── */
-                <p className="text-sm text-muted-foreground py-4 text-center">Event ini tidak memiliki seat map. Kursi akan di-generate otomatis.</p>
+                /* ─── GA (General Admission) Zone Selector ─── */
+                <div className="space-y-4">
+                  {/* Zone info cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {zoneGroupKeys.map((zone) => {
+                      const group = zoneGroups[zone]
+                      const selectedInZone = selectedSeats.filter((s) => s.startsWith(`${zone}-`)).length
+                      return (
+                        <div
+                          key={zone}
+                          className={cn(
+                            'rounded-xl border-2 p-4 transition-all',
+                            selectedGaZone === zone
+                              ? 'border-gold bg-gold/5'
+                              : 'border-border/50 bg-white hover:border-gold/30',
+                          )}
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                                <p className="font-medium text-sm text-charcoal">{zone}</p>
+                              </div>
+                              <p className="text-xs text-muted-foreground pl-[18px]">
+                                Tersedia: <span className="font-semibold text-emerald-700">{group.seats.length}</span>
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {group.priceCategory && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px]"
+                                  style={{ borderColor: group.priceCategory.colorCode, borderWidth: 1 }}
+                                >
+                                  {group.priceCategory.name}
+                                </Badge>
+                              )}
+                              {selectedInZone > 0 && (
+                                <Badge className="bg-gold text-white text-[10px]">+{selectedInZone}</Badge>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {zoneGroupKeys.length === 0 && (
+                    <p className="text-sm text-muted-foreground py-4 text-center">Tidak ada kursi tersedia untuk event ini.</p>
+                  )}
+
+                  {/* Zone selector + quantity picker */}
+                  {zoneGroupKeys.length > 0 && (
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 p-4 bg-muted/20 rounded-xl">
+                      <div className="flex-1 space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Pilih Zona</Label>
+                        <Select value={selectedGaZone} onValueChange={(v) => { setSelectedGaZone(v); setGaQuantity(1) }}>
+                          <SelectTrigger className="bg-white">
+                            <SelectValue placeholder="Pilih zona..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {zoneGroupKeys.map((zone) => (
+                              <SelectItem key={zone} value={zone}>
+                                <div className="flex items-center gap-2">
+                                  <span>{zone}</span>
+                                  <span className="text-muted-foreground text-xs">({zoneGroups[zone].seats.length} tersedia)</span>
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="w-full sm:w-32 space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">Jumlah</Label>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9"
+                            disabled={!selectedGaZone || gaQuantity <= 1}
+                            onClick={() => setGaQuantity((q) => Math.max(1, q - 1))}
+                          >
+                            −
+                          </Button>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={selectedGaZoneInfo ? selectedGaZoneInfo.seats.length : 99}
+                            value={gaQuantity}
+                            onChange={(e) => setGaQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                            className="h-9 text-center bg-white"
+                            disabled={!selectedGaZone}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9"
+                            disabled={!selectedGaZone || !selectedGaZoneInfo || gaQuantity >= selectedGaZoneInfo.seats.length}
+                            onClick={() => setGaQuantity((q) => Math.min(selectedGaZoneInfo!.seats.length, q + 1))}
+                          >
+                            +
+                          </Button>
+                        </div>
+                      </div>
+
+                      <Button
+                        onClick={addGaTickets}
+                        disabled={!selectedGaZone || !selectedGaZoneInfo || gaQuantity < 1}
+                        className="bg-gold hover:bg-gold-dark text-white h-9 whitespace-nowrap"
+                      >
+                        <Ticket className="w-4 h-4 mr-1.5" />
+                        Tambah ({gaQuantity})
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Selected GA tickets as badges */}
+                  {selectedSeats.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">Tiket dipilih:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {selectedSeats.map((code) => {
+                          const zone = code.includes('-') ? code.split('-').slice(0, -1).join('-') : code
+                          return (
+                            <Badge
+                              key={code}
+                              className="bg-gold text-white text-xs cursor-pointer hover:bg-gold-dark transition-colors"
+                              onClick={() => removeSeat(code)}
+                            >
+                              <MapPin className="w-3 h-3 mr-1" />
+                              {code} <X className="w-3 h-3 ml-1" />
+                            </Badge>
+                          )
+                        })}
+                      </div>
+                      <div className="flex gap-2">
+                        {zoneGroupKeys
+                          .filter((z) => selectedSeats.some((s) => s.startsWith(`${z}-`)))
+                          .map((z) => (
+                            <Button
+                              key={z}
+                              variant="ghost"
+                              size="sm"
+                              className="text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
+                              onClick={() => removeGaTicketsForZone(z)}
+                            >
+                              Hapus semua zona {z}
+                            </Button>
+                          ))
+                        }
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               <Separator />
@@ -590,7 +802,9 @@ export default function OTSTicketPage() {
                     <div className="flex flex-wrap gap-1 mt-0.5">
                       {selectedSeats.length > 0
                         ? selectedSeats.map((c) => <Badge key={c} className="bg-gold text-white text-[10px]">{c}</Badge>)
-                        : <span className="text-muted-foreground italic">Auto-generate (GA)</span>
+                        : isNumberedSeatMap
+                          ? <span className="text-muted-foreground italic">Belum dipilih</span>
+                          : <span className="text-muted-foreground italic">Pilih zona & jumlah di atas</span>
                       }
                     </div>
                   </div>
@@ -601,7 +815,7 @@ export default function OTSTicketPage() {
                 <Button variant="outline" onClick={() => goToStep(1)}>Kembali</Button>
                 <Button
                   onClick={handleSubmit}
-                  disabled={isSubmitting || (isNumberedSeatMap && selectedSeats.length === 0)}
+                  disabled={isSubmitting || selectedSeats.length === 0}
                   className="bg-charcoal hover:bg-charcoal/90 text-gold min-w-[180px]"
                 >
                   {isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengirim...</> : <><Send className="w-4 h-4 mr-2" />Kirim Tiket</>}

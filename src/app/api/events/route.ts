@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
           posterUrl: event.posterUrl,
           synopsis: event.synopsis,
           isPublished: event.isPublished,
+          seatType: event.seatType,
           createdAt: event.createdAt,
           updatedAt: event.updatedAt,
           priceCategories: eventPriceCats,

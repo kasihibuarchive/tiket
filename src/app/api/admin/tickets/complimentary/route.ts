@@ -106,10 +106,17 @@ export async function POST(request: NextRequest) {
     } catch {}
 
     // Determine if this is a numbered or GA event
-    const isNumbered = event.seatMapId
-      ? await db.seatMap.findUnique({ where: { id: event.seatMapId } })
-          .then((sm) => sm?.seatType === 'NUMBERED')
-      : false
+    // Check event.seatType FIRST (direct field), then fall back to seatMap.seatType
+    const eventSeatType = event.seatType
+    let isNumbered = false
+    if (eventSeatType === 'NUMBERED') {
+      isNumbered = true
+    } else if (eventSeatType === 'GENERAL_ADMISSION' || eventSeatType === 'PIANO_ROLL') {
+      isNumbered = false
+    } else if (event.seatMapId) {
+      const seatMap = await db.seatMap.findUnique({ where: { id: event.seatMapId }, select: { seatType: true } })
+      isNumbered = seatMap?.seatType === 'NUMBERED'
+    }
 
     if (isNumbered) {
       // ─── NUMBERED: Seats must already exist in DB ───────────────────
