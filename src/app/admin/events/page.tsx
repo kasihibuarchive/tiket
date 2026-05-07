@@ -91,6 +91,7 @@ export default function AdminEventsPage() {
   const router = useRouter()
   const [events, setEvents] = useState<EventData[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState<EventFormData>(emptyForm)
@@ -119,14 +120,21 @@ export default function AdminEventsPage() {
   }, [])
 
   async function fetchEvents() {
+    setFetchError(null)
     try {
       const res = await fetch('/api/admin/events')
       if (res.ok) {
         const data = await res.json()
         setEvents(data.events || [])
+      } else {
+        const data = await res.json().catch(() => ({ error: 'Unknown error' }))
+        setFetchError(data.error || `Error ${res.status}`)
+        setEvents([])
       }
     } catch (err) {
       console.error('Failed to fetch events:', err)
+      setFetchError('Gagal terhubung ke server. Coba refresh halaman.')
+      setEvents([])
     } finally {
       setIsLoading(false)
     }
@@ -428,6 +436,13 @@ export default function AdminEventsPage() {
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="w-6 h-6 text-gold animate-spin" />
+            </div>
+          ) : fetchError ? (
+            <div className="text-center py-12">
+              <p className="text-destructive text-sm font-medium">{fetchError}</p>
+              <Button onClick={fetchEvents} variant="outline" size="sm" className="mt-4">
+                Coba Lagi
+              </Button>
             </div>
           ) : events.length === 0 ? (
             <div className="text-center py-12">

@@ -1,54 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 
 export async function GET() {
   try {
-    // Separate queries — NO include
-    const events = await db.event.findMany({
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true, title: true, category: true, showDate: true,
-        location: true, posterUrl: true, isPublished: true,
-        adminFee: true, seatMapId: true, seatType: true,
-        createdAt: true, updatedAt: true,
-      },
-    })
-
-    const eventIds = events.map((e) => e.id)
-    const allPriceCategories = await db.priceCategory.findMany({ where: { eventId: { in: eventIds } } })
-    const allSeats = await db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } })
-    const allShowDates = await db.eventShowDate.findMany({
-      where: { eventId: { in: eventIds } },
-      orderBy: { date: 'asc' },
-    })
-
-    // Fetch linked seat maps for all events that have one
-    const seatMapIds = events.map((e) => e.seatMapId).filter((id): id is string => !!id)
-    const seatMaps = seatMapIds.length > 0
-      ? await db.seatMap.findMany({ where: { id: { in: seatMapIds } }, select: { id: true, name: true, seatType: true } })
-      : []
-    const seatMapMap = new Map(seatMaps.map((sm) => [sm.id, sm]))
-
-    const eventsWithSummary = events.map((event) => {
-      const eventSeats = allSeats.filter((s) => s.eventId === event.id)
-      const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
-      const eventShowDates = allShowDates.filter((sd) => sd.eventId === event.id)
-      const totalSeats = eventSeats.length
-      const availableSeats = eventSeats.filter((s) => s.status === 'AVAILABLE').length
-      const soldSeats = eventSeats.filter((s) => s.status === 'SOLD').length
-      const linkedSeatMap = event.seatMapId ? seatMapMap.get(event.seatMapId) : null
-
-      return {
-        ...event,
-        priceCategories: eventPriceCats,
-        showDates: eventShowDates,
-        seatSummary: {
-          total: totalSeats,
-          available: availableSeats,
-          sold: soldSeats,
+    const eventsWithSummary = await withDbRetry(async () => {
+      // Separate queries — NO include
+      const events = await db.event.findMany({
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true, title: true, category: true, showDate: true,
+          location: true, posterUrl: true, isPublished: true,
+          adminFee: true, seatMapId: true, seatType: true,
+          createdAt: true, updatedAt: true,
         },
-        seatMapInfo: linkedSeatMap ? { name: linkedSeatMap.name, seatType: linkedSeatMap.seatType } : null,
-      }
+      })
+
+      if (events.length === 0) return []
+
+      const eventIds = events.map((e) => e.id)
+
+      // Run all queries in parallel for performance
+      const [allPriceCategories, allSeats, allShowDates, seatMaps] = await Promise.all([
+        db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
+        db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } }),
+        db.eventShowDate.findMany({
+          where: { eventId: { in: eventIds } },
+          orderBy: { date: 'asc' },
+        }),
+        (() => {
+          const seatMapIds = events.map((e) => e.seatMapId).filter((id): id is string => !!id)
+          return seatMapIds.length > 0
+            ? db.seatMap.findMany({ where: { id: { in: seatMapIds } }, select: { id: true, name: true, seatType: true } })
+            : Promise.resolve([])
+        })(),
+      ])
+
+      const seatMapMap = new Map(seatMaps.map((sm) => [sm.id, sm]))
+
+      return events.map((event) => {
+        const eventSeats = allSeats.filter((s) => s.eventId === event.id)
+        const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
+        const eventShowDates = allShowDates.filter((sd) => sd.eventId === event.id)
+        const totalSeats = eventSeats.length
+        const availableSeats = eventSeats.filter((s) => s.status === 'AVAILABLE').length
+        const soldSeats = eventSeats.filter((s) => s.status === 'SOLD').length
+        const linkedSeatMap = event.seatMapId ? seatMapMap.get(event.seatMapId) : null
+
+        return {
+          ...event,
+          priceCategories: eventPriceCats,
+          showDates: eventShowDates,
+          seatSummary: {
+            total: totalSeats,
+            available: availableSeats,
+            sold: soldSeats,
+          },
+          seatMapInfo: linkedSeatMap ? { name: linkedSeatMap.name, seatType: linkedSeatMap.seatType } : null,
+        }
+      })
     })
 
     return NextResponse.json({ events: eventsWithSummary })

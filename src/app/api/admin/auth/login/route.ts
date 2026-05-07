@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyPassword, createSessionToken, validateSessionToken, hashPassword } from '@/lib/auth'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 
 // Auto-seed: ensure default admin accounts exist
 async function ensureAdminExists() {
@@ -50,12 +50,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Ensure admin account exists before checking credentials
-    await ensureAdminExists()
+    await withDbRetry(() => ensureAdminExists())
 
-    const admin = await db.admin.findFirst({
-      where: { username },
-      select: { id: true, username: true, password: true, name: true, role: true, isActive: true },
-    })
+    const admin = await withDbRetry(() =>
+      db.admin.findFirst({
+        where: { username },
+        select: { id: true, username: true, password: true, name: true, role: true, isActive: true },
+      })
+    )
 
     if (!admin) {
       return NextResponse.json(
@@ -149,11 +151,13 @@ export async function GET(request: NextRequest) {
     // Token invalid (possibly APP_SECRET changed after server restart)
     // Try to auto-recreate session if the admin account still exists
     try {
-      await ensureAdminExists()
-      const admin = await db.admin.findFirst({
-        where: { username: result.username },
-        select: { id: true, username: true, name: true, role: true },
-      })
+      await withDbRetry(() => ensureAdminExists())
+      const admin = await withDbRetry(() =>
+        db.admin.findFirst({
+          where: { username: result.username },
+          select: { id: true, username: true, name: true, role: true },
+        })
+      )
       if (admin) {
         // Re-issue a valid session token
         const newToken = createSessionToken(admin.username)
@@ -190,10 +194,12 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const admin = await db.admin.findFirst({
-      where: { username: result.username },
-      select: { id: true, username: true, name: true, role: true },
-    })
+    const admin = await withDbRetry(() =>
+      db.admin.findFirst({
+        where: { username: result.username },
+        select: { id: true, username: true, name: true, role: true },
+      })
+    )
 
     if (!admin) {
       return NextResponse.json({ authenticated: false }, { status: 401 })
