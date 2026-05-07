@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 
 export async function GET(
   request: NextRequest,
@@ -9,22 +9,26 @@ export async function GET(
     const { id } = await params
 
     // Separate queries — NO include (crashes Next.js 16)
-    const event = await db.event.findUnique({ where: { id } })
+    const [event, priceCategories, seats, transactions, showDates] = await withDbRetry(() =>
+      Promise.all([
+        db.event.findUnique({ where: { id } }),
+        db.priceCategory.findMany({ where: { eventId: id } }),
+        db.seat.findMany({ where: { eventId: id } }),
+        db.transaction.findMany({
+          where: { eventId: id },
+          orderBy: { createdAt: 'desc' },
+          take: 50,
+        }),
+        db.eventShowDate.findMany({
+          where: { eventId: id },
+          orderBy: { date: 'asc' },
+        }),
+      ])
+    )
+
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
-
-    const priceCategories = await db.priceCategory.findMany({ where: { eventId: id } })
-    const seats = await db.seat.findMany({ where: { eventId: id } })
-    const transactions = await db.transaction.findMany({
-      where: { eventId: id },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    })
-    const showDates = await db.eventShowDate.findMany({
-      where: { eventId: id },
-      orderBy: { date: 'asc' },
-    })
 
     // Attach priceCategory to each seat
     const seatsWithCat = seats.map((seat) => {

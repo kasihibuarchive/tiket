@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
-  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap
+  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
@@ -71,7 +71,7 @@ interface GaZoneDef {
   priceCategoryName: string
 }
 
-// ─── GA Zone Management Panel (shown when no seats exist for GA events) ──
+// ─── GA Zone Management Panel (always shown for GA events) ──
 function GaZoneManagementPanel({
   eventId,
   eventInfo,
@@ -91,6 +91,8 @@ function GaZoneManagementPanel({
   setNewZone,
   priceCategories,
   fileInputRef,
+  existingZoneSummary,
+  existingSeatsCount,
 }: {
   eventId: string
   eventInfo: EventInfo | null
@@ -110,7 +112,11 @@ function GaZoneManagementPanel({
   setNewZone: React.Dispatch<React.SetStateAction<GaZoneDef>>
   priceCategories: PriceCategoryData[]
   fileInputRef: React.RefObject<HTMLInputElement | null>
+  existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number }>
+  existingSeatsCount?: number
 }) {
+  const hasExistingSeats = (existingSeatsCount ?? 0) > 0
+
   // ─── Image upload handler ───────────────────────────────────────────
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -219,9 +225,15 @@ function GaZoneManagementPanel({
       return
     }
     const totalCapacity = gaZonesDef.reduce((sum, z) => sum + z.capacity, 0)
-    const confirmed = confirm(
-      `Generate ${totalCapacity} kursi dari ${gaZonesDef.length} zona?\n\nZona:\n${gaZonesDef.map(z => `• ${z.name}: ${z.capacity} kursi`).join('\n')}`
-    )
+
+    let confirmMsg = `Generate ${totalCapacity} kursi dari ${gaZonesDef.length} zona?\n\nZona:\n${gaZonesDef.map(z => `• ${z.name}: ${z.capacity} kursi`).join('\n')}`
+
+    // Warn if seats already exist
+    if (hasExistingSeats) {
+      confirmMsg = `⚠️ PERHATIAN!\nEvent ini sudah punya ${existingSeatsCount} kursi.\n\nKursi lama akan DIHAPUS dan diganti dengan yang baru.\n\n${confirmMsg}\n\nYAKIN ingin melanjutkan?`
+    }
+
+    const confirmed = confirm(confirmMsg)
     if (!confirmed) return
 
     // Save zones first, then generate
@@ -493,20 +505,71 @@ function GaZoneManagementPanel({
         </CardContent>
       </Card>
 
-      {/* 3. Generate Seats */}
-      <Card className="border-gold/20 bg-gold/5">
+      {/* 3. Existing Seats Summary (shown when seats already generated) */}
+      {hasExistingSeats && existingZoneSummary && (
+        <Card className="border-gold/20">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Users className="w-4 h-4 text-gold" />
+              <h2 className="font-serif text-lg font-semibold text-charcoal">Status Kursi Saat Ini</h2>
+              <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700">
+                {existingSeatsCount?.toLocaleString('id-ID')} kursi
+              </Badge>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {Object.entries(existingZoneSummary).map(([zoneName, stats]) => (
+                <div key={zoneName} className="rounded-lg border border-border/50 p-3 bg-white">
+                  <p className="text-sm font-semibold text-charcoal">{zoneName}</p>
+                  <div className="grid grid-cols-3 gap-2 mt-2">
+                    <div>
+                      <p className="text-lg font-bold text-emerald-600">{stats.available}</p>
+                      <p className="text-[10px] text-muted-foreground">Tersedia</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-red-500">{stats.sold}</p>
+                      <p className="text-[10px] text-muted-foreground">Terjual</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-amber-500">{stats.locked}</p>
+                      <p className="text-[10px] text-muted-foreground">Dikunci</p>
+                    </div>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all"
+                      style={{ width: `${stats.total > 0 ? (stats.available / stats.total) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    {stats.total > 0 ? Math.round((stats.available / stats.total) * 100) : 0}% tersisa
+                  </p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 4. Generate / Regenerate Seats */}
+      <Card className={cn("border-gold/20", hasExistingSeats ? "bg-amber-50/50 border-amber-200" : "bg-gold/5")}>
         <CardContent className="p-6">
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-2 mb-1">
                 <Zap className="w-4 h-4 text-gold" />
-                <h2 className="font-serif text-lg font-semibold text-charcoal">Generate Kursi</h2>
+                <h2 className="font-serif text-lg font-semibold text-charcoal">
+                  {hasExistingSeats ? 'Regenerate Kursi' : 'Generate Kursi'}
+                </h2>
               </div>
               <p className="text-sm text-muted-foreground">
                 {gaZonesDef.length > 0 ? (
                   <>
                     <span className="font-medium text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi dari{' '}
                     <span className="font-medium text-charcoal">{gaZonesDef.length}</span> zona akan di-generate.
+                    {hasExistingSeats && (
+                      <span className="text-amber-600 font-medium"> (kursi lama akan dihapus)</span>
+                    )}
                   </>
                 ) : (
                   'Tambahkan minimal 1 zona untuk generate kursi.'
@@ -517,12 +580,22 @@ function GaZoneManagementPanel({
               size="lg"
               onClick={handleGenerateSeats}
               disabled={isGeneratingFromZones || gaZonesDef.length === 0}
-              className="bg-gold hover:bg-gold/90 text-charcoal font-semibold"
+              className={cn(
+                "font-semibold",
+                hasExistingSeats
+                  ? "bg-amber-500 hover:bg-amber-600 text-white"
+                  : "bg-gold hover:bg-gold/90 text-charcoal"
+              )}
             >
               {isGeneratingFromZones ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Generating...
+                </>
+              ) : hasExistingSeats ? (
+                <>
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Regenerate
                 </>
               ) : (
                 <>
@@ -1162,31 +1235,47 @@ export default function SeatEditorPage() {
   // PIANO_ROLL must NOT be treated as GA — it has its own panel flow.
   const isEventGA = eventInfo?.seatType === 'GENERAL_ADMISSION' || !!eventInfo?.gaZoneConfig
 
-  if (allSeats.length === 0) {
-    // ─── GA-specific management panel when no seats exist ─────────────
-    if (isEventGA) {
-      return <GaZoneManagementPanel
-        eventId={eventId}
-        eventInfo={eventInfo}
-        gaZonesDef={gaZonesDef}
-        setGaZonesDef={setGaZonesDef}
-        layoutImage={layoutImage}
-        layoutImagePreview={layoutImagePreview}
-        setLayoutImage={setLayoutImage}
-        setLayoutImagePreview={setLayoutImagePreview}
-        isUploading={isUploading}
-        setIsUploading={setIsUploading}
-        isSavingZones={isSavingZones}
-        setIsSavingZones={setIsSavingZones}
-        isGeneratingFromZones={isGeneratingFromZones}
-        setIsGeneratingFromZones={setIsGeneratingFromZones}
-        newZone={newZone}
-        setNewZone={setNewZone}
-        priceCategories={priceCategories}
-        fileInputRef={fileInputRef}
-      />
+  // ─── For GA events: ALWAYS show the GA Zone Management Panel ────────
+  // regardless of whether seats already exist or not.
+  if (isEventGA) {
+    // Build zone summary from existing seats (grouped by zoneName)
+    const zoneSummary = new Map<string, { total: number; available: number; sold: number; locked: number }>()
+    for (const s of allSeats) {
+      const zone = s.zoneName || 'Tanpa Zona'
+      if (!zoneSummary.has(zone)) zoneSummary.set(zone, { total: 0, available: 0, sold: 0, locked: 0 })
+      const z = zoneSummary.get(zone)!
+      z.total++
+      if (s.status === 'AVAILABLE') z.available++
+      else if (s.status === 'SOLD') z.sold++
+      else if (s.status === 'LOCKED_TEMPORARY') z.locked++
     }
 
+    return <GaZoneManagementPanel
+      eventId={eventId}
+      eventInfo={eventInfo}
+      gaZonesDef={gaZonesDef}
+      setGaZonesDef={setGaZonesDef}
+      layoutImage={layoutImage}
+      layoutImagePreview={layoutImagePreview}
+      setLayoutImage={setLayoutImage}
+      setLayoutImagePreview={setLayoutImagePreview}
+      isUploading={isUploading}
+      setIsUploading={setIsUploading}
+      isSavingZones={isSavingZones}
+      setIsSavingZones={setIsSavingZones}
+      isGeneratingFromZones={isGeneratingFromZones}
+      setIsGeneratingFromZones={setIsGeneratingFromZones}
+      newZone={newZone}
+      setNewZone={setNewZone}
+      priceCategories={priceCategories}
+      fileInputRef={fileInputRef}
+      existingZoneSummary={Object.fromEntries(zoneSummary)}
+      existingSeatsCount={allSeats.length}
+    />
+  }
+
+  // ─── Non-GA events: show "no seats" message if empty ───────────────
+  if (allSeats.length === 0) {
     return (
       <div className="text-center py-20">
         <p className="text-muted-foreground">Belum ada kursi untuk event ini.</p>
