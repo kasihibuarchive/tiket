@@ -1,3 +1,5 @@
+'use client'
+
 // Shared seat layout parsing utilities
 // Used by both the public seat map (seat-map.tsx) and the usher seat map view
 
