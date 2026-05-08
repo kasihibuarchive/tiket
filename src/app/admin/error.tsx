@@ -30,6 +30,11 @@ export default function AdminError({
             <p className="text-xs font-mono text-red-800 break-all">
               {error.message}
             </p>
+            {error.stack && (
+              <pre className="mt-3 text-[10px] font-mono text-red-500 whitespace-pre-wrap break-all max-h-48 overflow-y-auto leading-relaxed">
+                {error.stack}
+              </pre>
+            )}
             {error.digest && (
               <p className="text-[10px] text-red-400 mt-2">
                 Error ID: {error.digest}
