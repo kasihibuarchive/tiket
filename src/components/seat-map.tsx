@@ -628,7 +628,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     setSelectedGAQty(clampedQty)
   }, [isGA, selectedGAZoneId, selectedSeatCodes.size, seats, gaZones])
 
-  const handleGAQtyConfirm = useCallback(async () => {
+  // targetQty: the desired quantity (passed directly to avoid stale state issues)
+  const handleGAQtyConfirm = useCallback(async (targetQtyOverride?: number) => {
     if (!isGA || !selectedGAZoneId || !selectedGAZoneData) return
     const zone = gaZones.find((z) => z.id === selectedGAZoneId)
     if (!zone) return
@@ -636,10 +637,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const currentLocked = new Set(
       seats.filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === zone.name).map((s) => s.seatCode)
     )
-    const targetQty = selectedGAQty
+    const targetQty = targetQtyOverride ?? selectedGAQty
     const needMore = targetQty - currentLocked.size
 
     if (needMore > 0) {
+      // ── ADD seats: lock additional available seats ──
       const availableSeats = seats.filter(
         (s) => s.zoneName === zone.name && s.status === 'AVAILABLE' && !currentLocked.has(s.seatCode)
       )
@@ -680,10 +682,34 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       })
 
       if (currentLocked.size === 0) setLockCountdown(LOCK_DURATION / 1000)
-    }
 
-    notifyParentWithCodes(new Set(selectedSeatCodes))
-  }, [isGA, selectedGAZoneId, selectedSeatCodes, selectedGAQty, seats, gaZones, eventId, showDateId, lockSeats, notifyParentWithCodes, selectedGAZoneData])
+      notifyParentWithCodes(newCodes)
+    } else if (needMore < 0) {
+      // ── REMOVE seats: unlock excess seats ──
+      const lockedCodes = Array.from(currentLocked)
+      const toUnlock = lockedCodes.slice(0, Math.abs(needMore))
+
+      const newCodes = new Set(selectedSeatCodes)
+      for (const c of toUnlock) newCodes.delete(c)
+      setSelectedSeatCodes(newCodes)
+
+      unlockSeats(toUnlock, sessionId.current)
+      fetch('/api/seats/unlock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatCodes: toUnlock, sessionId: sessionId.current, showDateId: showDateId || undefined }),
+      }).catch(() => {})
+
+      if (newCodes.size === 0) {
+        setLockCountdown(null)
+        setSelectedGAZoneId(null)
+        setSelectedGAQty(1)
+      }
+
+      notifyParentWithCodes(newCodes)
+    }
+    // If needMore === 0, do nothing
+  }, [isGA, selectedGAZoneId, selectedSeatCodes, selectedGAQty, seats, gaZones, eventId, showDateId, lockSeats, unlockSeats, notifyParentWithCodes, selectedGAZoneData])
 
   const handleGAClear = useCallback(async () => {
     if (!isGA || !selectedGAZoneId) return
@@ -731,6 +757,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   }
 
   // Integrate qty confirmation directly into the qty change handler
+  // Passes the target quantity directly to avoid stale React state issues
   const handleGAQtyChangeWithConfirm = useCallback((newQty: number) => {
     if (!isGA || !selectedGAZoneId) return
     const currentQty = selectedSeatCodes.size
@@ -739,8 +766,9 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const zoneSeats = seats.filter((s) => s.zoneName === zone.name && s.status === 'AVAILABLE')
     const clampedQty = Math.max(1, Math.min(newQty, zoneSeats.length + currentQty))
     setSelectedGAQty(clampedQty)
-    setTimeout(() => handleGAQtyConfirm(), 0)
-  }, [isGA, selectedGAZoneId, selectedSeatCodes.size, seats, gaZones, selectedGAQty, handleGAQtyConfirm])
+    // Pass clampedQty directly to avoid reading stale selectedGAQty
+    handleGAQtyConfirm(clampedQty)
+  }, [isGA, selectedGAZoneId, selectedSeatCodes.size, seats, gaZones, handleGAQtyConfirm])
 
   // ═══════════════════════════════════════════════════════════
   // RENDER: General Admission (GA) Mode — Zone Cards with Capacity

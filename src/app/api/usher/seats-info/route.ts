@@ -25,11 +25,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    // Get all paid transactions for this event
+    // Get all paid + complimentary transactions for this event
     const transactions = await db.transaction.findMany({
       where: {
         eventId,
-        paymentStatus: 'PAID',
+        paymentStatus: { in: ['PAID', 'COMPLIMENTARY'] },
       },
       select: {
         transactionId: true,
@@ -61,11 +61,17 @@ export async function GET(request: NextRequest) {
       let seatCodes: string[] = []
 
       // Parse seatCodes JSON string
+      if (!txn.seatCodes) continue
       try {
-        seatCodes = JSON.parse(txn.seatCodes)
+        const parsed = JSON.parse(txn.seatCodes)
+        if (Array.isArray(parsed)) {
+          seatCodes = parsed
+        } else {
+          seatCodes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
+        }
       } catch {
         // Fallback: try comma-separated
-        seatCodes = txn.seatCodes.split(',').map((s: string) => s.trim()).filter(Boolean)
+        seatCodes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
       }
 
       for (const code of seatCodes) {
