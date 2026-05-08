@@ -1,3 +1,42 @@
+'use client'
+
+import React, { useState, useEffect, useMemo, useCallback } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+
+import {
+  Check, X, Map, Ticket, User, Users, ArrowLeft,
+  ChevronDown, ChevronRight, Loader2, Crown, GraduationCap,
+  Minimize2, Maximize2, Hash, Mail, Phone, CreditCard, Clock, Send,
+} from 'lucide-react'
+
+import { cn } from '@/lib/utils'
+import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+import { StageRenderer } from '@/lib/stage-renderer'
+import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
+
+import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/components/ui/collapsible'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Progress } from '@/components/ui/progress'
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from '@/components/ui/sheet'
+
+// ─── Local Types ──────────────────────────────────────────────────
+
+interface SeatData {
+  id: string
+  seatCode: string
+  status: string
+  row: string
+  col: number
+  lockedUntil: string | null
+  zoneName: string | null
+  priceCategory: { id: string; name: string; price: number; colorCode: string } | null
+}
+
 interface PriceCategoryData {
   id: string
   name: string
