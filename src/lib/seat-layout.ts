@@ -1,7 +1,8 @@
-'use client'
-
 // Shared seat layout parsing utilities
 // Used by both the public seat map (seat-map.tsx) and the usher seat map view
+// NOTE: No 'use client' directive — this is a pure utility module with no React/JSX.
+// Adding 'use client' can cause webpack ESM/CJS interop issues with global
+// built-ins like Map/Set in production builds.
 
 export type LayoutObjectType = 'FOH' | 'ENTRANCE' | 'CUSTOM_SHAPE'
 

@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import {
-  Check, X, Map, Ticket, User, Users, ArrowLeft,
+  Check, X, Map as MapIcon, Ticket, User, Users, ArrowLeft,
   ChevronDown, ChevronRight, Loader2, Crown, GraduationCap,
   Minimize2, Maximize2, Hash, Mail, Phone, CreditCard, Clock, Send,
 } from 'lucide-react'
@@ -541,7 +541,7 @@ export default function UsherSeatMapPage() {
           <Card className="border-border/50">
             <CardContent className="p-4 sm:p-6">
               <div className="flex items-center gap-2 mb-3">
-                <Map className="w-4 h-4 text-gold" />
+                <MapIcon className="w-4 h-4 text-gold" />
                 <h3 className="text-sm font-semibold text-charcoal">Layout Venue</h3>
               </div>
               <div className="w-full rounded-lg overflow-hidden border border-border/30">
