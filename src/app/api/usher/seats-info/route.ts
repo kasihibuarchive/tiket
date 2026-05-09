@@ -3,10 +3,12 @@ import { db, withDbRetry } from '@/lib/db'
 
 // GET /api/usher/seats-info?eventId=xxx
 // Returns a map of seatCode -> transaction info for all SOLD/PAID seats
+// Also supports: GET /api/usher/seats-info?eventId=xxx&seatCode=A-1 (single seat lookup)
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const eventId = searchParams.get('eventId')
+    const targetSeatCode = searchParams.get('seatCode') // optional: single seat lookup
 
     if (!eventId) {
       return NextResponse.json(
@@ -88,6 +90,16 @@ export async function GET(request: NextRequest) {
           totalAmount: txn.totalAmount,
         }
       }
+    }
+
+    // If a specific seatCode was requested, return just that entry (or null)
+    if (targetSeatCode) {
+      return NextResponse.json({
+        event: { id: event.id, title: event.title },
+        seats: seatInfoMap,
+        targetSeat: seatInfoMap[targetSeatCode] || null,
+        totalSold: Object.keys(seatInfoMap).length,
+      })
     }
 
     return NextResponse.json({

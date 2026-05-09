@@ -297,9 +297,14 @@ export default function UsherSeatMapPage() {
         }
         if (infoRes.ok) {
           const infoData = await infoRes.json()
-          if (!cancelled) setSeatOwnerMap(infoData.seats || {})
+          if (!cancelled) {
+            const ownerCount = Object.keys(infoData.seats || {}).length
+            console.log(`[UsherSeats] seats-info loaded: ${ownerCount} seat owners`)
+            setSeatOwnerMap(infoData.seats || {})
+          }
         } else {
-          console.warn('[UsherSeats] seats-info API returned', infoRes.status)
+          const errText = await infoRes.text().catch(() => '')
+          console.warn('[UsherSeats] seats-info API returned', infoRes.status, errText)
         }
       } catch (err) {
         console.warn('[UsherSeats] fetchSeats error:', err)
@@ -328,7 +333,12 @@ export default function UsherSeatMapPage() {
         if (infoRes.ok) {
           const infoData = await infoRes.json()
           if (!cancelled) {
-            setSeatOwnerMap(infoData.seats || {})
+            const ownerCount = Object.keys(infoData.seats || {}).length
+            if (ownerCount === 0 && Object.keys(seatOwnerMap).length > 0) {
+              // Don't overwrite with empty data if we had data before
+            } else {
+              setSeatOwnerMap(infoData.seats || {})
+            }
             if (selectedSeatCode && infoData.seats?.[selectedSeatCode]) {
               setSelectedSeat(infoData.seats[selectedSeatCode])
             }
@@ -342,15 +352,49 @@ export default function UsherSeatMapPage() {
     return () => { cancelled = true; clearInterval(interval) }
   }, [eventId, event, activeShowDate?.id, selectedSeatCode])
 
+  // ── Fetch individual seat owner info (fallback when seatOwnerMap is empty) ──
+  const fetchSeatOwner = useCallback(async (seatCode: string): Promise<SeatOwnerInfo | null> => {
+    try {
+      // Try targeted lookup first
+      const res = await fetch(`/api/usher/seats-info?eventId=${eventId}&seatCode=${encodeURIComponent(seatCode)}`)
+      if (res.ok) {
+        const data = await res.json()
+        const ownerInfo = data.targetSeat || data.seats?.[seatCode] || null
+        if (ownerInfo) {
+          // Also update the full map so subsequent clicks are instant
+          if (data.seats) {
+            setSeatOwnerMap((prev) => ({ ...prev, ...data.seats }))
+          } else {
+            setSeatOwnerMap((prev) => ({ ...prev, [seatCode]: ownerInfo }))
+          }
+        }
+        console.log(`[UsherSeats] fetchSeatOwner for ${seatCode}:`, ownerInfo ? 'found' : 'not found')
+        return ownerInfo
+      } else {
+        console.warn('[UsherSeats] fetchSeatOwner API returned', res.status)
+      }
+    } catch (err) {
+      console.warn('[UsherSeats] fetchSeatOwner error:', err)
+    }
+    return null
+  }, [eventId])
+
   // Handle seat click (read-only — sold and invitation seats show info)
-  const handleSeatClick = useCallback((seat: SeatData) => {
+  const handleSeatClick = useCallback(async (seat: SeatData) => {
     if (seat.status === 'SOLD' || seat.status === 'INVITATION') {
+      // Always open the sheet to give feedback
+      setSelectedSeatCode(seat.seatCode)
+      setResendResult(null)
+      setInfoSheetOpen(true)
+
       const ownerInfo = seatOwnerMap[seat.seatCode]
       if (ownerInfo) {
-        setSelectedSeatCode(seat.seatCode)
         setSelectedSeat(ownerInfo)
-        setResendResult(null)
-        setInfoSheetOpen(true)
+      } else {
+        // Owner info not in cache — try to fetch it
+        setSelectedSeat(null) // Show loading state
+        const fetched = await fetchSeatOwner(seat.seatCode)
+        setSelectedSeat(fetched) // null if still not found → shows "not available" message
       }
     } else {
       setSelectedSeatCode(null)
@@ -358,18 +402,24 @@ export default function UsherSeatMapPage() {
       setResendResult(null)
       setInfoSheetOpen(false)
     }
-  }, [seatOwnerMap])
+  }, [seatOwnerMap, fetchSeatOwner])
 
   // Handle GA ticket holder click — open info sheet
-  const handleTicketHolderClick = useCallback((seatCode: string) => {
+  const handleTicketHolderClick = useCallback(async (seatCode: string) => {
+    // Always open the sheet to give feedback
+    setSelectedSeatCode(seatCode)
+    setResendResult(null)
+    setInfoSheetOpen(true)
+
     const ownerInfo = seatOwnerMap[seatCode]
     if (ownerInfo) {
-      setSelectedSeatCode(seatCode)
       setSelectedSeat(ownerInfo)
-      setResendResult(null)
-      setInfoSheetOpen(true)
+    } else {
+      setSelectedSeat(null)
+      const fetched = await fetchSeatOwner(seatCode)
+      setSelectedSeat(fetched)
     }
-  }, [seatOwnerMap])
+  }, [seatOwnerMap, fetchSeatOwner])
 
   // Resend email
   async function handleResendEmail() {
@@ -670,8 +720,7 @@ export default function UsherSeatMapPage() {
                         <ScrollArea className="max-h-96">
                           <div className="divide-y divide-border/20">
                             {ticketHolders.map(({ seat, owner }) => {
-                              if (!owner) return null
-                              const isCheckedIn = !!owner.checkInTime
+                              const isCheckedIn = !!(owner?.checkInTime)
                               const isSelected = selectedSeatCode === seat.seatCode
 
                               return (
@@ -690,18 +739,22 @@ export default function UsherSeatMapPage() {
                                         'w-6 h-6 rounded-full flex items-center justify-center shrink-0',
                                         isCheckedIn
                                           ? 'bg-success/10 text-success'
-                                          : 'bg-amber-50 text-amber-500'
+                                          : owner
+                                          ? 'bg-amber-50 text-amber-500'
+                                          : 'bg-gray-100 text-gray-400'
                                       )}>
                                         {isCheckedIn ? (
                                           <Check className="w-3.5 h-3.5" />
-                                        ) : (
+                                        ) : owner ? (
                                           <User className="w-3.5 h-3.5" />
+                                        ) : (
+                                          <Ticket className="w-3.5 h-3.5" />
                                         )}
                                       </div>
 
                                       <div className="min-w-0">
                                         <p className="text-sm font-medium text-charcoal truncate">
-                                          {owner.owner}
+                                          {owner?.owner || 'Data pembeli tidak tersedia'}
                                         </p>
                                         <p className="text-xs text-muted-foreground truncate mt-0.5">
                                           {seat.seatCode}
@@ -715,6 +768,7 @@ export default function UsherSeatMapPage() {
                                     </div>
 
                                     <div className="flex items-center gap-2 shrink-0">
+                                      {owner ? (
                                       <Badge
                                         variant="outline"
                                         className={cn(
@@ -726,11 +780,19 @@ export default function UsherSeatMapPage() {
                                       >
                                         {isCheckedIn ? '✓ Check-In' : 'Menunggu'}
                                       </Badge>
+                                      ) : (
+                                      <Badge
+                                        variant="outline"
+                                        className="text-[10px] px-1.5 py-0 border-gray-200 text-gray-400"
+                                      >
+                                        No data
+                                      </Badge>
+                                      )}
                                     </div>
                                   </div>
 
                                   {/* Expanded detail row */}
-                                  {isCheckedIn && owner.checkInTime && (
+                                  {isCheckedIn && owner?.checkInTime && (
                                     <p className="text-[10px] text-muted-foreground mt-1 ml-9">
                                       Check-in: {new Date(owner.checkInTime).toLocaleString('id-ID', {
                                         day: 'numeric', month: 'short', year: 'numeric',
@@ -1276,7 +1338,7 @@ export default function UsherSeatMapPage() {
             </SheetDescription>
           </SheetHeader>
 
-          {selectedSeat && (
+          {selectedSeat ? (
             <div className="space-y-4 px-4 pb-6">
               {/* Owner Info */}
               <div className="space-y-3">
@@ -1397,7 +1459,23 @@ export default function UsherSeatMapPage() {
                 )}
               </div>
             </div>
-          )}
+          ) : selectedSeatCode ? (
+            /* No owner info available — show loading or "not available" message */
+            <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+              </div>
+              <p className="text-sm font-medium text-charcoal mb-1">
+                Memuat data pembeli...
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Kursi {selectedSeatCode}
+              </p>
+              <p className="text-[10px] text-muted-foreground/60 mt-2">
+                Jika data tidak muncul, pastikan transaksi sudah berstatus PAID
+              </p>
+            </div>
+          ) : null}
         </SheetContent>
       </Sheet>
     </div>
