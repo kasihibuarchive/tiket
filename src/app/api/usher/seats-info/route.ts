@@ -30,14 +30,14 @@ export async function GET(request: NextRequest) {
     const isTargetedLookup = !!targetSeatCode
 
     // ── STEP 1: Query all transactions for this event ──
-    // Use NOT filter for null seatCodes to avoid Prisma syntax issues
+    // Don't filter by seatCodes null here — we'll skip nulls during parsing
+    // This avoids Prisma syntax issues with nullable string fields
     const whereClause: any = {
       eventId,
-      NOT: { seatCodes: null },
     }
 
     if (!isTargetedLookup) {
-      // Batch load: include all statuses
+      // Batch load: include all relevant statuses
       whereClause.paymentStatus = { in: ['PAID', 'PENDING', 'EXPIRED', 'FAILED', 'CANCELLED'] }
     }
     // For targeted lookup: no payment status filter — search ALL statuses
@@ -64,7 +64,6 @@ export async function GET(request: NextRequest) {
     console.log(`[seats-info] Found ${transactions.length} transactions for event ${eventId} (targeted: ${isTargetedLookup})`)
 
     // Build seatCode -> transaction info map
-    // If multiple transactions claim the same seat, prefer PAID > PENDING > others
     const statusPriority: Record<string, number> = {
       PAID: 0,
       PENDING: 1,
@@ -87,14 +86,13 @@ export async function GET(request: NextRequest) {
       lastEmailSentAt: string | null
     }> = {}
 
-    // Debug: collect raw seat codes found for troubleshooting
     const debugSeatCodes: string[] = []
 
     for (const txn of transactions) {
-      let seatCodes: string[] = []
-
-      // Parse seatCodes JSON string
+      // Skip transactions with no seatCodes
       if (!txn.seatCodes) continue
+
+      let seatCodes: string[] = []
       try {
         const parsed = JSON.parse(txn.seatCodes)
         if (Array.isArray(parsed)) {
@@ -105,7 +103,6 @@ export async function GET(request: NextRequest) {
           seatCodes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
         }
       } catch {
-        // Fallback: try comma-separated
         seatCodes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
       }
 
@@ -115,7 +112,6 @@ export async function GET(request: NextRequest) {
         const existingPriority = existing ? (statusPriority[existing.paymentStatus] ?? 99) : 99
         const currentPriority = statusPriority[txn.paymentStatus] ?? 99
 
-        // Only overwrite if current transaction has higher priority (lower number)
         if (!existing || currentPriority < existingPriority) {
           seatInfoMap[code] = {
             owner: txn.customerName,
@@ -134,110 +130,50 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── STEP 2: If targeted lookup and not found, try direct DB string search ──
+    // ── STEP 2: Targeted lookup ──
     let targetResult = targetSeatCode ? (seatInfoMap[targetSeatCode] || null) : null
-    let debugInfo: any = null
 
-    if (targetSeatCode) {
-      console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": ${targetResult ? 'found in map' : 'not found in map'}`)
+    if (targetSeatCode && !targetResult) {
+      // Not found in parsed map. Log what we have for debugging.
+      console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": not found in parsed map`)
+      console.log(`[seats-info] Parsed seat codes (${debugSeatCodes.length}): [${debugSeatCodes.slice(0, 30).join(', ')}]`)
 
-      if (debugSeatCodes.length > 0) {
-        console.log(`[seats-info] Seat codes in map sample: [${debugSeatCodes.slice(0, 20).join(', ')}]`)
-      }
+      // Fallback: try raw SQL to find transactions where seatCodes contains the code
+      // This catches ANY format difference
+      try {
+        // Use $queryRaw for maximum compatibility — bypasses Prisma filter syntax issues
+        const fallbackResults: any[] = await db.$queryRaw`
+          SELECT
+            "transactionId", "customerName", "customerEmail", "customerWa",
+            "seatCodes", "paymentStatus", "checkInTime", "paidAt",
+            "totalAmount", "emailStatus", "emailError", "lastEmailSentAt"
+          FROM "Transaction"
+          WHERE "eventId" = ${eventId}
+            AND "seatCodes" IS NOT NULL
+            AND "seatCodes" LIKE ${'%' + targetSeatCode + '%'}
+          LIMIT 5
+        `
 
-      if (!targetResult) {
-        // Fallback: search directly in database using string contains
-        try {
-          // Use raw query to avoid Prisma type issues with contains on nullable fields
-          const fallbackTxns = await withDbRetry(() => db.transaction.findMany({
-            where: {
-              eventId,
-              AND: [
-                { seatCodes: { contains: targetSeatCode } },
-                { NOT: { seatCodes: null } },
-              ],
-            },
-            select: {
-              transactionId: true,
-              customerName: true,
-              customerEmail: true,
-              customerWa: true,
-              seatCodes: true,
-              paymentStatus: true,
-              checkInTime: true,
-              paidAt: true,
-              totalAmount: true,
-              emailStatus: true,
-              emailError: true,
-              lastEmailSentAt: true,
-            },
-          }))
+        console.log(`[seats-info] Raw SQL fallback found ${fallbackResults.length} transactions containing "${targetSeatCode}"`)
 
-          console.log(`[seats-info] Fallback DB search found ${fallbackTxns.length} transactions containing "${targetSeatCode}"`)
+        for (const txn of fallbackResults) {
+          console.log(`[seats-info] Raw fallback txn ${txn.transactionId} (status: ${txn.paymentStatus}) seatCodes: ${String(txn.seatCodes).substring(0, 100)}`)
 
-          for (const txn of fallbackTxns) {
-            console.log(`[seats-info] Fallback txn ${txn.transactionId} (status: ${txn.paymentStatus}) seatCodes: ${txn.seatCodes?.substring(0, 100)}`)
-
-            let codes: string[] = []
-            try {
-              const parsed = JSON.parse(txn.seatCodes || '[]')
-              if (Array.isArray(parsed)) {
-                codes = parsed.map((s: any) => String(s).trim()).filter(Boolean)
-              } else {
-                codes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
-              }
-            } catch {
+          // Parse seatCodes from raw result
+          let codes: string[] = []
+          try {
+            const parsed = JSON.parse(txn.seatCodes || '[]')
+            if (Array.isArray(parsed)) {
+              codes = parsed.map((s: any) => String(s).trim()).filter(Boolean)
+            } else {
               codes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
             }
-
-            // Check exact match
-            if (codes.includes(targetSeatCode)) {
-              targetResult = {
-                owner: txn.customerName,
-                email: txn.customerEmail,
-                phone: txn.customerWa,
-                transactionId: txn.transactionId,
-                paymentStatus: txn.paymentStatus,
-                checkInTime: txn.checkInTime?.toISOString() || null,
-                paidAt: txn.paidAt?.toISOString() || null,
-                totalAmount: txn.totalAmount,
-                emailStatus: txn.emailStatus || null,
-                emailError: txn.emailError || null,
-                lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
-              }
-              seatInfoMap[targetSeatCode] = targetResult
-              console.log(`[seats-info] Fallback exact match for "${targetSeatCode}"`)
-              break
-            }
-
-            // Check case-insensitive match
-            const lowerTarget = targetSeatCode.toLowerCase()
-            const matchCode = codes.find(c => c.toLowerCase() === lowerTarget)
-            if (matchCode) {
-              targetResult = {
-                owner: txn.customerName,
-                email: txn.customerEmail,
-                phone: txn.customerWa,
-                transactionId: txn.transactionId,
-                paymentStatus: txn.paymentStatus,
-                checkInTime: txn.checkInTime?.toISOString() || null,
-                paidAt: txn.paidAt?.toISOString() || null,
-                totalAmount: txn.totalAmount,
-                emailStatus: txn.emailStatus || null,
-                emailError: txn.emailError || null,
-                lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
-              }
-              seatInfoMap[targetSeatCode] = targetResult
-              seatInfoMap[matchCode] = targetResult
-              console.log(`[seats-info] Fallback case-insensitive match: "${targetSeatCode}" ↔ "${matchCode}"`)
-              break
-            }
+          } catch {
+            codes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
           }
 
-          // Last resort: if fallback found transactions but no code match,
-          // use the first one (seatCode is in the raw string)
-          if (!targetResult && fallbackTxns.length > 0) {
-            const txn = fallbackTxns[0]
+          // Exact match
+          if (codes.includes(targetSeatCode)) {
             targetResult = {
               owner: txn.customerName,
               email: txn.customerEmail,
@@ -246,20 +182,76 @@ export async function GET(request: NextRequest) {
               paymentStatus: txn.paymentStatus,
               checkInTime: txn.checkInTime?.toISOString() || null,
               paidAt: txn.paidAt?.toISOString() || null,
-              totalAmount: txn.totalAmount,
+              totalAmount: Number(txn.totalAmount),
               emailStatus: txn.emailStatus || null,
               emailError: txn.emailError || null,
               lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
             }
             seatInfoMap[targetSeatCode] = targetResult
-            console.log(`[seats-info] Fallback substring match for "${targetSeatCode}"`)
+            console.log(`[seats-info] Raw fallback exact match for "${targetSeatCode}"`)
+            break
           }
-        } catch (fallbackErr) {
-          console.error('[seats-info] Fallback search error:', fallbackErr)
-        }
-      }
 
-      debugInfo = {
+          // Case-insensitive match
+          const lowerTarget = targetSeatCode.toLowerCase()
+          const matchCode = codes.find(c => c.toLowerCase() === lowerTarget)
+          if (matchCode) {
+            targetResult = {
+              owner: txn.customerName,
+              email: txn.customerEmail,
+              phone: txn.customerWa,
+              transactionId: txn.transactionId,
+              paymentStatus: txn.paymentStatus,
+              checkInTime: txn.checkInTime?.toISOString() || null,
+              paidAt: txn.paidAt?.toISOString() || null,
+              totalAmount: Number(txn.totalAmount),
+              emailStatus: txn.emailStatus || null,
+              emailError: txn.emailError || null,
+              lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+            }
+            seatInfoMap[targetSeatCode] = targetResult
+            seatInfoMap[matchCode] = targetResult
+            console.log(`[seats-info] Raw fallback case-insensitive match: "${targetSeatCode}" ↔ "${matchCode}"`)
+            break
+          }
+        }
+
+        // Last resort: use first match even if parsing doesn't find exact code
+        if (!targetResult && fallbackResults.length > 0) {
+          const txn = fallbackResults[0]
+          targetResult = {
+            owner: txn.customerName,
+            email: txn.customerEmail,
+            phone: txn.customerWa,
+            transactionId: txn.transactionId,
+            paymentStatus: txn.paymentStatus,
+            checkInTime: txn.checkInTime?.toISOString() || null,
+            paidAt: txn.paidAt?.toISOString() || null,
+            totalAmount: Number(txn.totalAmount),
+            emailStatus: txn.emailStatus || null,
+            emailError: txn.emailError || null,
+            lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+          }
+          seatInfoMap[targetSeatCode] = targetResult
+          console.log(`[seats-info] Raw fallback substring match for "${targetSeatCode}"`)
+        }
+      } catch (fallbackErr) {
+        console.error('[seats-info] Raw fallback error:', fallbackErr)
+      }
+    } else if (targetSeatCode) {
+      console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": found (status: ${targetResult?.paymentStatus})`)
+    }
+
+    // Build response
+    const response: any = {
+      event: { id: event.id, title: event.title },
+      seats: seatInfoMap,
+      totalSold: Object.keys(seatInfoMap).length,
+    }
+
+    if (targetSeatCode) {
+      response.targetSeat = targetResult
+      response._debug = {
         lookupSeatCode: targetSeatCode,
         totalTransactions: transactions.length,
         totalSeatCodesParsed: debugSeatCodes.length,
@@ -268,21 +260,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (targetSeatCode) {
-      return NextResponse.json({
-        event: { id: event.id, title: event.title },
-        seats: seatInfoMap,
-        targetSeat: targetResult,
-        totalSold: Object.keys(seatInfoMap).length,
-        ...(debugInfo ? { _debug: debugInfo } : {}),
-      })
-    }
-
-    return NextResponse.json({
-      event: { id: event.id, title: event.title },
-      seats: seatInfoMap,
-      totalSold: Object.keys(seatInfoMap).length,
-    })
+    return NextResponse.json(response)
   } catch (error) {
     console.error('[seats-info] Error:', error)
     return NextResponse.json(
