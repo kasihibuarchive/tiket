@@ -101,28 +101,43 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'seatCode is required' }, { status: 400 })
     }
 
-    const whereClause: string[] = [
-      `"seatCodes" IS NOT NULL`,
-      `"seatCodes" LIKE ${'%' + seatCode + '%'}`
-    ]
-    if (eventId) {
-      whereClause.push(`"eventId" = '${eventId}'`)
-    }
+    const likePattern = '%' + seatCode + '%'
 
-    const results: any[] = await db.$queryRawUnsafe(`
-      SELECT
-        "transactionId", "customerName", "customerEmail", "customerWa",
-        "seatCodes", "paymentStatus", "emailStatus", "emailError", "lastEmailSentAt"
-      FROM "Transaction"
-      WHERE ${whereClause.join(' AND ')}
-      ORDER BY
-        CASE "paymentStatus"
-          WHEN 'PAID' THEN 0
-          WHEN 'PENDING' THEN 1
-          ELSE 99
-        END ASC
-      LIMIT 5
-    `)
+    let results: any[]
+    if (eventId) {
+      results = await db.$queryRaw`
+        SELECT
+          "transactionId", "customerName", "customerEmail", "customerWa",
+          "seatCodes", "paymentStatus", "emailStatus", "emailError", "lastEmailSentAt"
+        FROM "Transaction"
+        WHERE "seatCodes" IS NOT NULL
+          AND "seatCodes" LIKE ${likePattern}
+          AND "eventId" = ${eventId}
+        ORDER BY
+          CASE "paymentStatus"
+            WHEN 'PAID' THEN 0
+            WHEN 'PENDING' THEN 1
+            ELSE 99
+          END ASC
+        LIMIT 5
+      `
+    } else {
+      results = await db.$queryRaw`
+        SELECT
+          "transactionId", "customerName", "customerEmail", "customerWa",
+          "seatCodes", "paymentStatus", "emailStatus", "emailError", "lastEmailSentAt"
+        FROM "Transaction"
+        WHERE "seatCodes" IS NOT NULL
+          AND "seatCodes" LIKE ${likePattern}
+        ORDER BY
+          CASE "paymentStatus"
+            WHEN 'PAID' THEN 0
+            WHEN 'PENDING' THEN 1
+            ELSE 99
+          END ASC
+        LIMIT 5
+      `
+    }
 
     if (results.length === 0) {
       return NextResponse.json(
