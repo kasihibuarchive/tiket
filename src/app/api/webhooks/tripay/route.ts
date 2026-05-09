@@ -1,17 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server'
+import crypto from 'crypto'
 import { db } from '@/lib/db'
-import { verifyCallbackSignature } from '@/lib/tripay'
+import { getTripayConfig } from '@/lib/tripay'
 import { sendETicketEmail } from '@/lib/email'
 import QRCode from 'qrcode'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
+    // Get raw body text FIRST (before JSON parsing) for signature verification
+    const rawBody = await request.text()
+    let body: any
+    try {
+      body = JSON.parse(rawBody)
+    } catch {
+      console.error('[tripay-webhook] Invalid JSON body')
+      return NextResponse.json({ success: false, message: 'Invalid JSON' }, { status: 400 })
+    }
 
-    // Verify Tripay callback signature
+    // Verify Tripay callback signature using RAW body string
+    // Tripay computes: HMAC-SHA256(privateKey, rawJsonBodyString)
     const xCallbackSignature = request.headers.get('x-callback-signature') || ''
-    if (!verifyCallbackSignature(body, xCallbackSignature)) {
-      console.error('[tripay-webhook] Invalid signature for reference:', body.reference)
+    const config = getTripayConfig()
+    const computedSignature = crypto
+      .createHmac('sha256', config.privateKey)
+      .update(rawBody)
+      .digest('hex')
+
+    if (computedSignature !== xCallbackSignature) {
+      console.error('[tripay-webhook] Invalid signature for reference:', body.reference,
+        '| computed:', computedSignature.substring(0, 8) + '...',
+        '| received:', xCallbackSignature.substring(0, 8) + '...')
       return NextResponse.json({ success: false, message: 'Invalid signature' }, { status: 403 })
     }
 
