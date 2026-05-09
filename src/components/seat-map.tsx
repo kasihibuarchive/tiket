@@ -292,11 +292,13 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     return () => {}
   }, [onSeatLocked, onSeatUnlocked, onSeatSold, onAllSeatsStatus, onSeatLockRejected, onSeatsLockRejected, eventId])
 
-  // Poll seats from API every 3 seconds
+  // Real-time: fetch initial seat status once on mount, then rely on socket events
+  // No more 3-second polling — socket handles all updates in real-time
   useEffect(() => {
     if (!eventId) return
     let cancelled = false
-    const pollSeats = async () => {
+
+    const fetchInitialStatus = async () => {
       try {
         const myCodes = selectedSeatCodesRef.current
         const bust = '_t=' + Date.now()
@@ -310,7 +312,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         setSeats((prev) =>
           prev.map((s) => {
             if (myCodes.has(s.seatCode)) return s
-            // Skip seats we just unlocked (avoid race condition with DB)
             if (justUnlockedRef.current.has(s.seatCode)) return s
             const fresh = data.find((f: any) => f.id === s.id)
             if (!fresh) return s
@@ -322,12 +323,13 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         )
       } catch { /* silent */ }
     }
-    const timeout = setTimeout(() => { pollSeats() }, 2000)
-    const interval = setInterval(pollSeats, 3000)
-    return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
+
+    // Fetch once on mount
+    fetchInitialStatus()
+    return () => { cancelled = true }
   }, [eventId, showDateId])
 
-  // Cleanup expired locks locally
+  // Cleanup expired locks locally (lightweight check every 30s, not aggressive)
   useEffect(() => {
     const CLOCK_SKEW_TOLERANCE = 2000
     const interval = setInterval(() => {
@@ -343,7 +345,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           return s
         })
       )
-    }, 5000)
+    }, 30000)
     return () => clearInterval(interval)
   }, [])
 
