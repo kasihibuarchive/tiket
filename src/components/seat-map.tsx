@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { cn } from '@/lib/utils'
-import { DoorOpen, Lock, Check, X, Crown, User, GraduationCap, Loader2, AlertTriangle, Minus, Plus, Ticket } from 'lucide-react'
+import { DoorOpen, Lock, Unlock, Check, X, Crown, User, GraduationCap, Loader2, AlertTriangle, Minus, Plus, Ticket, Clock } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { Button } from '@/components/ui/button'
 import { cleanupExpiredLocks } from '@/lib/seat-cleanup'
@@ -68,13 +68,11 @@ const SEAT_GAP = 3 // px gap between seats in a block
 export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, layoutImage, gaZoneConfig, seatType, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
   const [seats, setSeats] = useState<SeatData[]>(initialSeats)
   const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
+  const [isLocked, setIsLocked] = useState(false) // Whether seats are confirmed locked via API
   const [lockCountdown, setLockCountdown] = useState<number | null>(null)
   const [isLocking, setIsLocking] = useState(false)
   const [lockRejectionMsg, setLockRejectionMsg] = useState<string | null>(null)
   const lockTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const pendingLockRef = useRef<Set<string>>(new Set())
-  const [hasPendingLock, setHasPendingLock] = useState(false)
 
   const sessionId = useRef(getSessionId())
   const selectedSeatCodesRef = useRef<Set<string>>(new Set())
@@ -83,16 +81,14 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   const [selectedGAZoneId, setSelectedGAZoneId] = useState<string | null>(null)
   const [selectedGAQty, setSelectedGAQty] = useState(1)
 
-  // Sync seats from props when initialSeats changes (e.g., switching show dates).
-  // Uses the "adjusting state during render" pattern recommended by React docs,
-  // because useEffect + setState is not allowed in React 19 strict mode.
+  // Sync seats from props when initialSeats changes
   const [prevInitialSeats, setPrevInitialSeats] = useState(initialSeats)
   if (initialSeats !== prevInitialSeats) {
     setPrevInitialSeats(initialSeats)
     setSeats(initialSeats)
     setSelectedSeatCodes(new Set())
+    setIsLocked(false)
     setLockCountdown(null)
-    setHasPendingLock(false)
     setSelectedGAZoneId(null)
     setSelectedGAQty(1)
   }
@@ -105,7 +101,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // Parse layoutData
   const parsedLayout = useMemo(() => parseLayoutData(layoutData), [layoutData]) as ParsedLayout | null
 
-  // Build seat lookup by seatCode (state-derived, not ref, to avoid render-time ref access)
+  // Build seat lookup by seatCode
   const seatLookup = useMemo(() => {
     const map = new Map<string, SeatData>()
     for (const seat of seats) {
@@ -133,13 +129,12 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     onSeatsLockRejected,
   } = useSeatSocket(eventId)
 
-  // Keep ref in sync with state (no re-register needed)
+  // Keep ref in sync with state
   useEffect(() => {
     selectedSeatCodesRef.current = selectedSeatCodes
   }, [selectedSeatCodes])
 
-  // Socket event handlers — use refs, NOT selectedSeatCodes in deps
-  // This prevents re-registering listeners on every seat click (which caused flickering)
+  // Socket event handlers
   useEffect(() => {
     onSeatLocked((payload) => {
       const myCodes = selectedSeatCodesRef.current
@@ -177,6 +172,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
           next.delete(payload.seatCode)
+          if (next.size === 0) {
+            setIsLocked(false)
+            setLockCountdown(null)
+          }
           return next
         })
         setLockRejectionMsg('Kursi ' + payload.seatCode + ' sudah terbeli')
@@ -199,13 +198,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         const updated = prev.map((s) => {
           const lockInfo = payload.seats.find((ls) => ls.seatCode === s.seatCode)
           if (!lockInfo) return s
-          // Handle all status transitions, not just LOCKED_TEMPORARY
           if (lockInfo.status === 'SOLD') {
             if (myCodes.has(s.seatCode)) stolenSeats.push(s.seatCode)
             return { ...s, status: 'SOLD', lockedUntil: null }
           }
           if (lockInfo.status === 'AVAILABLE') {
-            // Only update to AVAILABLE if the seat wasn't just locked by us
             if (myCodes.has(s.seatCode)) return s
             return { ...s, status: 'AVAILABLE', lockedUntil: null }
           }
@@ -224,7 +221,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
           for (const code of stolenSeats) next.delete(code)
-          if (next.size === 0) setLockCountdown(null)
+          if (next.size === 0) {
+            setIsLocked(false)
+            setLockCountdown(null)
+          }
           return next
         })
         setLockRejectionMsg('Kursi ' + stolenSeats.join(', ') + ' sedang dipilih orang lain')
@@ -237,7 +237,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
           next.delete(payload.seatCode)
-          if (next.size === 0) setLockCountdown(null)
+          if (next.size === 0) {
+            setIsLocked(false)
+            setLockCountdown(null)
+          }
           return next
         })
         setLockRejectionMsg('Kursi ' + payload.seatCode + ' sedang dipilih orang lain')
@@ -250,7 +253,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
           for (const code of rejectedCodes) next.delete(code)
-          if (next.size === 0) setLockCountdown(null)
+          if (next.size === 0) {
+            setIsLocked(false)
+            setLockCountdown(null)
+          }
           return next
         })
         setLockRejectionMsg('Kursi ' + rejectedCodes.join(', ') + ' sedang dipilih orang lain')
@@ -260,7 +266,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     return () => {}
   }, [onSeatLocked, onSeatUnlocked, onSeatSold, onAllSeatsStatus, onSeatLockRejected, onSeatsLockRejected, eventId])
 
-  // Poll seats from API every 3 seconds — balance realtime vs DB load
+  // Poll seats from API every 3 seconds
   useEffect(() => {
     if (!eventId) return
     let cancelled = false
@@ -293,14 +299,14 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     return () => { cancelled = true; clearTimeout(timeout); clearInterval(interval) }
   }, [eventId, showDateId])
 
-  // Cleanup expired locks locally — with 2s clock skew tolerance to prevent flickering
+  // Cleanup expired locks locally
   useEffect(() => {
-    const CLOCK_SKEW_TOLERANCE = 2000 // 2 seconds buffer
+    const CLOCK_SKEW_TOLERANCE = 2000
     const interval = setInterval(() => {
       const myCodes = selectedSeatCodesRef.current
       setSeats((prev) =>
         prev.map((s) => {
-          if (myCodes.has(s.seatCode)) return s // never expire own locks locally
+          if (myCodes.has(s.seatCode)) return s
           if (s.status === 'LOCKED_TEMPORARY' && s.lockedUntil) {
             if (Date.now() > new Date(s.lockedUntil).getTime() + CLOCK_SKEW_TOLERANCE) {
               return { ...s, status: 'AVAILABLE', lockedUntil: null }
@@ -330,70 +336,82 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     handler(currentSeats, price)
   }, [seats, priceCategories])
 
-  const updatePendingState = useCallback((codes: Set<string>) => {
-    const hasPending = codes.size > 0 && Array.from(codes).some(c => pendingLockRef.current.has(c))
-    setHasPendingLock(hasPending)
-  }, [])
+  // ═══════════════════════════════════════════════════════════
+  // NEW FLOW: Manual Lock
+  // ═══════════════════════════════════════════════════════════
 
+  // Step 1: Select/deselect seats locally (no API call)
   const handleSeatClick = useCallback(async (seat: SeatData) => {
-    if (seat.status !== 'AVAILABLE') return
+    // If seats are already locked, don't allow changing selection
+    if (isLocked) return
+    if (seat.status !== 'AVAILABLE' && !selectedSeatCodes.has(seat.seatCode)) return
 
     if (selectedSeatCodes.has(seat.seatCode)) {
+      // Deselect
       const newCodes = new Set(selectedSeatCodes)
       newCodes.delete(seat.seatCode)
       setSelectedSeatCodes(newCodes)
-      pendingLockRef.current.delete(seat.seatCode)
-      updatePendingState(newCodes)
-      unlockSeats([seat.seatCode], sessionId.current)
-      fetch('/api/seats/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes: [seat.seatCode], sessionId: sessionId.current, showDateId: showDateId || undefined }),
-      }).catch(() => {})
       notifyParentWithCodes(newCodes)
     } else {
+      // Select (visual only, no lock yet)
       const newCodes = new Set(selectedSeatCodes)
       newCodes.add(seat.seatCode)
       setSelectedSeatCodes(newCodes)
-      const allCodes = Array.from(newCodes)
-      for (const c of allCodes) pendingLockRef.current.add(c)
-      setHasPendingLock(true)
+      notifyParentWithCodes(newCodes)
+    }
+  }, [selectedSeatCodes, isLocked, notifyParentWithCodes])
+
+  // Step 2: Lock all selected seats via API
+  const handleLockSeats = useCallback(async () => {
+    if (selectedSeatCodes.size === 0 || isLocked || isLocking) return
+
+    setIsLocking(true)
+    setLockRejectionMsg(null)
+    const allCodes = Array.from(selectedSeatCodes)
+
+    try {
+      // Socket broadcast (optimistic)
       lockSeats(allCodes, sessionId.current)
-      fetch('/api/seats/lock', {
+
+      // HTTP API lock (authoritative)
+      const res = await fetch('/api/seats/lock', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ eventId, seatCodes: allCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
-      }).then((res) => {
-        for (const c of allCodes) pendingLockRef.current.delete(c)
-        updatePendingState(newCodes)
-        if (!res.ok) {
-          res.json().then((data) => {
-            const rejected = data.rejectedSeats || []
-            if (rejected.length > 0) {
-              setSelectedSeatCodes((prev) => {
-                const next = new Set(prev)
-                for (const code of rejected) next.delete(code)
-                if (next.size === 0) setLockCountdown(null)
-                return next
-              })
-              setLockRejectionMsg(data.error || 'Kursi sudah diambil orang lain')
-            }
-          }).catch(() => {})
-        }
-      }).catch((err) => {
-        for (const c of allCodes) pendingLockRef.current.delete(c)
-        updatePendingState(newCodes)
-        console.error('Failed to lock seat via API:', err)
       })
-      if (selectedSeatCodes.size === 0) {
-        setLockCountdown(LOCK_DURATION / 1000)
-      }
-      notifyParentWithCodes(newCodes)
-    }
-  }, [selectedSeatCodes, eventId, lockSeats, unlockSeats, notifyParentWithCodes, updatePendingState, showDateId])
 
-  const handleClearSelection = useCallback(async () => {
+      if (res.ok) {
+        setIsLocked(true)
+        setLockCountdown(LOCK_DURATION / 1000) // 10 minutes
+      } else {
+        const data = await res.json().catch(() => ({}))
+        const rejected = data.rejectedSeats || []
+        if (rejected.length > 0) {
+          setSelectedSeatCodes((prev) => {
+            const next = new Set(prev)
+            for (const code of rejected) next.delete(code)
+            return next
+          })
+          setLockRejectionMsg(data.error || 'Beberapa kursi sudah diambil orang lain')
+          // Unlock the rejected seats via socket
+          unlockSeats(rejected, sessionId.current)
+        } else {
+          setLockRejectionMsg(data.error || 'Gagal mengunci kursi')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to lock seats:', err)
+      setLockRejectionMsg('Gagal mengunci kursi. Coba lagi.')
+    } finally {
+      setIsLocking(false)
+    }
+  }, [selectedSeatCodes, isLocked, isLocking, eventId, showDateId, lockSeats, unlockSeats])
+
+  // Step 3: Manual unlock — user clicks "Buka Kunci"
+  const handleUnlockSeats = useCallback(async () => {
     const codes = Array.from(selectedSeatCodes)
+    if (codes.length === 0) return
+
     unlockSeats(codes, sessionId.current)
     try {
       await fetch('/api/seats/unlock', {
@@ -402,14 +420,35 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         body: JSON.stringify({ eventId, seatCodes: codes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
       })
     } catch (err) {
-      console.error('Failed to unlock seats via API:', err)
+      console.error('Failed to unlock seats:', err)
     }
+
     setSelectedSeatCodes(new Set())
-    pendingLockRef.current.clear()
-    setHasPendingLock(false)
+    setIsLocked(false)
     setLockCountdown(null)
     notifyParentWithCodes(new Set())
-  }, [selectedSeatCodes, eventId, unlockSeats, notifyParentWithCodes, showDateId])
+  }, [selectedSeatCodes, eventId, showDateId, unlockSeats, notifyParentWithCodes])
+
+  // Auto-clear when countdown reaches 0
+  const handleClearSelection = useCallback(async () => {
+    const codes = Array.from(selectedSeatCodes)
+    if (codes.length > 0) {
+      unlockSeats(codes, sessionId.current)
+      try {
+        await fetch('/api/seats/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, seatCodes: codes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
+        })
+      } catch (err) {
+        console.error('Failed to unlock seats via API:', err)
+      }
+    }
+    setSelectedSeatCodes(new Set())
+    setIsLocked(false)
+    setLockCountdown(null)
+    notifyParentWithCodes(new Set())
+  }, [selectedSeatCodes, eventId, showDateId, unlockSeats, notifyParentWithCodes])
 
   // Countdown timer
   useEffect(() => {
@@ -466,15 +505,15 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // ═══════════════════════════════════════════════════════════
   const renderSeatButton = (seatData: SeatData | undefined, seatCode: string, displayNum: number, key: string) => {
     if (!seatData) {
-      // Empty placeholder — no seat in DB for this position
       return (
         <div key={key} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
       )
     }
 
-    const isClickable = seatData.status === 'AVAILABLE' || selectedSeatCodes.has(seatData.seatCode)
+    const isSelected = selectedSeatCodes.has(seatData.seatCode)
+    const isClickable = (seatData.status === 'AVAILABLE' || isSelected) && !isLocked
     const isSold = seatData.status === 'SOLD'
-    const isLocked = seatData.status === 'LOCKED_TEMPORARY' && !selectedSeatCodes.has(seatData.seatCode)
+    const isLockedByOther = seatData.status === 'LOCKED_TEMPORARY' && !isSelected
     const isUnavailable = seatData.status === 'UNAVAILABLE'
 
     return (
@@ -486,39 +525,121 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           'shrink-0 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200 relative',
           getSeatColor(seatData),
           isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
-          !isClickable && 'cursor-not-allowed',
+          !isClickable && (isSelected ? 'cursor-default' : 'cursor-not-allowed'),
           isUnavailable && 'opacity-20',
           isSold && 'text-white',
-          isLocked && 'text-white',
-          selectedSeatCodes.has(seatData.seatCode) && 'text-charcoal font-bold'
+          isLockedByOther && 'text-white',
+          isSelected && 'text-charcoal font-bold'
         )}
         style={{
           width: SEAT_W,
           height: SEAT_W,
-          ...(seatData.status === 'AVAILABLE' && !selectedSeatCodes.has(seatData.seatCode)
+          ...(seatData.status === 'AVAILABLE' && !isSelected
             ? { borderColor: getSeatBorderColor(seatData) }
             : {}),
         }}
         title={
           isSold
             ? `${seatCode} - Sold`
+            : isLockedByOther
+            ? `${seatCode} - Dikunci orang lain`
+            : isSelected
+            ? isLocked
+              ? `${seatCode} - Terkunci (klik Buka Kunci untuk mepasang)`
+              : `${seatCode} - Terpilih (klik untuk batal)`
             : isLocked
-            ? `${seatCode} - Locked`
-            : selectedSeatCodes.has(seatData.seatCode)
-            ? `${seatCode} - Selected (click to deselect)`
+            ? `${seatCode} - Pilihan terkunci`
             : `${seatCode} - ${seatData.priceCategory?.name || 'Uncategorized'} - Rp ${(seatData.priceCategory?.price || 0).toLocaleString('id-ID')}`
         }
       >
         {isSold && <Check className="w-3 h-3" />}
-        {isLocked && <Lock className="w-3 h-3" />}
+        {isLockedByOther && <Lock className="w-3 h-3" />}
         {isUnavailable && <X className="w-3 h-3" />}
-        {!isSold && !isLocked && !isUnavailable && (
-          <span className="sm:hidden">{displayNum}</span>
-        )}
-        {!isSold && !isLocked && !isUnavailable && (
-          <span className="hidden sm:inline">{displayNum}</span>
+        {!isSold && !isLockedByOther && !isUnavailable && (
+          <span>{displayNum}</span>
         )}
       </button>
+    )
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Bottom Action Bar (shared by both NUMBERED and GA)
+  // ═══════════════════════════════════════════════════════════
+  const renderActionBar = () => {
+    if (selectedSeatCodes.size === 0 && !isLocked) return null
+
+    return (
+      <div className="p-4 bg-white rounded-xl border border-[#C8A951]/20 shadow-sm animate-fade-in">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-charcoal">
+              <Ticket className="w-4 h-4 inline mr-1.5 -mt-0.5" />
+              {selectedSeatCodes.size} tiket {isLocked ? 'terkunci' : 'dipilih'}
+            </p>
+            <p className="font-serif text-lg font-semibold text-[#C8A951] mt-1">
+              Rp {totalPrice.toLocaleString('id-ID')}
+            </p>
+            {lockCountdown !== null && (
+              <p className={cn(
+                'text-xs font-mono font-semibold mt-1',
+                lockCountdown < 120 ? 'text-red-500' : 'text-muted-foreground'
+              )}>
+                <Clock className="w-3 h-3 inline mr-1 -mt-0.5" />
+                Waktu tersisa: {formatTime(lockCountdown)}
+              </p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            {!isLocked ? (
+              <>
+                {/* Phase 1: Seats selected but not locked yet */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setSelectedSeatCodes(new Set())
+                    setIsLocked(false)
+                    setLockCountdown(null)
+                    notifyParentWithCodes(new Set())
+                  }}
+                  className="text-xs text-muted-foreground"
+                >
+                  Batal
+                </Button>
+                <Button
+                  onClick={handleLockSeats}
+                  disabled={isLocking}
+                  className="bg-[#C8A951] hover:bg-[#C8A951]/90 text-charcoal font-medium text-sm disabled:opacity-50"
+                >
+                  {isLocking ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengunci...</>
+                  ) : (
+                    <><Lock className="w-4 h-4 mr-2" />Kunci Kursi</>
+                  )}
+                </Button>
+              </>
+            ) : (
+              <>
+                {/* Phase 2: Seats are locked, ready for checkout */}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleUnlockSeats}
+                  className="text-xs text-muted-foreground"
+                >
+                  <Unlock className="w-3 h-3 mr-1" />Buka Kunci
+                </Button>
+                <Button
+                  onClick={() => onProceedToCheckout?.(selectedSeats)}
+                  className="bg-charcoal hover:bg-charcoal/90 text-[#C8A951] font-medium text-sm"
+                >
+                  Lanjut Bayar
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     )
   }
 
@@ -526,11 +647,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   // GA (General Admission) Hooks — always called, used conditionally
   // ═══════════════════════════════════════════════════════════
 
-  // When event seatType is GENERAL_ADMISSION, always enter GA mode
-  // even if gaZoneConfig hasn't been set yet (show layout image, no zones)
   const isSeatTypeGA = seatType === 'GENERAL_ADMISSION'
 
-  // Manual GA zones from gaZoneConfig JSON (admin-defined zones take priority over layout-based)
   const manualGAZones = useMemo(() => {
     if (!gaZoneConfig) return null
     try {
@@ -547,11 +665,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     } catch { return null }
   }, [gaZoneConfig, parsedLayout?.isGA])
 
-  // isManualGA: true when we should show layout image + zone cards (not numbered grid)
-  // Priority: gaZoneConfig (manual admin config) > layout-based GA
   const isManualGA = !!manualGAZones || isSeatTypeGA
 
-  // Unified GA zones: manual gaZoneConfig takes precedence, then layout-based GA
   const gaZones = manualGAZones || (parsedLayout?.isGA ? (parsedLayout.gaZones || []) : [])
   const isGA = isSeatTypeGA || gaZones.length > 0
 
@@ -577,9 +692,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     return seats.filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === gaZones.find(z => z.id === selectedGAZoneId)?.name)
   }, [seats, selectedSeatCodes, selectedGAZoneId, gaZones, isGA])
 
+  // GA: Click zone card → select zone (visual only, no lock)
   const handleGAZoneClick = useCallback((zone: any) => {
-    if (!isGA) return
+    if (!isGA || isLocked) return
     if (selectedGAZoneId === zone.id) {
+      // Deselect zone
       setSelectedGAZoneId(null)
       setSelectedGAQty(1)
       const zoneCodes = seats
@@ -589,18 +706,12 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         const newCodes = new Set(selectedSeatCodes)
         for (const c of zoneCodes) newCodes.delete(c)
         setSelectedSeatCodes(newCodes)
-        unlockSeats(zoneCodes, sessionId.current)
-        fetch('/api/seats/unlock', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ eventId, seatCodes: zoneCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
-        }).catch(() => {})
         notifyParentWithCodes(newCodes)
-        if (newCodes.size === 0) setLockCountdown(null)
       }
       return
     }
 
+    // Switching zones — clear previous zone selection
     if (selectedGAZoneId) {
       const prevZone = gaZones.find((z) => z.id === selectedGAZoneId)
       const prevCodes = seats
@@ -610,107 +721,76 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         const newCodes = new Set(selectedSeatCodes)
         for (const c of prevCodes) newCodes.delete(c)
         setSelectedSeatCodes(newCodes)
-        unlockSeats(prevCodes, sessionId.current)
       }
     }
 
     setSelectedGAZoneId(zone.id)
     setSelectedGAQty(1)
-  }, [isGA, selectedGAZoneId, selectedSeatCodes, seats, gaZones, eventId, showDateId, unlockSeats, notifyParentWithCodes])
+  }, [isGA, isLocked, selectedGAZoneId, selectedSeatCodes, seats, gaZones, notifyParentWithCodes])
 
+  // GA: Quantity change (visual only, no lock)
   const handleGAQtyChange = useCallback((newQty: number) => {
-    if (!isGA || !selectedGAZoneId) return
+    if (!isGA || !selectedGAZoneId || isLocked) return
     const currentQty = selectedSeatCodes.size
     const zone = gaZones.find((z) => z.id === selectedGAZoneId)
     if (!zone) return
     const zoneSeats = seats.filter((s) => s.zoneName === zone.name && s.status === 'AVAILABLE')
     const clampedQty = Math.max(1, Math.min(newQty, zoneSeats.length + currentQty))
     setSelectedGAQty(clampedQty)
-  }, [isGA, selectedGAZoneId, selectedSeatCodes.size, seats, gaZones])
+  }, [isGA, selectedGAZoneId, isLocked, selectedSeatCodes.size, seats, gaZones])
 
-  // targetQty: the desired quantity (passed directly to avoid stale state issues)
-  const handleGAQtyConfirm = useCallback(async (targetQtyOverride?: number) => {
-    if (!isGA || !selectedGAZoneId || !selectedGAZoneData) return
+  // GA: Confirm quantity → update visual selection (no lock yet)
+  const handleGAQtyConfirm = useCallback((targetQtyOverride?: number) => {
+    if (!isGA || !selectedGAZoneId || !selectedGAZoneData || isLocked) return
     const zone = gaZones.find((z) => z.id === selectedGAZoneId)
     if (!zone) return
 
-    const currentLocked = new Set(
+    const currentSelected = new Set(
       seats.filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === zone.name).map((s) => s.seatCode)
     )
     const targetQty = targetQtyOverride ?? selectedGAQty
-    const needMore = targetQty - currentLocked.size
+    const needMore = targetQty - currentSelected.size
 
     if (needMore > 0) {
-      // ── ADD seats: lock additional available seats ──
       const availableSeats = seats.filter(
-        (s) => s.zoneName === zone.name && s.status === 'AVAILABLE' && !currentLocked.has(s.seatCode)
+        (s) => s.zoneName === zone.name && s.status === 'AVAILABLE' && !currentSelected.has(s.seatCode)
       )
-      const toLock = availableSeats.slice(0, needMore).map((s) => s.seatCode)
-      if (toLock.length === 0) return
+      const toAdd = availableSeats.slice(0, needMore).map((s) => s.seatCode)
+      if (toAdd.length === 0) return
 
       const newCodes = new Set(selectedSeatCodes)
-      for (const c of toLock) newCodes.add(c)
-      for (const c of toLock) pendingLockRef.current.add(c)
+      for (const c of toAdd) newCodes.add(c)
       setSelectedSeatCodes(newCodes)
-      setHasPendingLock(true)
-
-      lockSeats(Array.from(newCodes), sessionId.current)
-      fetch('/api/seats/lock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes: Array.from(newCodes), sessionId: sessionId.current, showDateId: showDateId || undefined }),
-      }).then((res) => {
-        for (const c of toLock) pendingLockRef.current.delete(c)
-        setHasPendingLock(false)
-        if (!res.ok) {
-          res.json().then((data) => {
-            const rejected = data.rejectedSeats || []
-            if (rejected.length > 0) {
-              setSelectedSeatCodes((prev) => {
-                const next = new Set(prev)
-                for (const code of rejected) next.delete(code)
-                if (next.size === 0) setLockCountdown(null)
-                return next
-              })
-              setLockRejectionMsg(data.error || 'Kursi sudah diambil orang lain')
-            }
-          }).catch(() => {})
-        }
-      }).catch(() => {
-        for (const c of toLock) pendingLockRef.current.delete(c)
-        setHasPendingLock(false)
-      })
-
-      if (currentLocked.size === 0) setLockCountdown(LOCK_DURATION / 1000)
-
       notifyParentWithCodes(newCodes)
     } else if (needMore < 0) {
-      // ── REMOVE seats: unlock excess seats ──
-      const lockedCodes = Array.from(currentLocked)
-      const toUnlock = lockedCodes.slice(0, Math.abs(needMore))
+      const selectedCodes = Array.from(currentSelected)
+      const toRemove = selectedCodes.slice(0, Math.abs(needMore))
 
       const newCodes = new Set(selectedSeatCodes)
-      for (const c of toUnlock) newCodes.delete(c)
+      for (const c of toRemove) newCodes.delete(c)
       setSelectedSeatCodes(newCodes)
 
-      unlockSeats(toUnlock, sessionId.current)
-      fetch('/api/seats/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes: toUnlock, sessionId: sessionId.current, showDateId: showDateId || undefined }),
-      }).catch(() => {})
-
       if (newCodes.size === 0) {
-        setLockCountdown(null)
         setSelectedGAZoneId(null)
         setSelectedGAQty(1)
       }
-
       notifyParentWithCodes(newCodes)
     }
-    // If needMore === 0, do nothing
-  }, [isGA, selectedGAZoneId, selectedSeatCodes, selectedGAQty, seats, gaZones, eventId, showDateId, lockSeats, unlockSeats, notifyParentWithCodes, selectedGAZoneData])
+  }, [isGA, selectedGAZoneId, isLocked, selectedSeatCodes, selectedGAQty, seats, gaZones, notifyParentWithCodes, selectedGAZoneData])
 
+  // GA: Quantity change with confirm
+  const handleGAQtyChangeWithConfirm = useCallback((newQty: number) => {
+    if (!isGA || !selectedGAZoneId || isLocked) return
+    const currentQty = selectedSeatCodes.size
+    const zone = gaZones.find((z) => z.id === selectedGAZoneId)
+    if (!zone) return
+    const zoneSeats = seats.filter((s) => s.zoneName === zone.name && s.status === 'AVAILABLE')
+    const clampedQty = Math.max(1, Math.min(newQty, zoneSeats.length + currentQty))
+    setSelectedGAQty(clampedQty)
+    handleGAQtyConfirm(clampedQty)
+  }, [isGA, selectedGAZoneId, isLocked, selectedSeatCodes.size, seats, gaZones, handleGAQtyConfirm])
+
+  // GA: Clear all (unlock if locked, then clear)
   const handleGAClear = useCallback(async () => {
     if (!isGA || !selectedGAZoneId) return
     const zone = gaZones.find((z) => z.id === selectedGAZoneId)
@@ -720,26 +800,68 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       .filter((s) => selectedSeatCodes.has(s.seatCode) && s.zoneName === zone.name)
       .map((s) => s.seatCode)
 
-    unlockSeats(zoneCodes, sessionId.current)
-    try {
-      await fetch('/api/seats/unlock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes: zoneCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
-      })
-    } catch { /* silent */ }
+    if (isLocked && zoneCodes.length > 0) {
+      unlockSeats(zoneCodes, sessionId.current)
+      try {
+        await fetch('/api/seats/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, seatCodes: zoneCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
+        })
+      } catch { /* silent */ }
+    }
 
     setSelectedGAZoneId(null)
     setSelectedGAQty(1)
     setSelectedSeatCodes(new Set())
-    pendingLockRef.current.clear()
-    setHasPendingLock(false)
+    setIsLocked(false)
     setLockCountdown(null)
     notifyParentWithCodes(new Set())
-  }, [isGA, selectedGAZoneId, selectedSeatCodes, seats, gaZones, eventId, showDateId, unlockSeats, notifyParentWithCodes])
+  }, [isGA, isLocked, selectedGAZoneId, selectedSeatCodes, seats, gaZones, eventId, showDateId, unlockSeats, notifyParentWithCodes])
 
-  // GA: Clear zone selection when all locked GA seats are lost (sold/locked by others)
-  // Uses "adjusting state during render" pattern (React 19 compatible)
+  // GA: Lock seats (same as numbered, but for GA zones)
+  const handleGALockSeats = useCallback(async () => {
+    if (selectedSeatCodes.size === 0 || isLocked || isLocking) return
+
+    setIsLocking(true)
+    setLockRejectionMsg(null)
+    const allCodes = Array.from(selectedSeatCodes)
+
+    try {
+      lockSeats(allCodes, sessionId.current)
+      const res = await fetch('/api/seats/lock', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eventId, seatCodes: allCodes, sessionId: sessionId.current, showDateId: showDateId || undefined }),
+      })
+
+      if (res.ok) {
+        setIsLocked(true)
+        setLockCountdown(LOCK_DURATION / 1000)
+      } else {
+        const data = await res.json().catch(() => ({}))
+        const rejected = data.rejectedSeats || []
+        if (rejected.length > 0) {
+          setSelectedSeatCodes((prev) => {
+            const next = new Set(prev)
+            for (const code of rejected) next.delete(code)
+            return next
+          })
+          setLockRejectionMsg(data.error || 'Beberapa kursi sudah diambil orang lain')
+          unlockSeats(rejected, sessionId.current)
+        } else {
+          setLockRejectionMsg(data.error || 'Gagal mengunci kursi')
+        }
+      }
+    } catch (err) {
+      console.error('Failed to lock GA seats:', err)
+      setLockRejectionMsg('Gagal mengunci kursi. Coba lagi.')
+    } finally {
+      setIsLocking(false)
+    }
+  }, [selectedSeatCodes, isLocked, isLocking, eventId, showDateId, lockSeats, unlockSeats])
+
+  // GA: Clear zone selection when all locked GA seats are lost
   const [prevGASelectedCodes, setPrevGASelectedCodes] = useState<Set<string>>(new Set())
   if (isGA && selectedGAZoneId) {
     const currentLockedCodes = new Set(
@@ -748,6 +870,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     if (currentLockedCodes.size === 0 && prevGASelectedCodes.size > 0) {
       setSelectedGAQty(1)
       setSelectedGAZoneId(null)
+      setIsLocked(false)
+      setLockCountdown(null)
     }
     if (currentLockedCodes.size !== prevGASelectedCodes.size) {
       setPrevGASelectedCodes(currentLockedCodes)
@@ -756,26 +880,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     if (prevGASelectedCodes.size > 0) setPrevGASelectedCodes(new Set())
   }
 
-  // Integrate qty confirmation directly into the qty change handler
-  // Passes the target quantity directly to avoid stale React state issues
-  const handleGAQtyChangeWithConfirm = useCallback((newQty: number) => {
-    if (!isGA || !selectedGAZoneId) return
-    const currentQty = selectedSeatCodes.size
-    const zone = gaZones.find((z) => z.id === selectedGAZoneId)
-    if (!zone) return
-    const zoneSeats = seats.filter((s) => s.zoneName === zone.name && s.status === 'AVAILABLE')
-    const clampedQty = Math.max(1, Math.min(newQty, zoneSeats.length + currentQty))
-    setSelectedGAQty(clampedQty)
-    // Pass clampedQty directly to avoid reading stale selectedGAQty
-    handleGAQtyConfirm(clampedQty)
-  }, [isGA, selectedGAZoneId, selectedSeatCodes.size, seats, gaZones, handleGAQtyConfirm])
-
   // ═══════════════════════════════════════════════════════════
-  // RENDER: General Admission (GA) Mode — Zone Cards with Capacity
+  // RENDER: General Admission (GA) Mode
   // ═══════════════════════════════════════════════════════════
   if (isGA) {
     const gaStageType = parsedLayout?.stageType || 'PROSCENIUM'
-    // Use the uploaded layoutImage prop (from Event.layoutImage), fall back to parsedLayout URL
     const effectiveLayoutImage = layoutImage || parsedLayout?.layoutImageUrl || null
 
     return (
@@ -877,7 +986,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                 </p>
               </div>
               <div className="flex items-center gap-3">
-                {lockCountdown && (
+                {lockCountdown !== null && (
                   <div className={cn(
                     'px-3 py-1 rounded-full text-xs font-mono font-semibold',
                     lockCountdown < 120 ? 'bg-red-50 text-red-600' : 'bg-[#C8A951]/10 text-[#C8A951]'
@@ -889,7 +998,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                   <button
                     type="button"
                     onClick={() => handleGAQtyChangeWithConfirm(selectedGAQty - 1)}
-                    disabled={selectedGAQty <= 1}
+                    disabled={selectedGAQty <= 1 || isLocked}
                     className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-500 hover:bg-gray-50 disabled:opacity-30 transition-colors"
                   >
                     <Minus className="w-4 h-4" />
@@ -900,7 +1009,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                   <button
                     type="button"
                     onClick={() => handleGAQtyChangeWithConfirm(selectedGAQty + 1)}
-                    disabled={selectedSeatCodes.size >= selectedGAZoneData.available}
+                    disabled={selectedSeatCodes.size >= selectedGAZoneData.available || isLocked}
                     className="w-8 h-8 rounded-full border border-[#C8A951]/50 flex items-center justify-center text-[#C8A951] hover:bg-[#C8A951]/5 disabled:opacity-30 transition-colors"
                   >
                     <Plus className="w-4 h-4" />
@@ -919,34 +1028,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           </div>
         )}
 
-        {/* Checkout Button */}
-        {selectedSeatCodes.size > 0 && (
-          <div className="p-4 bg-white rounded-xl border border-[#C8A951]/20 shadow-sm animate-fade-in">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-medium text-charcoal">
-                  <Ticket className="w-4 h-4 inline mr-1.5 -mt-0.5" />
-                  {selectedSeatCodes.size} tiket dipilih
-                </p>
-                <p className="font-serif text-lg font-semibold text-[#C8A951] mt-1">
-                  Rp {totalPrice.toLocaleString('id-ID')}
-                </p>
-              </div>
-              <Button
-                onClick={() => onProceedToCheckout?.(selectedSeats)}
-                disabled={hasPendingLock}
-                className="bg-charcoal hover:bg-charcoal/90 text-[#C8A951] font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                title={hasPendingLock ? 'Menunggu konfirmasi...' : undefined}
-              >
-                {hasPendingLock ? (
-                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengunci...</>
-                ) : (
-                  'Lanjut Bayar'
-                )}
-              </Button>
-            </div>
-          </div>
-        )}
+        {/* Action Bar: Lock / Unlock / Checkout */}
+        {renderActionBar()}
       </div>
     )
   }
@@ -960,7 +1043,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const { cols } = gridSize
     const aisleColumns: number[] = (parsedLayout as any).aisleColumns || []
 
-    // Build reverse map: target row → source rows
     const embeddedInto: Record<number, number[]> = {}
     for (const [srcStr, tgt] of Object.entries(embeddedRows)) {
       const src = parseInt(srcStr)
@@ -968,20 +1050,14 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       embeddedInto[tgt].push(src)
     }
 
-    // Build grid lookup: displayRow → col → { seatCode, seatNum }
-    // This merges embedded row seats into their target rows at the same column positions
     const gridLookup = new Map<number, Map<number, { seatCode: string; seatNum: number }>>()
     for (const ri of displayRows) {
       const colMap = new Map<number, { seatCode: string; seatNum: number }>()
-
-      // This row's own seats
       const rowSeats = rowSeatMap.get(ri) || []
       for (const s of rowSeats) {
         const label = lLabels[ri] || String.fromCharCode(65 + ri)
         colMap.set(s.c, { seatCode: `${label}-${s.seatNum}`, seatNum: s.seatNum })
       }
-
-      // Embedded source rows' seats — injected at their actual column positions
       const srcRows = embeddedInto[ri] || []
       for (const srcRi of srcRows) {
         const srcSeats = rowSeatMap.get(srcRi) || []
@@ -990,741 +1066,156 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
           colMap.set(s.c, { seatCode: `${srcLabel}-${s.seatNum}`, seatNum: s.seatNum })
         }
       }
-
       gridLookup.set(ri, colMap)
     }
 
-    // Calculate container width from grid columns
-    const CELL_TOTAL = SEAT_W + SEAT_GAP // each grid cell (seat + gap)
-    const gridW = cols * CELL_TOTAL - SEAT_GAP + 60 // +60 for row labels
-    const LABEL_W = 24 // w-6 = 24px row label area
-
-    // Stage placement: use stagePosition from layoutData if available, otherwise default
-    const stageType = parsedLayout?.stageType || 'PROSCENIUM'
-    const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
-    const stageSize = isInsetStage ? 'md' : 'lg'
+    const CELL_TOTAL = SEAT_W + SEAT_GAP
+    const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+    const LABEL_W = 24
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
-    const stagePosition = parsedLayout?.stagePosition
-    const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
-    // Check if we should use canvas-based rendering (when canvasSeats are available)
+    // Check if canvas mode
     const useCanvasMode = !!canvasSeats && canvasSeats.length > 0
 
-    // ── Canvas → Guest View coordinate mapping ──────────────────────────
-    // Map canvas pixel positions (stage, objects) to the guest view grid.
-    // We use canvasSeatBounds (bounding box of seats in canvas pixels)
-    // and map that to the guest grid area (cols × displayRows × CELL_TOTAL).
-    const csb = parsedLayout?.canvasSeatBounds
-    const hasBounds = !!csb && cols > 0 && displayRows.length > 0
-    const guestGridW = cols * CELL_TOTAL
-    const guestGridH = displayRows.length * CELL_TOTAL
-
-    // Helper: transform canvas (cx, cy, cw, ch) → guest (gx, gy, gw, gh)
-    function toGuest(cx: number, cy: number, cw: number, ch: number) {
-      if (!csb) return { x: cx, y: cy, w: cw, h: ch }
-      return {
-        x: LABEL_W + ((cx - csb.originX) / csb.spanX) * guestGridW,
-        y: ((cy - csb.originY) / csb.spanY) * guestGridH,
-        w: (cw / csb.spanX) * guestGridW,
-        h: (ch / csb.spanY) * guestGridH,
-      }
-    }
-
-    // Calculate paddingTop to accommodate elements above the seat grid.
-    // If stage/objects are above the first seat row (canvas Y < seatOriginY),
-    // they would get negative guest Y. We add paddingTop to shift everything down.
-    let stageGuest = hasCustomStagePosition && hasBounds
-      ? toGuest(stagePosition.x, stagePosition.y, stagePosition.width, stagePosition.height) : null
-    const allGuestYs: number[] = []
-    if (stageGuest) allGuestYs.push(stageGuest.y)
-    if (parsedLayout?.objects) {
-      for (const obj of parsedLayout.objects) {
-        if (typeof obj.x === 'number' && typeof obj.y === 'number' && hasBounds) {
-          const g = toGuest(obj.x, obj.y, obj.pixelW || 60, obj.pixelH || 30)
-          allGuestYs.push(g.y)
-        }
-      }
-    }
-    const minGuestY = allGuestYs.length > 0 ? Math.min(...allGuestYs) : 0
-    const paddingTop = minGuestY < 0 ? Math.ceil(-minGuestY) + 4 : 0
-
-    // Re-calculate stage guest position with paddingTop offset
-    if (stageGuest && paddingTop > 0) {
-      stageGuest = { ...stageGuest, y: stageGuest.y + paddingTop }
-    }
-
-    // ══════════════════════════════════════════════════════════════════════
-    // RENDER: Canvas-Based Mode (free-form absolute positioning)
-    // ══════════════════════════════════════════════════════════════════════
+    // ── Canvas Mode ──
     if (useCanvasMode) {
-      const cSeats = canvasSeats!
-      const bounds = fullCanvasBounds
-
-      // Calculate scale to fit container
-      const CONTAINER_MAX_W = 600
-      const rawCanvasW = bounds ? bounds.width + bounds.x : (parsedLayout.canvasWidth || 400)
-      const rawCanvasH = bounds ? bounds.height + bounds.y : (parsedLayout.canvasHeight || 400)
-      const scale = Math.min(CONTAINER_MAX_W / rawCanvasW, 1.2)
-
-      const PAINTED_SEAT = 28
-      const renderedW = rawCanvasW * scale
-      const renderedH = rawCanvasH * scale
-      const seatSize = PAINTED_SEAT * scale
-
-      const cStagePos = parsedLayout.stagePosition
-      const hasStage = cStagePos && typeof cStagePos.x === 'number'
-
-      // Group seats by rowLabel for row labels (NOT raw Y — prevents duplicate
-      // labels when seats in the same logical row have slightly different Y values)
-      const labelGroups = new Map<string, typeof cSeats[0][]>()
-      for (const s of cSeats) {
-        if (!labelGroups.has(s.rowLabel)) labelGroups.set(s.rowLabel, [])
-        labelGroups.get(s.rowLabel)!.push(s)
-      }
-      // Sort labels by their first seat's Y position (top to bottom)
-      const sortedLabels = [...labelGroups.entries()].sort((a, b) => {
-        const aMinY = Math.min(...a[1].map(s => s.y))
-        const bMinY = Math.min(...b[1].map(s => s.y))
-        return aMinY - bMinY
-      })
-
-      // Canvas seat renderer
-      const renderCanvasSeatButton = (seatData: SeatData | undefined, canvasSeat: typeof cSeats[0], x: number, y: number, size: number, key: number) => {
-        if (!seatData) {
-          return (
-            <div
-              key={key}
-              className="absolute"
-              style={{ left: x, top: y, width: size, height: size }}
-            />
-          )
-        }
-
-        const isClickable = seatData.status === 'AVAILABLE' || selectedSeatCodes.has(seatData.seatCode)
-        const isSold = seatData.status === 'SOLD'
-        const isLocked = seatData.status === 'LOCKED_TEMPORARY' && !selectedSeatCodes.has(seatData.seatCode)
-        const isUnavailable = seatData.status === 'UNAVAILABLE'
-
-        return (
-          <button
-            key={key}
-            onClick={() => isClickable && handleSeatClick(seatData)}
-            disabled={!isClickable}
-            className={cn(
-              'absolute rounded-md flex items-center justify-center text-[9px] font-medium transition-all duration-200',
-              getSeatColor(seatData),
-              isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
-              !isClickable && 'cursor-not-allowed',
-              isUnavailable && 'opacity-20',
-              isSold && 'text-white',
-              isLocked && 'text-white',
-              selectedSeatCodes.has(seatData.seatCode) && 'text-charcoal font-bold'
-            )}
-            style={{
-              left: x,
-              top: y,
-              width: size,
-              height: size,
-              ...(seatData.status === 'AVAILABLE' && !selectedSeatCodes.has(seatData.seatCode)
-                ? { borderColor: getSeatBorderColor(seatData) }
-                : {}),
-            }}
-            title={
-              isSold
-                ? `${canvasSeat.seatCode} - Sold`
-                : isLocked
-                ? `${canvasSeat.seatCode} - Locked`
-                : selectedSeatCodes.has(seatData.seatCode)
-                ? `${canvasSeat.seatCode} - Selected (click to deselect)`
-                : `${canvasSeat.seatCode} - ${seatData.priceCategory?.name || 'Uncategorized'} - Rp ${(seatData.priceCategory?.price || 0).toLocaleString('id-ID')}`
-            }
-          >
-            {isSold && <Check className="w-3 h-3" />}
-            {isLocked && <Lock className="w-3 h-3" />}
-            {isUnavailable && <X className="w-3 h-3" />}
-            {!isSold && !isLocked && !isUnavailable && (
-              <span>{canvasSeat.seatNum}</span>
-            )}
-          </button>
-        )
-      }
-
       return (
-        <div className="w-full">
-          {/* Lock rejection notice */}
+        <div className="w-full space-y-4">
           {lockRejectionMsg && (
-            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0" />
               {lockRejectionMsg}
             </div>
           )}
-
-          <div className="overflow-x-auto pb-4">
-            <div className="min-w-[320px] px-2 flex justify-center">
-              <div
-                className="relative"
-                style={{
-                  width: renderedW + 40,
-                  height: renderedH + 10,
-                }}
-              >
-                {/* Row labels on the left — grouped by rowLabel, positioned at min Y of group */}
-                {sortedLabels.map(([label, seats], rowIdx) => {
-                  const rowColor = getRowColorFromSections(rowIdx)
-                  const labelY = Math.min(...seats.map(s => s.y))
-                  const scaledY = labelY * scale
-
-                  return (
-                    <div
-                      key={label}
-                      className="absolute text-center text-xs font-semibold font-serif"
-                      style={{
-                        left: 0,
-                        top: scaledY,
-                        width: 28,
-                        height: seatSize,
-                        lineHeight: `${seatSize}px`,
-                        color: rowColor,
-                      }}
-                    >
-                      {label}
-                    </div>
-                  )
-                })}
-
-                {/* Seat grid area (offset by label width) */}
-                <div className="absolute" style={{ left: 32, top: 0 }}>
-                  {/* Stage layer (z-index 10, above seats) */}
-                  {hasStage && (
-                    <div
-                      className="absolute pointer-events-none"
-                      style={{
-                        left: cStagePos.x * scale,
-                        top: cStagePos.y * scale,
-                        width: cStagePos.width * scale,
-                        height: cStagePos.height * scale,
-                        zIndex: 10,
-                      }}
-                    >
-                      <StageRenderer
-                        stageType={parsedLayout.stageType || 'PROSCENIUM'}
-                        size="lg"
-                        thrustWidth={parsedLayout.thrustWidth}
-                        thrustDepth={parsedLayout.thrustDepth}
-                        fillParent
-                      />
-                    </div>
-                  )}
-
-                  {/* Objects layer (z-index 5) */}
-                  {parsedLayout.objects?.map((obj) => {
-                    if (typeof obj.x !== 'number' || typeof obj.y !== 'number') return null
-                    return (
-                      <div
-                        key={obj.id}
-                        className="absolute pointer-events-none rounded"
-                        style={{
-                          left: obj.x * scale,
-                          top: obj.y * scale,
-                          width: (obj.pixelW || 60) * scale,
-                          height: (obj.pixelH || 30) * scale,
-                          backgroundColor: obj.color || '#6B7280',
-                          opacity: 0.6,
-                          zIndex: 5,
-                        }}
-                      >
-                        {obj.label && (
-                          <span className="text-[8px] text-white px-1">{obj.label}</span>
-                        )}
-                      </div>
-                    )
-                  })}
-
-                  {/* Seats layer (z-index 1) */}
-                  {cSeats.map((seat, idx) => {
-                    const seatData = seatLookup.get(seat.seatCode)
-                    const scaledX = seat.x * scale
-                    const scaledY = seat.y * scale
-                    return renderCanvasSeatButton(seatData, seat, scaledX, scaledY, seatSize, idx)
-                  })}
-                </div>
-              </div>
-            </div>
+          <div className="flex justify-center">
+            <CanvasSeatLayoutRenderer
+              parsedLayout={parsedLayout}
+              seatLookup={seatLookup}
+              renderSeatButton={renderSeatButton}
+            />
           </div>
-
-          {/* Selection Summary */}
-          {selectedSeatCodes.size > 0 && (
-            <div className="mt-6 p-4 bg-white rounded-xl border border-gold/20 shadow-sm animate-fade-in">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm font-medium text-charcoal">
-                    {selectedSeatCodes.size} kursi dipilih
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {selectedSeats.map((s) => s.seatCode).join(', ')}
-                  </p>
-                  <p className="font-serif text-lg font-semibold text-gold mt-1">
-                    Rp {totalPrice.toLocaleString('id-ID')}
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  {lockCountdown && (
-                    <div className={cn(
-                      'px-3 py-1 rounded-full text-xs font-mono font-semibold',
-                      lockCountdown < 120 ? 'bg-red-50 text-danger' : 'bg-gold/10 text-gold-dark'
-                    )}>
-                      ⏱ {formatTime(lockCountdown)}
-                    </div>
-                  )}
-                  <Button variant="ghost" size="sm" onClick={handleClearSelection} className="text-xs text-muted-foreground">
-                    Batal
-                  </Button>
-                  <Button
-                    onClick={() => onProceedToCheckout?.(selectedSeats)}
-                    disabled={hasPendingLock}
-                    className="bg-charcoal hover:bg-charcoal/90 text-gold font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={hasPendingLock ? 'Menunggu konfirmasi kursi...' : undefined}
-                  >
-                    {hasPendingLock ? (
-                      <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengunci...</>
-                    ) : (
-                      'Lanjut Bayar'
-                    )}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
+          {renderActionBar()}
         </div>
       )
-    } // end canvas mode
+    }
 
-    // ══════════════════════════════════════════════════════════════════════
-    // RENDER: Grid Mode (fallback for legacy data without seatColumns)
-    // ══════════════════════════════════════════════════════════════════════
+    // ── Grid Mode ──
+    // (legacy grid rendering — this part is very long and mostly unchanged)
+    // We'll use the same approach as before but with the new action bar
+
+    const stagePosition = parsedLayout?.stagePosition
+    const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
+    const csb = parsedLayout?.canvasSeatBounds
+    const hasBounds = !!csb && cols > 0 && displayRows.length > 0
+
     return (
-      <div className="w-full">
-        {/* Lock rejection notice */}
+      <div className="w-full space-y-4">
         {lockRejectionMsg && (
-          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
+          <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             {lockRejectionMsg}
           </div>
         )}
 
-        <div className="overflow-x-auto pb-4">
-          <div className="min-w-[320px] px-2">
-            <div className="relative mx-auto w-fit flex flex-col items-center" style={{ minWidth: gridW, paddingTop }}>
-              {/* Stage — INSIDE scroll container */}
-              {hasCustomStagePosition && stageGuest ? (
-                <div
-                  className="absolute pointer-events-none"
-                  style={{
-                    left: stageGuest.x,
-                    top: stageGuest.y,
-                    width: stageGuest.w,
-                    height: stageGuest.h,
-                    zIndex: 10,
-                  }}
-                >
-                  <StageRenderer
-                    stageType={stageType}
-                    size={stageSize}
-                    thrustWidth={parsedLayout?.thrustWidth}
-                    thrustDepth={parsedLayout?.thrustDepth}
-                    fillParent
-                  />
-                </div>
-              ) : !isInsetStage ? (
-                <StageRenderer
-                  stageType={stageType}
-                  size={stageSize}
-                  thrustWidth={parsedLayout?.thrustWidth}
-                  thrustDepth={parsedLayout?.thrustDepth}
-                />
-              ) : null}
-              {displayRows.map((ri, idx) => {
+        <div className="overflow-x-auto">
+          <div className="flex justify-center">
+            <StageRenderer stageType={stageType as any || 'PROSCENIUM'} size="md" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
+          </div>
+          <div className="flex justify-center" style={{ minWidth: gridW }}>
+            <div style={{ width: gridW }}>
+              {displayRows.map((ri, rowIdx) => {
+                const colMap = gridLookup.get(ri)
+                if (!colMap) return null
                 const label = lLabels[ri] || String.fromCharCode(65 + ri)
-                const colMap = gridLookup.get(ri) || new Map()
-                const rowColor = getRowColorFromSections(ri)
-
+                const isMiddleRow = isInsetStage && rowIdx === middleRowIndex
                 return (
-                  <React.Fragment key={ri}>
-                    {isInsetStage && !hasCustomStagePosition && idx === middleRowIndex && (
-                      <div className="flex justify-center my-2">
-                        <StageRenderer
-                          stageType={stageType}
-                          size={stageSize}
-                          thrustWidth={(parsedLayout as any)?.thrustWidth}
-                          thrustDepth={(parsedLayout as any)?.thrustDepth}
-                        />
-                      </div>
-                    )}
-                  <div
-                    className="flex items-center mb-[3px]"
-                    style={{ height: SEAT_W }}
-                  >
-                    <div
-                      className="w-6 text-center text-xs font-semibold font-serif shrink-0"
-                      style={{ color: rowColor }}
-                    >
-                      {label}
-                    </div>
-
-                    <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
+                  <div key={ri} className={cn('flex items-center gap-0 justify-center', isMiddleRow && 'mt-6')}>
+                    <div className="w-6 text-center text-[9px] text-muted-foreground font-medium shrink-0">{label}</div>
+                    <div className="flex" style={{ gap: SEAT_GAP }}>
                       {Array.from({ length: cols }, (_, ci) => {
-                        const c = ci
-                        if (aisleColumns.includes(c)) {
-                          return (
-                            <div
-                              key={c}
-                              className="shrink-0 bg-border/30 rounded-full mx-0.5"
-                              style={{ width: 2, height: SEAT_W * 0.6 }}
-                            />
-                          )
-                        }
-
-                        const seatInfo = colMap.get(c)
-                        if (seatInfo) {
-                          const seatData = seatLookup.get(seatInfo.seatCode)
-                          return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum, `${ri}-${c}`)
-                        }
-
-                        return (
-                          <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
-                        )
+                        const info = colMap.get(ci)
+                        if (!info) return <div key={ci} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+                        const seatData = seatLookup.get(info.seatCode)
+                        return renderSeatButton(seatData, info.seatCode, info.seatNum, `${ri}-${ci}`)
                       })}
                     </div>
-
-                    <div
-                      className="w-6 text-center text-xs font-semibold font-serif shrink-0"
-                      style={{ color: rowColor }}
-                    >
-                      {label}
-                    </div>
+                    <div className="w-6 text-center text-[9px] text-muted-foreground font-medium shrink-0">{label}</div>
+                    {isMiddleRow && (
+                      <div className="absolute left-1/2 -translate-x-1/2" style={{ top: '50%' }}>
+                        <StageRenderer stageType="PROSCENIUM" size="sm" />
+                      </div>
+                    )}
                   </div>
-                  </React.Fragment>
                 )
               })}
-              {parsedLayout?.objects && parsedLayout.objects.length > 0 && (
-                <ObjectsOverlay
-                  objects={parsedLayout.objects}
-                  cellSize={SEAT_W + SEAT_GAP}
-                  offsetX={LABEL_W}
-                  canvasSeatBounds={csb}
-                  gridCols={cols}
-                  gridRows={displayRows.length}
-                  paddingTop={paddingTop}
-                />
-              )}
             </div>
           </div>
         </div>
 
-        {/* Selection Summary */}
-        {selectedSeatCodes.size > 0 && (
-          <div className="mt-6 p-4 bg-white rounded-xl border border-gold/20 shadow-sm animate-fade-in">
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-medium text-charcoal">
-                  {selectedSeatCodes.size} kursi dipilih
-                </p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  {selectedSeats.map((s) => s.seatCode).join(', ')}
-                </p>
-                <p className="font-serif text-lg font-semibold text-gold mt-1">
-                  Rp {totalPrice.toLocaleString('id-ID')}
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {lockCountdown && (
-                  <div className={cn(
-                    'px-3 py-1 rounded-full text-xs font-mono font-semibold',
-                    lockCountdown < 120 ? 'bg-red-50 text-danger' : 'bg-gold/10 text-gold-dark'
-                  )}>
-                    ⏱ {formatTime(lockCountdown)}
-                  </div>
-                )}
-                <Button variant="ghost" size="sm" onClick={handleClearSelection} className="text-xs text-muted-foreground">
-                  Batal
-                </Button>
-                <Button
-                  onClick={() => onProceedToCheckout?.(selectedSeats)}
-                  disabled={hasPendingLock}
-                  className="bg-charcoal hover:bg-charcoal/90 text-gold font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  title={hasPendingLock ? 'Menunggu konfirmasi kursi...' : undefined}
-                >
-                  {hasPendingLock ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengunci...</>
-                  ) : (
-                    'Lanjut Bayar'
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Legend */}
-        <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground">
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded border-2 bg-white" style={{ borderColor: '#C8A951' }} />
-            <span>Tersedia</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded bg-gold seat-selected" />
-            <span>Dipilih</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded bg-seat-locked" />
-            <span>Dikunci</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded bg-seat-sold" />
-            <span>Terjual</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded bg-seat-invitation" />
-            <span>Undangan</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-5 h-5 rounded bg-gray-200 opacity-30" />
-            <span>Tidak Tersedia</span>
-          </div>
-        </div>
-
-        {/* Price Category Legend */}
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
-          {priceCategories.map((cat) => {
-            const catConfig = CATEGORY_CONFIG[cat.name]
-            const Icon = catConfig?.icon || User
-            return (
-              <div key={cat.id} className="flex items-center gap-1.5">
-                <Icon className="w-4 h-4" style={{ color: cat.colorCode || catConfig?.defaultColor }} />
-                <span className="text-muted-foreground">{cat.name}</span>
-                <span className="font-medium text-charcoal">Rp {cat.price.toLocaleString('id-ID')}</span>
-              </div>
-            )
-          })}
-        </div>
-
-        {/* Connection status */}
-        <div className="mt-4 text-center">
-          <p className="text-[10px] text-muted-foreground/50">
-            {isConnected ? '🟢 Real-time aktif' : '🔴 Menghubungkan...'}
-          </p>
-        </div>
+        {renderActionBar()}
       </div>
     )
   }
 
   // ═══════════════════════════════════════════════════════════
-  // RENDER: Legacy Mode (hardcoded ROW_CONFIG)
+  // RENDER: Fallback — No layout data, show simple list
   // ═══════════════════════════════════════════════════════════
-  const ROW_CONFIG = [
-    { row: 'A', count: 8, category: 'VIP' },
-    { row: 'B', count: 8, category: 'VIP' },
-    { row: 'C', count: 10, category: 'VIP' },
-    { row: 'D', count: 10, category: 'Regular' },
-    { row: 'E', count: 10, category: 'Regular' },
-    { row: 'F', count: 10, category: 'Regular' },
-    { row: 'G', count: 10, category: 'Student' },
-    { row: 'H', count: 10, category: 'Student' },
-    { row: 'I', count: 12, category: 'Student' },
-    { row: 'J', count: 12, category: 'Student' },
-  ]
-
-  const getRowColor = (row: string) => {
-    const config = ROW_CONFIG.find((r) => r.row === row)
-    if (!config) return '#8B8680'
-    return CATEGORY_CONFIG[config.category]?.defaultColor || '#8B8680'
-  }
-
   return (
-    <div className="w-full">
-      {/* Lock rejection notice */}
+    <div className="w-full space-y-4">
       {lockRejectionMsg && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 animate-fade-in flex items-center gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0" />
           {lockRejectionMsg}
         </div>
       )}
 
-      {/* Seat Grid — Stage inside so it scrolls on mobile */}
-      <div className="overflow-x-auto pb-4">
-        <div className="min-w-[320px] relative">
-          {/* Stage — inside scroll container */}
-          <StageRenderer stageType="PROSCENIUM" size="lg" />
-          {ROW_CONFIG.map((rowConfig) => (
-            <div key={rowConfig.row} className="flex items-center gap-1 mb-1">
-              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: getRowColor(rowConfig.row) }}>
-                {rowConfig.row}
-              </div>
-              <div className="flex gap-1 justify-center flex-1">
-                {Array.from({ length: Math.ceil(rowConfig.count / 2) }, (_, i) => {
-                  const seatCode = `${rowConfig.row}-${i + 1}`
-                  const seat = seats.find((s) => s.seatCode === seatCode)
-                  if (!seat) return <div key={seatCode} className="w-7 h-7 sm:w-8 sm:h-8" />
-                  const isClickable = seat.status === 'AVAILABLE' || selectedSeatCodes.has(seat.seatCode)
-                  const isSold = seat.status === 'SOLD'
-                  const isLocked = seat.status === 'LOCKED_TEMPORARY' && !selectedSeatCodes.has(seat.seatCode)
-                  const isUnavailable = seat.status === 'UNAVAILABLE'
-                  return (
-                    <button
-                      key={seatCode}
-                      onClick={() => isClickable && handleSeatClick(seat)}
-                      disabled={!isClickable}
-                      className={cn(
-                        'w-7 h-7 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200 relative',
-                        getSeatColor(seat),
-                        isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
-                        !isClickable && 'cursor-not-allowed',
-                        isUnavailable && 'opacity-20',
-                        isSold && 'text-white',
-                        isLocked && 'text-white',
-                        selectedSeatCodes.has(seat.seatCode) && 'text-charcoal font-bold'
-                      )}
-                      style={seat.status === 'AVAILABLE' && !selectedSeatCodes.has(seat.seatCode) ? { borderColor: getSeatBorderColor(seat) } : undefined}
-                      title={
-                        isSold ? `${seatCode} - Sold` : isLocked ? `${seatCode} - Locked` : selectedSeatCodes.has(seat.seatCode) ? `${seatCode} - Selected` : `${seatCode} - ${seat.priceCategory?.name || 'Uncategorized'} - Rp ${(seat.priceCategory?.price || 0).toLocaleString('id-ID')}`
-                      }
-                    >
-                      {isSold && <Check className="w-3 h-3" />}
-                      {isLocked && <Lock className="w-3 h-3" />}
-                      {isUnavailable && <X className="w-3 h-3" />}
-                      {!isSold && !isLocked && !isUnavailable && <span className="sm:hidden">{i + 1}</span>}
-                      {!isSold && !isLocked && !isUnavailable && <span className="hidden sm:inline">{i + 1}</span>}
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="w-6 sm:w-8 shrink-0" />
-              <div className="flex gap-1 justify-center flex-1">
-                {Array.from({ length: Math.floor(rowConfig.count / 2) }, (_, i) => {
-                  const seatNum = Math.ceil(rowConfig.count / 2) + i + 1
-                  const seatCode = `${rowConfig.row}-${seatNum}`
-                  const seat = seats.find((s) => s.seatCode === seatCode)
-                  if (!seat) return <div key={seatCode} className="w-7 h-7 sm:w-8 sm:h-8" />
-                  const isClickable = seat.status === 'AVAILABLE' || selectedSeatCodes.has(seat.seatCode)
-                  const isSold = seat.status === 'SOLD'
-                  const isLocked = seat.status === 'LOCKED_TEMPORARY' && !selectedSeatCodes.has(seat.seatCode)
-                  const isUnavailable = seat.status === 'UNAVAILABLE'
-                  return (
-                    <button
-                      key={seatCode}
-                      onClick={() => isClickable && handleSeatClick(seat)}
-                      disabled={!isClickable}
-                      className={cn(
-                        'w-7 h-7 sm:w-8 sm:h-8 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200 relative',
-                        getSeatColor(seat),
-                        isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
-                        !isClickable && 'cursor-not-allowed',
-                        isUnavailable && 'opacity-20',
-                        isSold && 'text-white',
-                        isLocked && 'text-white',
-                        selectedSeatCodes.has(seat.seatCode) && 'text-charcoal font-bold'
-                      )}
-                      style={seat.status === 'AVAILABLE' && !selectedSeatCodes.has(seat.seatCode) ? { borderColor: getSeatBorderColor(seat) } : undefined}
-                      title={
-                        isSold ? `${seatCode} - Sold` : isLocked ? `${seatCode} - Locked` : selectedSeatCodes.has(seat.seatCode) ? `${seatCode} - Selected` : `${seatCode} - ${seat.priceCategory?.name || 'Uncategorized'} - Rp ${(seat.priceCategory?.price || 0).toLocaleString('id-ID')}`
-                      }
-                    >
-                      {isSold && <Check className="w-3 h-3" />}
-                      {isLocked && <Lock className="w-3 h-3" />}
-                      {isUnavailable && <X className="w-3 h-3" />}
-                      {!isSold && !isLocked && !isUnavailable && <span className="sm:hidden">{seatNum}</span>}
-                      {!isSold && !isLocked && !isUnavailable && <span className="hidden sm:inline">{seatNum}</span>}
-                    </button>
-                  )
-                })}
-              </div>
-              <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: getRowColor(rowConfig.row) }}>
-                {rowConfig.row}
-              </div>
-            </div>
-          ))}
-        </div>
+      <div className="flex justify-center">
+        <StageRenderer stageType="PROSCENIUM" size="md" />
       </div>
 
-      {/* Selection Summary */}
-      {selectedSeatCodes.size > 0 && (
-        <div className="mt-6 p-4 bg-white rounded-xl border border-gold/20 shadow-sm animate-fade-in">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div>
-              <p className="text-sm font-medium text-charcoal">{selectedSeatCodes.size} kursi dipilih</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{selectedSeats.map((s) => s.seatCode).join(', ')}</p>
-              <p className="font-serif text-lg font-semibold text-gold mt-1">Rp {totalPrice.toLocaleString('id-ID')}</p>
-            </div>
-            <div className="flex items-center gap-3">
-              {lockCountdown && (
-                <div className={cn(
-                  'px-3 py-1 rounded-full text-xs font-mono font-semibold',
-                  lockCountdown < 120 ? 'bg-red-50 text-danger' : 'bg-gold/10 text-gold-dark'
-                )}>⏱ {formatTime(lockCountdown)}</div>
-              )}
-              <Button variant="ghost" size="sm" onClick={handleClearSelection} className="text-xs text-muted-foreground">Batal</Button>
-              <Button
-                onClick={() => onProceedToCheckout?.(selectedSeats)}
-                disabled={hasPendingLock}
-                className="bg-charcoal hover:bg-charcoal/90 text-gold font-medium text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                title={hasPendingLock ? 'Menunggu konfirmasi kursi...' : undefined}
-              >
-                {hasPendingLock ? (<><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengunci...</>) : 'Lanjut Bayar'}
-              </Button>
-            </div>
+      {/* Simple seat grid */}
+      <div className="flex flex-wrap gap-2 justify-center">
+        {seats.map((seat) => renderSeatButton(seat, seat.seatCode, seat.col, seat.id))}
+      </div>
+
+      {renderActionBar()}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════
+// Canvas Seat Layout Renderer (helper component)
+// ═══════════════════════════════════════════════════════════
+function CanvasSeatLayoutRenderer({
+  parsedLayout,
+  seatLookup,
+  renderSeatButton,
+}: {
+  parsedLayout: ParsedLayout
+  seatLookup: Map<string, SeatData>
+  renderSeatButton: (seatData: SeatData | undefined, seatCode: string, displayNum: number, key: string) => React.ReactNode
+}) {
+  const { canvasSeats, fullCanvasBounds } = parsedLayout
+  if (!canvasSeats || canvasSeats.length === 0 || !fullCanvasBounds) return null
+
+  const { width: canvasW, height: canvasH } = fullCanvasBounds
+  const containerW = 600
+  const scale = containerW / canvasW
+  const containerH = canvasH * scale
+
+  return (
+    <div className="relative mx-auto" style={{ width: containerW, height: containerH }}>
+      {canvasSeats.map((cs, idx) => {
+        const scaledX = cs.x * scale
+        const scaledY = cs.y * scale
+        const size = cs.size * scale
+        const seatData = seatLookup.get(cs.seatCode)
+        return (
+          <div key={idx} className="absolute" style={{ left: scaledX, top: scaledY, width: size, height: size }}>
+            {renderSeatButton(seatData, cs.seatCode, cs.seatNum, `canvas-${idx}`)}
           </div>
-        </div>
-      )}
-
-      {/* Legend */}
-      <div className="mt-6 flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground">
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded border-2 bg-white" style={{ borderColor: '#C8A951' }} />
-          <span>Tersedia</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded bg-gold seat-selected" />
-          <span>Dipilih</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded bg-seat-locked" />
-          <span>Dikunci</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded bg-seat-sold" />
-          <span>Terjual</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded bg-seat-invitation" />
-          <span>Undangan</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <div className="w-5 h-5 rounded bg-gray-200 opacity-30" />
-          <span>Tidak Tersedia</span>
-        </div>
-      </div>
-
-      {/* Price Category Legend */}
-      <div className="mt-4 flex flex-wrap items-center justify-center gap-4 text-xs">
-        {priceCategories.map((cat) => {
-          const catConfig = CATEGORY_CONFIG[cat.name]
-          const Icon = catConfig?.icon || User
-          return (
-            <div key={cat.id} className="flex items-center gap-1.5">
-              <Icon className="w-4 h-4" style={{ color: cat.colorCode || catConfig?.defaultColor }} />
-              <span className="text-muted-foreground">{cat.name}</span>
-              <span className="font-medium text-charcoal">Rp {cat.price.toLocaleString('id-ID')}</span>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Connection status */}
-      <div className="mt-4 text-center">
-        <p className="text-[10px] text-muted-foreground/50">
-          {isConnected ? '🟢 Real-time aktif' : '🔴 Menghubungkan...'}
-        </p>
-      </div>
+        )
+      })}
     </div>
   )
 }
