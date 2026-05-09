@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { db } from '@/lib/db'
+import { db, withDbRetry } from '@/lib/db'
 
 // GET /api/usher/seats-info?eventId=xxx
 // Returns a map of seatCode -> transaction info for all SOLD/PAID seats
@@ -16,20 +16,22 @@ export async function GET(request: NextRequest) {
     }
 
     // Verify event exists
-    const event = await db.event.findUnique({
+    const event = await withDbRetry(() => db.event.findUnique({
       where: { id: eventId },
       select: { id: true, title: true },
-    })
+    }))
 
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    // Get all paid + complimentary transactions for this event
-    const transactions = await db.transaction.findMany({
+    // Get all paid transactions for this event
+    // Note: Complimentary tickets are stored as paymentStatus='PAID' with totalAmount=0,
+    // so 'PAID' covers both regular and complimentary tickets.
+    const transactions = await withDbRetry(() => db.transaction.findMany({
       where: {
         eventId,
-        paymentStatus: { in: ['PAID', 'COMPLIMENTARY'] },
+        paymentStatus: 'PAID',
       },
       select: {
         transactionId: true,
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest) {
         totalAmount: true,
         id: true,
       },
-    })
+    }))
 
     // Build seatCode -> transaction info map
     const seatInfoMap: Record<string, {

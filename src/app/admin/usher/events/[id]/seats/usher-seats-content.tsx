@@ -298,9 +298,11 @@ export default function UsherSeatMapPage() {
         if (infoRes.ok) {
           const infoData = await infoRes.json()
           if (!cancelled) setSeatOwnerMap(infoData.seats || {})
+        } else {
+          console.warn('[UsherSeats] seats-info API returned', infoRes.status)
         }
-      } catch {
-        // silent
+      } catch (err) {
+        console.warn('[UsherSeats] fetchSeats error:', err)
       }
     }
 
@@ -332,8 +334,8 @@ export default function UsherSeatMapPage() {
             }
           }
         }
-      } catch {
-        // silent
+      } catch (err) {
+        console.warn('[UsherSeats] interval fetch error:', err)
       }
     }, 5000)
 
