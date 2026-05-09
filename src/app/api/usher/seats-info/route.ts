@@ -27,17 +27,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    // ── Strategy ──
-    // For the usher panel, we need to find the owner of SOLD/INVITATION seats.
-    // A seat can be marked SOLD but its transaction might be in ANY status.
-    // We search ALL statuses to ensure we find the owner.
-
     const isTargetedLookup = !!targetSeatCode
 
-    // ── STEP 1: Batch query — build seatInfoMap from all transactions ──
+    // ── STEP 1: Query all transactions for this event ──
+    // Use NOT filter for null seatCodes to avoid Prisma syntax issues
     const whereClause: any = {
       eventId,
-      seatCodes: { not: null },
+      NOT: { seatCodes: null },
     }
 
     if (!isTargetedLookup) {
@@ -120,7 +116,6 @@ export async function GET(request: NextRequest) {
         const currentPriority = statusPriority[txn.paymentStatus] ?? 99
 
         // Only overwrite if current transaction has higher priority (lower number)
-        // or if there's no existing entry
         if (!existing || currentPriority < existingPriority) {
           seatInfoMap[code] = {
             owner: txn.customerName,
@@ -139,24 +134,28 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── STEP 2: If targeted lookup and not found in map, try direct DB string search ──
-    // This handles edge cases where seatCodes is stored in unexpected format
-    // (e.g., the seat code might be embedded differently in the JSON string)
+    // ── STEP 2: If targeted lookup and not found, try direct DB string search ──
     let targetResult = targetSeatCode ? (seatInfoMap[targetSeatCode] || null) : null
     let debugInfo: any = null
 
     if (targetSeatCode) {
       console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": ${targetResult ? 'found in map' : 'not found in map'}`)
-      console.log(`[seats-info] All seat codes found: [${debugSeatCodes.slice(0, 30).join(', ')}${debugSeatCodes.length > 30 ? '...' : ''}]`)
+
+      if (debugSeatCodes.length > 0) {
+        console.log(`[seats-info] Seat codes in map sample: [${debugSeatCodes.slice(0, 20).join(', ')}]`)
+      }
 
       if (!targetResult) {
         // Fallback: search directly in database using string contains
-        // This catches cases where the seatCode format differs from what we expect
         try {
+          // Use raw query to avoid Prisma type issues with contains on nullable fields
           const fallbackTxns = await withDbRetry(() => db.transaction.findMany({
             where: {
               eventId,
-              seatCodes: { contains: targetSeatCode },
+              AND: [
+                { seatCodes: { contains: targetSeatCode } },
+                { NOT: { seatCodes: null } },
+              ],
             },
             select: {
               transactionId: true,
@@ -177,10 +176,8 @@ export async function GET(request: NextRequest) {
           console.log(`[seats-info] Fallback DB search found ${fallbackTxns.length} transactions containing "${targetSeatCode}"`)
 
           for (const txn of fallbackTxns) {
-            // Log the raw seatCodes for debugging
-            console.log(`[seats-info] Fallback txn ${txn.transactionId} (status: ${txn.paymentStatus}) seatCodes raw: ${txn.seatCodes}`)
+            console.log(`[seats-info] Fallback txn ${txn.transactionId} (status: ${txn.paymentStatus}) seatCodes: ${txn.seatCodes?.substring(0, 100)}`)
 
-            // Try to parse and find the matching code
             let codes: string[] = []
             try {
               const parsed = JSON.parse(txn.seatCodes || '[]')
@@ -193,7 +190,7 @@ export async function GET(request: NextRequest) {
               codes = String(txn.seatCodes).split(',').map((s: string) => s.trim()).filter(Boolean)
             }
 
-            // Check exact match first
+            // Check exact match
             if (codes.includes(targetSeatCode)) {
               targetResult = {
                 owner: txn.customerName,
@@ -208,9 +205,8 @@ export async function GET(request: NextRequest) {
                 emailError: txn.emailError || null,
                 lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
               }
-              // Also add to map
               seatInfoMap[targetSeatCode] = targetResult
-              console.log(`[seats-info] Fallback exact match for "${targetSeatCode}" in txn ${txn.transactionId}`)
+              console.log(`[seats-info] Fallback exact match for "${targetSeatCode}"`)
               break
             }
 
@@ -231,19 +227,17 @@ export async function GET(request: NextRequest) {
                 emailError: txn.emailError || null,
                 lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
               }
-              // Add to map under BOTH the original code and the matched code
               seatInfoMap[targetSeatCode] = targetResult
               seatInfoMap[matchCode] = targetResult
-              console.log(`[seats-info] Fallback case-insensitive match: "${targetSeatCode}" ↔ "${matchCode}" in txn ${txn.transactionId}`)
+              console.log(`[seats-info] Fallback case-insensitive match: "${targetSeatCode}" ↔ "${matchCode}"`)
               break
             }
           }
 
-          // If still not found via parsing but fallback found transactions,
-          // the seatCode might be in a format we can't parse. Try substring matching.
+          // Last resort: if fallback found transactions but no code match,
+          // use the first one (seatCode is in the raw string)
           if (!targetResult && fallbackTxns.length > 0) {
             const txn = fallbackTxns[0]
-            console.log(`[seats-info] Fallback substring match: using first transaction containing "${targetSeatCode}"`)
             targetResult = {
               owner: txn.customerName,
               email: txn.customerEmail,
@@ -258,13 +252,13 @@ export async function GET(request: NextRequest) {
               lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
             }
             seatInfoMap[targetSeatCode] = targetResult
+            console.log(`[seats-info] Fallback substring match for "${targetSeatCode}"`)
           }
         } catch (fallbackErr) {
           console.error('[seats-info] Fallback search error:', fallbackErr)
         }
       }
 
-      // Build debug info for frontend troubleshooting
       debugInfo = {
         lookupSeatCode: targetSeatCode,
         totalTransactions: transactions.length,
@@ -290,9 +284,9 @@ export async function GET(request: NextRequest) {
       totalSold: Object.keys(seatInfoMap).length,
     })
   } catch (error) {
-    console.error('Error fetching usher seats info:', error)
+    console.error('[seats-info] Error:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch seats info' },
+      { error: 'Failed to fetch seats info', details: error instanceof Error ? error.message : String(error) },
       { status: 500 }
     )
   }
