@@ -30,38 +30,64 @@ export async function GET(request: NextRequest) {
     const isTargetedLookup = !!targetSeatCode
 
     // ── STEP 1: Query all transactions for this event ──
-    // Don't filter by seatCodes null here — we'll skip nulls during parsing
-    // This avoids Prisma syntax issues with nullable string fields
+    // We try with email columns first. If the migration hasn't been run yet,
+    // the query will fail, and we retry without those columns.
     const whereClause: any = {
       eventId,
     }
 
     if (!isTargetedLookup) {
-      // Batch load: include all relevant statuses
       whereClause.paymentStatus = { in: ['PAID', 'PENDING', 'EXPIRED', 'FAILED', 'CANCELLED'] }
     }
-    // For targeted lookup: no payment status filter — search ALL statuses
 
-    const transactions = await withDbRetry(() => db.transaction.findMany({
-      where: whereClause,
-      select: {
-        transactionId: true,
-        customerName: true,
-        customerEmail: true,
-        customerWa: true,
-        seatCodes: true,
-        paymentStatus: true,
-        checkInTime: true,
-        paidAt: true,
-        totalAmount: true,
-        emailStatus: true,
-        emailError: true,
-        lastEmailSentAt: true,
-        id: true,
-      },
-    }))
+    // Try with email columns, fall back without them if migration not yet applied
+    let transactions: any[] = []
+    let hasEmailColumns = true
 
-    console.log(`[seats-info] Found ${transactions.length} transactions for event ${eventId} (targeted: ${isTargetedLookup})`)
+    try {
+      transactions = await withDbRetry(() => db.transaction.findMany({
+        where: whereClause,
+        select: {
+          transactionId: true,
+          customerName: true,
+          customerEmail: true,
+          customerWa: true,
+          seatCodes: true,
+          paymentStatus: true,
+          checkInTime: true,
+          paidAt: true,
+          totalAmount: true,
+          emailStatus: true,
+          emailError: true,
+          lastEmailSentAt: true,
+          id: true,
+        },
+      }))
+    } catch (selectErr: any) {
+      if (selectErr?.message?.includes('emailStatus') || selectErr?.message?.includes('emailError') || selectErr?.message?.includes('lastEmailSentAt')) {
+        console.log('[seats-info] Email columns not found in DB — falling back to query without them')
+        hasEmailColumns = false
+        transactions = await withDbRetry(() => db.transaction.findMany({
+          where: whereClause,
+          select: {
+            transactionId: true,
+            customerName: true,
+            customerEmail: true,
+            customerWa: true,
+            seatCodes: true,
+            paymentStatus: true,
+            checkInTime: true,
+            paidAt: true,
+            totalAmount: true,
+            id: true,
+          },
+        }))
+      } else {
+        throw selectErr
+      }
+    }
+
+    console.log(`[seats-info] Found ${transactions.length} transactions for event ${eventId} (targeted: ${isTargetedLookup}, emailCols: ${hasEmailColumns})`)
 
     // Build seatCode -> transaction info map
     const statusPriority: Record<string, number> = {
@@ -89,7 +115,6 @@ export async function GET(request: NextRequest) {
     const debugSeatCodes: string[] = []
 
     for (const txn of transactions) {
-      // Skip transactions with no seatCodes
       if (!txn.seatCodes) continue
 
       let seatCodes: string[] = []
@@ -122,31 +147,28 @@ export async function GET(request: NextRequest) {
             checkInTime: txn.checkInTime?.toISOString() || null,
             paidAt: txn.paidAt?.toISOString() || null,
             totalAmount: txn.totalAmount,
-            emailStatus: txn.emailStatus || null,
-            emailError: txn.emailError || null,
-            lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+            emailStatus: hasEmailColumns ? (txn.emailStatus || null) : null,
+            emailError: hasEmailColumns ? (txn.emailError || null) : null,
+            lastEmailSentAt: hasEmailColumns ? (txn.lastEmailSentAt?.toISOString() || null) : null,
           }
         }
       }
     }
 
-    // ── STEP 2: Targeted lookup ──
+    // ── STEP 2: Targeted lookup fallback via raw SQL ──
     let targetResult = targetSeatCode ? (seatInfoMap[targetSeatCode] || null) : null
 
     if (targetSeatCode && !targetResult) {
-      // Not found in parsed map. Log what we have for debugging.
       console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": not found in parsed map`)
       console.log(`[seats-info] Parsed seat codes (${debugSeatCodes.length}): [${debugSeatCodes.slice(0, 30).join(', ')}]`)
 
-      // Fallback: try raw SQL to find transactions where seatCodes contains the code
-      // This catches ANY format difference
       try {
-        // Use $queryRaw for maximum compatibility — bypasses Prisma filter syntax issues
+        // Use raw SQL — only select columns that definitely exist
         const fallbackResults: any[] = await db.$queryRaw`
           SELECT
             "transactionId", "customerName", "customerEmail", "customerWa",
             "seatCodes", "paymentStatus", "checkInTime", "paidAt",
-            "totalAmount", "emailStatus", "emailError", "lastEmailSentAt"
+            "totalAmount"
           FROM "Transaction"
           WHERE "eventId" = ${eventId}
             AND "seatCodes" IS NOT NULL
@@ -159,7 +181,6 @@ export async function GET(request: NextRequest) {
         for (const txn of fallbackResults) {
           console.log(`[seats-info] Raw fallback txn ${txn.transactionId} (status: ${txn.paymentStatus}) seatCodes: ${String(txn.seatCodes).substring(0, 100)}`)
 
-          // Parse seatCodes from raw result
           let codes: string[] = []
           try {
             const parsed = JSON.parse(txn.seatCodes || '[]')
@@ -183,9 +204,9 @@ export async function GET(request: NextRequest) {
               checkInTime: txn.checkInTime?.toISOString() || null,
               paidAt: txn.paidAt?.toISOString() || null,
               totalAmount: Number(txn.totalAmount),
-              emailStatus: txn.emailStatus || null,
-              emailError: txn.emailError || null,
-              lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+              emailStatus: null,
+              emailError: null,
+              lastEmailSentAt: null,
             }
             seatInfoMap[targetSeatCode] = targetResult
             console.log(`[seats-info] Raw fallback exact match for "${targetSeatCode}"`)
@@ -205,9 +226,9 @@ export async function GET(request: NextRequest) {
               checkInTime: txn.checkInTime?.toISOString() || null,
               paidAt: txn.paidAt?.toISOString() || null,
               totalAmount: Number(txn.totalAmount),
-              emailStatus: txn.emailStatus || null,
-              emailError: txn.emailError || null,
-              lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+              emailStatus: null,
+              emailError: null,
+              lastEmailSentAt: null,
             }
             seatInfoMap[targetSeatCode] = targetResult
             seatInfoMap[matchCode] = targetResult
@@ -216,7 +237,7 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Last resort: use first match even if parsing doesn't find exact code
+        // Last resort
         if (!targetResult && fallbackResults.length > 0) {
           const txn = fallbackResults[0]
           targetResult = {
@@ -228,9 +249,9 @@ export async function GET(request: NextRequest) {
             checkInTime: txn.checkInTime?.toISOString() || null,
             paidAt: txn.paidAt?.toISOString() || null,
             totalAmount: Number(txn.totalAmount),
-            emailStatus: txn.emailStatus || null,
-            emailError: txn.emailError || null,
-            lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+            emailStatus: null,
+            emailError: null,
+            lastEmailSentAt: null,
           }
           seatInfoMap[targetSeatCode] = targetResult
           console.log(`[seats-info] Raw fallback substring match for "${targetSeatCode}"`)
@@ -257,6 +278,7 @@ export async function GET(request: NextRequest) {
         totalSeatCodesParsed: debugSeatCodes.length,
         foundInMap: !!seatInfoMap[targetSeatCode],
         seatCodesSample: debugSeatCodes.slice(0, 20),
+        hasEmailColumns,
       }
     }
 
