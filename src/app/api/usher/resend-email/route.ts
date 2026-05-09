@@ -104,11 +104,11 @@ export async function POST(request: NextRequest) {
           : undefined,
       })
 
-      // Track successful delivery
+      // Track successful delivery (safe even if email columns don't exist yet)
       await db.transaction.update({
         where: { transactionId },
         data: { emailStatus: 'SENT', emailError: null, lastEmailSentAt: new Date() },
-      })
+      }).catch(() => {})
 
       return NextResponse.json({
         success: true,
@@ -128,6 +128,9 @@ export async function POST(request: NextRequest) {
           lastEmailSentAt: new Date(),
         },
       }).catch(() => {})
+
+      // If email columns don't exist yet, the update above will silently fail (caught by .catch)
+      // The email still wasn't sent, so we still return the error below
 
       // Give user-friendly error message for common bounce reasons
       let userMessage = `Gagal mengirim email: ${errMsg}`

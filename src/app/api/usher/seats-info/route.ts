@@ -8,13 +8,10 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const eventId = searchParams.get('eventId')
-    const targetSeatCode = searchParams.get('seatCode') // optional: single seat lookup
+    const targetSeatCode = searchParams.get('seatCode')
 
     if (!eventId) {
-      return NextResponse.json(
-        { error: 'eventId is required' },
-        { status: 400 }
-      )
+      return NextResponse.json({ error: 'eventId is required' }, { status: 400 })
     }
 
     // Verify event exists
@@ -29,75 +26,54 @@ export async function GET(request: NextRequest) {
 
     const isTargetedLookup = !!targetSeatCode
 
-    // ── STEP 1: Query all transactions for this event ──
-    // We try with email columns first. If the migration hasn't been run yet,
-    // the query will fail, and we retry without those columns.
-    const whereClause: any = {
-      eventId,
-    }
+    // ── Use raw SQL for maximum reliability ──
+    // This avoids all Prisma select/column mismatch issues
+    // and handles cases where migration hasn't been run yet
 
-    if (!isTargetedLookup) {
-      whereClause.paymentStatus = { in: ['PAID', 'PENDING', 'EXPIRED', 'FAILED', 'CANCELLED'] }
-    }
-
-    // Try with email columns, fall back without them if migration not yet applied
-    let transactions: any[] = []
-    let hasEmailColumns = true
-
+    // Check if email columns exist
+    let hasEmailColumns = false
     try {
-      transactions = await withDbRetry(() => db.transaction.findMany({
-        where: whereClause,
-        select: {
-          transactionId: true,
-          customerName: true,
-          customerEmail: true,
-          customerWa: true,
-          seatCodes: true,
-          paymentStatus: true,
-          checkInTime: true,
-          paidAt: true,
-          totalAmount: true,
-          emailStatus: true,
-          emailError: true,
-          lastEmailSentAt: true,
-          id: true,
-        },
-      }))
-    } catch (selectErr: any) {
-      if (selectErr?.message?.includes('emailStatus') || selectErr?.message?.includes('emailError') || selectErr?.message?.includes('lastEmailSentAt')) {
-        console.log('[seats-info] Email columns not found in DB — falling back to query without them')
-        hasEmailColumns = false
-        transactions = await withDbRetry(() => db.transaction.findMany({
-          where: whereClause,
-          select: {
-            transactionId: true,
-            customerName: true,
-            customerEmail: true,
-            customerWa: true,
-            seatCodes: true,
-            paymentStatus: true,
-            checkInTime: true,
-            paidAt: true,
-            totalAmount: true,
-            id: true,
-          },
-        }))
-      } else {
-        throw selectErr
-      }
+      await db.$queryRaw`SELECT "emailStatus" FROM "Transaction" LIMIT 1`
+      hasEmailColumns = true
+    } catch {
+      hasEmailColumns = false
     }
 
-    console.log(`[seats-info] Found ${transactions.length} transactions for event ${eventId} (targeted: ${isTargetedLookup}, emailCols: ${hasEmailColumns})`)
+    console.log(`[seats-info] email columns available: ${hasEmailColumns}`)
+
+    // Build status filter for raw SQL
+    let statusFilter = ''
+    if (!isTargetedLookup) {
+      statusFilter = `AND "paymentStatus" IN ('PAID', 'PENDING', 'EXPIRED', 'FAILED', 'CANCELLED')`
+    }
+
+    const emailColumnsSelect = hasEmailColumns
+      ? ', "emailStatus", "emailError", "lastEmailSentAt"'
+      : ''
+
+    const rawResults: any[] = await db.$queryRawUnsafe(`
+      SELECT
+        "transactionId", "customerName", "customerEmail", "customerWa",
+        "seatCodes", "paymentStatus", "checkInTime", "paidAt",
+        "totalAmount"${emailColumnsSelect}
+      FROM "Transaction"
+      WHERE "eventId" = $1
+        AND "seatCodes" IS NOT NULL
+        ${statusFilter}
+      ORDER BY
+        CASE "paymentStatus"
+          WHEN 'PAID' THEN 0
+          WHEN 'PENDING' THEN 1
+          WHEN 'EXPIRED' THEN 2
+          WHEN 'FAILED' THEN 3
+          WHEN 'CANCELLED' THEN 4
+          ELSE 99
+        END ASC
+    `, eventId)
+
+    console.log(`[seats-info] Found ${rawResults.length} transactions for event ${eventId} (targeted: ${isTargetedLookup})`)
 
     // Build seatCode -> transaction info map
-    const statusPriority: Record<string, number> = {
-      PAID: 0,
-      PENDING: 1,
-      EXPIRED: 2,
-      FAILED: 3,
-      CANCELLED: 4,
-    }
-
     const seatInfoMap: Record<string, {
       owner: string
       email: string
@@ -114,7 +90,7 @@ export async function GET(request: NextRequest) {
 
     const debugSeatCodes: string[] = []
 
-    for (const txn of transactions) {
+    for (const txn of rawResults) {
       if (!txn.seatCodes) continue
 
       let seatCodes: string[] = []
@@ -133,37 +109,34 @@ export async function GET(request: NextRequest) {
 
       for (const code of seatCodes) {
         debugSeatCodes.push(code)
-        const existing = seatInfoMap[code]
-        const existingPriority = existing ? (statusPriority[existing.paymentStatus] ?? 99) : 99
-        const currentPriority = statusPriority[txn.paymentStatus] ?? 99
-
-        if (!existing || currentPriority < existingPriority) {
+        // First transaction wins (sorted by status priority above)
+        if (!seatInfoMap[code]) {
           seatInfoMap[code] = {
             owner: txn.customerName,
             email: txn.customerEmail,
             phone: txn.customerWa,
             transactionId: txn.transactionId,
             paymentStatus: txn.paymentStatus,
-            checkInTime: txn.checkInTime?.toISOString() || null,
-            paidAt: txn.paidAt?.toISOString() || null,
-            totalAmount: txn.totalAmount,
+            checkInTime: txn.checkInTime?.toISOString?.() || null,
+            paidAt: txn.paidAt?.toISOString?.() || null,
+            totalAmount: Number(txn.totalAmount),
             emailStatus: hasEmailColumns ? (txn.emailStatus || null) : null,
             emailError: hasEmailColumns ? (txn.emailError || null) : null,
-            lastEmailSentAt: hasEmailColumns ? (txn.lastEmailSentAt?.toISOString() || null) : null,
+            lastEmailSentAt: hasEmailColumns ? (txn.lastEmailSentAt?.toISOString?.() || null) : null,
           }
         }
       }
     }
 
-    // ── STEP 2: Targeted lookup fallback via raw SQL ──
+    // ── Targeted lookup ──
     let targetResult = targetSeatCode ? (seatInfoMap[targetSeatCode] || null) : null
 
     if (targetSeatCode && !targetResult) {
       console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": not found in parsed map`)
       console.log(`[seats-info] Parsed seat codes (${debugSeatCodes.length}): [${debugSeatCodes.slice(0, 30).join(', ')}]`)
 
+      // Fallback: LIKE search directly in DB
       try {
-        // Use raw SQL — only select columns that definitely exist
         const fallbackResults: any[] = await db.$queryRaw`
           SELECT
             "transactionId", "customerName", "customerEmail", "customerWa",
@@ -176,10 +149,10 @@ export async function GET(request: NextRequest) {
           LIMIT 5
         `
 
-        console.log(`[seats-info] Raw SQL fallback found ${fallbackResults.length} transactions containing "${targetSeatCode}"`)
+        console.log(`[seats-info] LIKE fallback found ${fallbackResults.length} transactions containing "${targetSeatCode}"`)
 
         for (const txn of fallbackResults) {
-          console.log(`[seats-info] Raw fallback txn ${txn.transactionId} (status: ${txn.paymentStatus}) seatCodes: ${String(txn.seatCodes).substring(0, 100)}`)
+          console.log(`[seats-info] LIKE fallback txn ${txn.transactionId} (status: ${txn.paymentStatus}) seatCodes: ${String(txn.seatCodes).substring(0, 100)}`)
 
           let codes: string[] = []
           try {
@@ -201,15 +174,15 @@ export async function GET(request: NextRequest) {
               phone: txn.customerWa,
               transactionId: txn.transactionId,
               paymentStatus: txn.paymentStatus,
-              checkInTime: txn.checkInTime?.toISOString() || null,
-              paidAt: txn.paidAt?.toISOString() || null,
+              checkInTime: txn.checkInTime?.toISOString?.() || null,
+              paidAt: txn.paidAt?.toISOString?.() || null,
               totalAmount: Number(txn.totalAmount),
               emailStatus: null,
               emailError: null,
               lastEmailSentAt: null,
             }
             seatInfoMap[targetSeatCode] = targetResult
-            console.log(`[seats-info] Raw fallback exact match for "${targetSeatCode}"`)
+            console.log(`[seats-info] LIKE fallback exact match for "${targetSeatCode}"`)
             break
           }
 
@@ -223,8 +196,8 @@ export async function GET(request: NextRequest) {
               phone: txn.customerWa,
               transactionId: txn.transactionId,
               paymentStatus: txn.paymentStatus,
-              checkInTime: txn.checkInTime?.toISOString() || null,
-              paidAt: txn.paidAt?.toISOString() || null,
+              checkInTime: txn.checkInTime?.toISOString?.() || null,
+              paidAt: txn.paidAt?.toISOString?.() || null,
               totalAmount: Number(txn.totalAmount),
               emailStatus: null,
               emailError: null,
@@ -232,7 +205,7 @@ export async function GET(request: NextRequest) {
             }
             seatInfoMap[targetSeatCode] = targetResult
             seatInfoMap[matchCode] = targetResult
-            console.log(`[seats-info] Raw fallback case-insensitive match: "${targetSeatCode}" ↔ "${matchCode}"`)
+            console.log(`[seats-info] LIKE fallback case-insensitive match: "${targetSeatCode}" ↔ "${matchCode}"`)
             break
           }
         }
@@ -246,18 +219,18 @@ export async function GET(request: NextRequest) {
             phone: txn.customerWa,
             transactionId: txn.transactionId,
             paymentStatus: txn.paymentStatus,
-            checkInTime: txn.checkInTime?.toISOString() || null,
-            paidAt: txn.paidAt?.toISOString() || null,
+            checkInTime: txn.checkInTime?.toISOString?.() || null,
+            paidAt: txn.paidAt?.toISOString?.() || null,
             totalAmount: Number(txn.totalAmount),
             emailStatus: null,
             emailError: null,
             lastEmailSentAt: null,
           }
           seatInfoMap[targetSeatCode] = targetResult
-          console.log(`[seats-info] Raw fallback substring match for "${targetSeatCode}"`)
+          console.log(`[seats-info] LIKE fallback substring match for "${targetSeatCode}"`)
         }
       } catch (fallbackErr) {
-        console.error('[seats-info] Raw fallback error:', fallbackErr)
+        console.error('[seats-info] LIKE fallback error:', fallbackErr)
       }
     } else if (targetSeatCode) {
       console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": found (status: ${targetResult?.paymentStatus})`)
@@ -274,7 +247,7 @@ export async function GET(request: NextRequest) {
       response.targetSeat = targetResult
       response._debug = {
         lookupSeatCode: targetSeatCode,
-        totalTransactions: transactions.length,
+        totalTransactions: rawResults.length,
         totalSeatCodesParsed: debugSeatCodes.length,
         foundInMap: !!seatInfoMap[targetSeatCode],
         seatCodesSample: debugSeatCodes.slice(0, 20),
