@@ -1072,6 +1072,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const CELL_TOTAL = SEAT_W + SEAT_GAP
     const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
     const LABEL_W = 24
+    const stageType = parsedLayout?.stageType || 'PROSCENIUM'
+    const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
 
     // Check if canvas mode
@@ -1119,7 +1121,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
 
         <div className="overflow-x-auto">
           <div className="flex justify-center">
-            <StageRenderer stageType={stageType as any || 'PROSCENIUM'} size="md" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
+            <StageRenderer stageType={stageType} size="md" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
           </div>
           <div className="flex justify-center" style={{ minWidth: gridW }}>
             <div style={{ width: gridW }}>
