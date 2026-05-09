@@ -201,6 +201,9 @@ model Transaction {
   merchandiseData  String?       // JSON: [{merchandiseId, name, price, quantity}]
   paymentMethod    String?       // Payment channel code (e.g., BCAVA, QRIS, OVO, BRIVA)
   paymentUrl       String?       // Tripay checkout_url / pay_url for re-payment
+  emailStatus      String?       // Email delivery status: SENT, FAILED, BOUNCED
+  emailError       String?       // Last email error message (e.g. "Inbox over quota")
+  lastEmailSentAt  DateTime?     // When email was last sent/attempted
 
   // Relations
   event          Event          @relation(fields: [eventId], references: [id])

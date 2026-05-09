@@ -53,6 +53,9 @@ interface SeatOwnerInfo {
   checkInTime: string | null
   paidAt: string | null
   totalAmount: number
+  emailStatus: string | null
+  emailError: string | null
+  lastEmailSentAt: string | null
 }
 
 interface GaZoneDef {
@@ -1432,6 +1435,55 @@ export default function UsherSeatMapPage() {
                   </div>
                 )}
               </div>
+
+              {/* Email Delivery Status */}
+              {selectedSeat.emailStatus && (
+                <div className="space-y-2">
+                  <div className="zen-divider" />
+                  <div className="space-y-1">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                      <Mail className="w-3 h-3" /> Status Email
+                    </p>
+                    {selectedSeat.emailStatus === 'SENT' ? (
+                      <Badge className="bg-success/10 text-success border-success/20 text-xs">
+                        Email Terkirim
+                      </Badge>
+                    ) : selectedSeat.emailStatus === 'BOUNCED' ? (
+                      <div className="space-y-1">
+                        <Badge className="bg-red-50 text-red-700 border-red-200 text-xs">
+                          Email Bounce (Inbox Penuh)
+                        </Badge>
+                        {selectedSeat.emailError && (
+                          <p className="text-[10px] text-red-500/80 leading-relaxed">
+                            {selectedSeat.emailError.includes('OverQuota') || selectedSeat.emailError.includes('out of storage')
+                              ? 'Inbox penerima penuh. Minta penerima mengosongkan inbox, lalu kirim ulang.'
+                              : selectedSeat.emailError.substring(0, 200)}
+                          </p>
+                        )}
+                      </div>
+                    ) : selectedSeat.emailStatus === 'FAILED' ? (
+                      <div className="space-y-1">
+                        <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                          Email Gagal Terkirim
+                        </Badge>
+                        {selectedSeat.emailError && (
+                          <p className="text-[10px] text-amber-600/80">
+                            {selectedSeat.emailError.substring(0, 200)}
+                          </p>
+                        )}
+                      </div>
+                    ) : null}
+                    {selectedSeat.lastEmailSentAt && (
+                      <p className="text-[10px] text-muted-foreground">
+                        Terakhir dikirim: {new Date(selectedSeat.lastEmailSentAt).toLocaleString('id-ID', {
+                          day: 'numeric', month: 'short', year: 'numeric',
+                          hour: '2-digit', minute: '2-digit',
+                        })}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Resend Email */}
               <div className="pt-2 space-y-3">

@@ -45,6 +45,9 @@ export async function GET(request: NextRequest) {
         checkInTime: true,
         paidAt: true,
         totalAmount: true,
+        emailStatus: true,
+        emailError: true,
+        lastEmailSentAt: true,
         id: true,
       },
     }))
@@ -59,6 +62,9 @@ export async function GET(request: NextRequest) {
       checkInTime: string | null
       paidAt: string | null
       totalAmount: number
+      emailStatus: string | null
+      emailError: string | null
+      lastEmailSentAt: string | null
     }> = {}
 
     for (const txn of transactions) {
@@ -88,6 +94,9 @@ export async function GET(request: NextRequest) {
           checkInTime: txn.checkInTime?.toISOString() || null,
           paidAt: txn.paidAt?.toISOString() || null,
           totalAmount: txn.totalAmount,
+          emailStatus: txn.emailStatus || null,
+          emailError: txn.emailError || null,
+          lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
         }
       }
     }

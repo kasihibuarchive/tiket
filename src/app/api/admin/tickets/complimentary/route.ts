@@ -250,9 +250,20 @@ export async function POST(request: NextRequest) {
             footer: emailTemplate.footer,
           }
         : undefined,
-    }).catch((emailError: unknown) =>
-      console.error('Failed to send complimentary e-ticket email:', emailError)
-    )
+    }).then(async () => {
+      await db.transaction.update({
+        where: { transactionId },
+        data: { emailStatus: 'SENT', lastEmailSentAt: new Date() },
+      }).catch(() => {})
+    }).catch(async (emailError: unknown) => {
+      const errMsg = emailError instanceof Error ? emailError.message : String(emailError)
+      console.error('Failed to send complimentary e-ticket email:', errMsg)
+      const isBounce = errMsg.includes('OverQuota') || errMsg.includes('out of storage') || errMsg.includes('452') || errMsg.includes('550')
+      await db.transaction.update({
+        where: { transactionId },
+        data: { emailStatus: isBounce ? 'BOUNCED' : 'FAILED', emailError: errMsg.substring(0, 500), lastEmailSentAt: new Date() },
+      }).catch(() => {})
+    })
 
     // ─── Log activity ──────────────────────────────────────────────
     const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||

@@ -104,14 +104,41 @@ export async function POST(request: NextRequest) {
           : undefined,
       })
 
+      // Track successful delivery
+      await db.transaction.update({
+        where: { transactionId },
+        data: { emailStatus: 'SENT', emailError: null, lastEmailSentAt: new Date() },
+      })
+
       return NextResponse.json({
         success: true,
         message: `E-tiket berhasil dikirim ulang ke ${transaction.customerEmail}`,
       })
     } catch (emailError: any) {
-      console.error('[RESEND-EMAIL] Failed to send email:', emailError?.message || emailError)
+      const errMsg = emailError?.message || String(emailError)
+      console.error('[RESEND-EMAIL] Failed to send email:', errMsg)
+
+      // Track failed delivery
+      const isBounce = errMsg.includes('OverQuota') || errMsg.includes('out of storage') || errMsg.includes('452') || errMsg.includes('550')
+      await db.transaction.update({
+        where: { transactionId },
+        data: {
+          emailStatus: isBounce ? 'BOUNCED' : 'FAILED',
+          emailError: errMsg.substring(0, 500),
+          lastEmailSentAt: new Date(),
+        },
+      }).catch(() => {})
+
+      // Give user-friendly error message for common bounce reasons
+      let userMessage = `Gagal mengirim email: ${errMsg}`
+      if (isBounce) {
+        userMessage = 'Inbox email penerima penuh (over quota). Minta penerima untuk mengosongkan inbox Gmail-nya, lalu coba kirim ulang.'
+      } else if (errMsg.includes('ENOTFOUND') || errMsg.includes('Invalid recipient')) {
+        userMessage = 'Alamat email tidak valid. Pastikan email penerima benar.'
+      }
+
       return NextResponse.json(
-        { error: `Gagal mengirim email: ${emailError?.message || 'Unknown error'}` },
+        { error: userMessage },
         { status: 500 }
       )
     }
