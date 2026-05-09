@@ -359,23 +359,27 @@ export default function UsherSeatMapPage() {
   // ── Fetch individual seat owner info (fallback when seatOwnerMap is empty) ──
   const fetchSeatOwner = useCallback(async (seatCode: string): Promise<SeatOwnerInfo | null> => {
     try {
-      // Try targeted lookup first
+      // Try targeted lookup — this searches ALL transaction statuses (not just PAID/PENDING)
       const res = await fetch(`/api/usher/seats-info?eventId=${eventId}&seatCode=${encodeURIComponent(seatCode)}`)
       if (res.ok) {
         const data = await res.json()
         const ownerInfo = data.targetSeat || data.seats?.[seatCode] || null
         if (ownerInfo) {
           // Also update the full map so subsequent clicks are instant
-          if (data.seats) {
-            setSeatOwnerMap((prev) => ({ ...prev, ...data.seats }))
+          if (data.seats && Object.keys(data.seats).length > 0) {
+            setSeatOwnerMap((prev) => {
+              const updated = { ...prev, ...data.seats }
+              return updated
+            })
           } else {
             setSeatOwnerMap((prev) => ({ ...prev, [seatCode]: ownerInfo }))
           }
         }
-        console.log(`[UsherSeats] fetchSeatOwner for ${seatCode}:`, ownerInfo ? 'found' : 'not found')
+        console.log(`[UsherSeats] fetchSeatOwner for ${seatCode}:`, ownerInfo ? `found (status: ${ownerInfo.paymentStatus})` : 'not found in any transaction')
         return ownerInfo
       } else {
-        console.warn('[UsherSeats] fetchSeatOwner API returned', res.status)
+        const errText = await res.text().catch(() => '')
+        console.warn('[UsherSeats] fetchSeatOwner API returned', res.status, errText)
       }
     } catch (err) {
       console.warn('[UsherSeats] fetchSeatOwner error:', err)
@@ -1403,9 +1407,29 @@ export default function UsherSeatMapPage() {
 
                 <div className="space-y-1">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Status Pembayaran</p>
-                  <Badge className="bg-success/10 text-success border-success/20 text-xs">
-                    {selectedSeat.paymentStatus}
-                  </Badge>
+                  {selectedSeat.paymentStatus === 'PAID' ? (
+                    <Badge className="bg-success/10 text-success border-success/20 text-xs">
+                      {selectedSeat.paymentStatus}
+                    </Badge>
+                  ) : selectedSeat.paymentStatus === 'PENDING' ? (
+                    <div className="space-y-1">
+                      <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                        {selectedSeat.paymentStatus}
+                      </Badge>
+                      <p className="text-[10px] text-amber-600/80 leading-relaxed">
+                        Webhook mungkin belum memperbarui status. Data pembeli tetap ditampilkan.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <Badge className="bg-red-50 text-red-700 border-red-200 text-xs">
+                        {selectedSeat.paymentStatus}
+                      </Badge>
+                      <p className="text-[10px] text-red-500/80 leading-relaxed">
+                        Transaksi berstatus {selectedSeat.paymentStatus}. Kursi mungkin ditandai SOLD secara manual.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">
@@ -1546,9 +1570,23 @@ export default function UsherSeatMapPage() {
                     Kursi {selectedSeatCode}
                   </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-3 leading-relaxed">
-                    Kemungkinan transaksi masih berstatus PENDING (webhook belum memperbarui status),<br />
-                    atau kursi ditandai SOLD secara manual.
+                    Tidak ditemukan transaksi yang memuat kursi ini.<br />
+                    Kemungkinan kursi ditandai SOLD secara manual tanpa transaksi.
                   </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-4 text-xs"
+                    onClick={async () => {
+                      setIsFetchingOwner(true)
+                      const fetched = await fetchSeatOwner(selectedSeatCode!)
+                      setSelectedSeat(fetched)
+                      setIsFetchingOwner(false)
+                    }}
+                  >
+                    <Loader2 className={cn('w-3 h-3 mr-1', isFetchingOwner && 'animate-spin')} />
+                    Cari Ulang
+                  </Button>
                 </>
               )}
             </div>

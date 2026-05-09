@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db, withDbRetry } from '@/lib/db'
 
 // GET /api/usher/seats-info?eventId=xxx
-// Returns a map of seatCode -> transaction info for all SOLD/PAID seats
+// Returns a map of seatCode -> transaction info for all occupied seats
 // Also supports: GET /api/usher/seats-info?eventId=xxx&seatCode=A-1 (single seat lookup)
 export async function GET(request: NextRequest) {
   try {
@@ -27,14 +27,39 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    // Get all transactions for this event that could have seat owners
-    // Include PAID (normal + complimentary), and also PENDING (webhook may have failed
-    // to update status, but seats could already be marked SOLD)
+    // ── Strategy ──
+    // For the usher panel, we need to find the owner of SOLD/INVITATION seats.
+    // A seat can be marked SOLD but its transaction might be in ANY status:
+    //   - PAID: normal flow, payment confirmed
+    //   - PENDING: webhook failed to update (e.g. Tripay signature bug)
+    //   - EXPIRED: transaction expired but seat was already manually marked SOLD
+    //   - FAILED: payment failed but seat was manually reassigned
+    //   - CANCELLED: cancelled but seat status wasn't reverted
+    //
+    // For the batch load (no targetSeatCode), we still prioritize PAID/PENDING
+    // to keep the response fast. But we ALSO include other statuses since the
+    // usher needs to identify who owns the seat.
+    //
+    // For the targeted lookup (targetSeatCode provided), we search ALL statuses
+    // to ensure we find the owner no matter what.
+
+    const isTargetedLookup = !!targetSeatCode
+
+    // Build the where clause
+    const whereClause: any = {
+      eventId,
+      seatCodes: { not: null },
+    }
+
+    if (!isTargetedLookup) {
+      // Batch load: include all statuses to ensure we find all seat owners
+      // Previously only PAID/PENDING which missed EXPIRED/CANCELLED/FAILED owners
+      whereClause.paymentStatus = { in: ['PAID', 'PENDING', 'EXPIRED', 'FAILED', 'CANCELLED'] }
+    }
+    // For targeted lookup: no payment status filter — search ALL statuses
+
     const transactions = await withDbRetry(() => db.transaction.findMany({
-      where: {
-        eventId,
-        paymentStatus: { in: ['PAID', 'PENDING'] },
-      },
+      where: whereClause,
       select: {
         transactionId: true,
         customerName: true,
@@ -52,7 +77,18 @@ export async function GET(request: NextRequest) {
       },
     }))
 
+    console.log(`[seats-info] Found ${transactions.length} transactions for event ${eventId} (targeted: ${isTargetedLookup})`)
+
     // Build seatCode -> transaction info map
+    // If multiple transactions claim the same seat, prefer PAID > PENDING > others
+    const statusPriority: Record<string, number> = {
+      PAID: 0,
+      PENDING: 1,
+      EXPIRED: 2,
+      FAILED: 3,
+      CANCELLED: 4,
+    }
+
     const seatInfoMap: Record<string, {
       owner: string
       email: string
@@ -85,28 +121,39 @@ export async function GET(request: NextRequest) {
       }
 
       for (const code of seatCodes) {
-        seatInfoMap[code] = {
-          owner: txn.customerName,
-          email: txn.customerEmail,
-          phone: txn.customerWa,
-          transactionId: txn.transactionId,
-          paymentStatus: txn.paymentStatus,
-          checkInTime: txn.checkInTime?.toISOString() || null,
-          paidAt: txn.paidAt?.toISOString() || null,
-          totalAmount: txn.totalAmount,
-          emailStatus: txn.emailStatus || null,
-          emailError: txn.emailError || null,
-          lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+        const existing = seatInfoMap[code]
+        const existingPriority = existing ? (statusPriority[existing.paymentStatus] ?? 99) : 99
+        const currentPriority = statusPriority[txn.paymentStatus] ?? 99
+
+        // Only overwrite if current transaction has higher priority (lower number)
+        // or if there's no existing entry
+        if (!existing || currentPriority < existingPriority) {
+          seatInfoMap[code] = {
+            owner: txn.customerName,
+            email: txn.customerEmail,
+            phone: txn.customerWa,
+            transactionId: txn.transactionId,
+            paymentStatus: txn.paymentStatus,
+            checkInTime: txn.checkInTime?.toISOString() || null,
+            paidAt: txn.paidAt?.toISOString() || null,
+            totalAmount: txn.totalAmount,
+            emailStatus: txn.emailStatus || null,
+            emailError: txn.emailError || null,
+            lastEmailSentAt: txn.lastEmailSentAt?.toISOString() || null,
+          }
         }
       }
     }
 
     // If a specific seatCode was requested, return just that entry (or null)
     if (targetSeatCode) {
+      const targetResult = seatInfoMap[targetSeatCode] || null
+      console.log(`[seats-info] Targeted lookup for "${targetSeatCode}": ${targetResult ? 'found' : 'not found'}`)
+
       return NextResponse.json({
         event: { id: event.id, title: event.title },
         seats: seatInfoMap,
-        targetSeat: seatInfoMap[targetSeatCode] || null,
+        targetSeat: targetResult,
         totalSold: Object.keys(seatInfoMap).length,
       })
     }
