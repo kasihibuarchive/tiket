@@ -126,6 +126,7 @@ export default function UsherSeatMapPage() {
   const [stageSize, setStageSize] = useState<'sm' | 'md' | 'lg'>('md')
   const [infoSheetOpen, setInfoSheetOpen] = useState(false)
   const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set())
+  const [isFetchingOwner, setIsFetchingOwner] = useState(false)
 
   // Parse layout data from event's seat map
   const parsedLayout = useMemo(() => {
@@ -393,17 +394,21 @@ export default function UsherSeatMapPage() {
       const ownerInfo = seatOwnerMap[seat.seatCode]
       if (ownerInfo) {
         setSelectedSeat(ownerInfo)
+        setIsFetchingOwner(false)
       } else {
         // Owner info not in cache — try to fetch it
-        setSelectedSeat(null) // Show loading state
+        setSelectedSeat(null)
+        setIsFetchingOwner(true)
         const fetched = await fetchSeatOwner(seat.seatCode)
-        setSelectedSeat(fetched) // null if still not found → shows "not available" message
+        setSelectedSeat(fetched)
+        setIsFetchingOwner(false)
       }
     } else {
       setSelectedSeatCode(null)
       setSelectedSeat(null)
       setResendResult(null)
       setInfoSheetOpen(false)
+      setIsFetchingOwner(false)
     }
   }, [seatOwnerMap, fetchSeatOwner])
 
@@ -417,10 +422,13 @@ export default function UsherSeatMapPage() {
     const ownerInfo = seatOwnerMap[seatCode]
     if (ownerInfo) {
       setSelectedSeat(ownerInfo)
+      setIsFetchingOwner(false)
     } else {
       setSelectedSeat(null)
+      setIsFetchingOwner(true)
       const fetched = await fetchSeatOwner(seatCode)
       setSelectedSeat(fetched)
+      setIsFetchingOwner(false)
     }
   }, [seatOwnerMap, fetchSeatOwner])
 
@@ -1512,20 +1520,37 @@ export default function UsherSeatMapPage() {
               </div>
             </div>
           ) : selectedSeatCode ? (
-            /* No owner info available — show loading or "not available" message */
+            /* No owner info available — show loading or "not found" message */
             <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
-              <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
-                <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
-              </div>
-              <p className="text-sm font-medium text-charcoal mb-1">
-                Memuat data pembeli...
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Kursi {selectedSeatCode}
-              </p>
-              <p className="text-[10px] text-muted-foreground/60 mt-2">
-                Jika data tidak muncul, pastikan transaksi sudah berstatus PAID
-              </p>
+              {isFetchingOwner ? (
+                <>
+                  <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mb-3">
+                    <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
+                  </div>
+                  <p className="text-sm font-medium text-charcoal mb-1">
+                    Memuat data pembeli...
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Kursi {selectedSeatCode}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="w-12 h-12 rounded-full bg-amber-50 flex items-center justify-center mb-3">
+                    <Users className="w-5 h-5 text-amber-500" />
+                  </div>
+                  <p className="text-sm font-medium text-charcoal mb-1">
+                    Data pembeli tidak ditemukan
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Kursi {selectedSeatCode}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/60 mt-3 leading-relaxed">
+                    Kemungkinan transaksi masih berstatus PENDING (webhook belum memperbarui status),<br />
+                    atau kursi ditandai SOLD secara manual.
+                  </p>
+                </>
+              )}
             </div>
           ) : null}
         </SheetContent>

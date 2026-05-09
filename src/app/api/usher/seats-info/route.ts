@@ -27,13 +27,13 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    // Get all paid transactions for this event
-    // Note: Complimentary tickets are stored as paymentStatus='PAID' with totalAmount=0,
-    // so 'PAID' covers both regular and complimentary tickets.
+    // Get all transactions for this event that could have seat owners
+    // Include PAID (normal + complimentary), and also PENDING (webhook may have failed
+    // to update status, but seats could already be marked SOLD)
     const transactions = await withDbRetry(() => db.transaction.findMany({
       where: {
         eventId,
-        paymentStatus: 'PAID',
+        paymentStatus: { in: ['PAID', 'PENDING'] },
       },
       select: {
         transactionId: true,
