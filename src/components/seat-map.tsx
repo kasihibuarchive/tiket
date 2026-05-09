@@ -76,6 +76,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
 
   const sessionId = useRef(getSessionId())
   const selectedSeatCodesRef = useRef<Set<string>>(new Set())
+  // Track seats we just unlocked so we can ignore stale lock/poll events for them
+  const justUnlockedRef = useRef<Set<string>>(new Set())
 
   // GA-specific state
   const [selectedGAZoneId, setSelectedGAZoneId] = useState<string | null>(null)
@@ -138,6 +140,9 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   useEffect(() => {
     onSeatLocked((payload) => {
       const myCodes = selectedSeatCodesRef.current
+      // Ignore stale lock events for seats we just unlocked (race condition)
+      if (justUnlockedRef.current.has(payload.seatCode)) return
+      // Someone else locked a seat I had selected → rejection
       if (payload.sessionId !== sessionId.current && myCodes.has(payload.seatCode)) {
         setSelectedSeatCodes((prev) => {
           const next = new Set(prev)
@@ -147,6 +152,18 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         setLockRejectionMsg('Kursi ' + payload.seatCode + ' diambil orang lain')
         return
       }
+      // If this lock is from our own session, mark it but don't treat it as "locked by other"
+      if (payload.sessionId === sessionId.current) {
+        setSeats((prev) =>
+          prev.map((s) =>
+            s.seatCode === payload.seatCode
+              ? { ...s, status: 'LOCKED_TEMPORARY', lockedUntil: new Date(payload.lockedUntil).toISOString() }
+              : s
+          )
+        )
+        return
+      }
+      // Someone else locked a seat we don't have selected → show as locked by other
       setSeats((prev) =>
         prev.map((s) =>
           s.seatCode === payload.seatCode
@@ -157,6 +174,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     })
 
     onSeatUnlocked((payload) => {
+      // Clear from justUnlocked tracking since unlock is now confirmed
+      justUnlockedRef.current.delete(payload.seatCode)
       setSeats((prev) =>
         prev.map((s) =>
           s.seatCode === payload.seatCode
@@ -207,10 +226,17 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             return { ...s, status: 'AVAILABLE', lockedUntil: null }
           }
           if (lockInfo.status === 'LOCKED_TEMPORARY' && lockInfo.lockedUntil > Date.now()) {
+            // Skip seats we just unlocked (avoid race condition)
+            if (justUnlockedRef.current.has(s.seatCode)) return s
             if (lockInfo.sessionId !== sessionId.current && myCodes.has(s.seatCode)) {
               stolenSeats.push(s.seatCode)
               return s
             }
+            // If locked by our own session, keep showing as locked
+            if (lockInfo.sessionId === sessionId.current) {
+              return { ...s, status: 'LOCKED_TEMPORARY', lockedUntil: new Date(lockInfo.lockedUntil).toISOString() }
+            }
+            // Locked by someone else
             return { ...s, status: 'LOCKED_TEMPORARY', lockedUntil: new Date(lockInfo.lockedUntil).toISOString() }
           }
           return s
@@ -284,6 +310,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         setSeats((prev) =>
           prev.map((s) => {
             if (myCodes.has(s.seatCode)) return s
+            // Skip seats we just unlocked (avoid race condition with DB)
+            if (justUnlockedRef.current.has(s.seatCode)) return s
             const fresh = data.find((f: any) => f.id === s.id)
             if (!fresh) return s
             if (fresh.status !== s.status || fresh.lockedUntil !== s.lockedUntil) {
@@ -412,6 +440,20 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const codes = Array.from(selectedSeatCodes)
     if (codes.length === 0) return
 
+    // Mark seats as just-unlocked so we ignore stale lock/poll events
+    for (const code of codes) justUnlockedRef.current.add(code)
+    // Auto-clear justUnlocked after 5 seconds (safety net)
+    setTimeout(() => { for (const code of codes) justUnlockedRef.current.delete(code) }, 5000)
+
+    // Optimistically set seats to AVAILABLE locally
+    setSeats((prev) =>
+      prev.map((s) =>
+        codes.includes(s.seatCode)
+          ? { ...s, status: 'AVAILABLE', lockedUntil: null }
+          : s
+      )
+    )
+
     unlockSeats(codes, sessionId.current)
     try {
       await fetch('/api/seats/unlock', {
@@ -433,6 +475,19 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
   const handleClearSelection = useCallback(async () => {
     const codes = Array.from(selectedSeatCodes)
     if (codes.length > 0) {
+      // Mark as just-unlocked
+      for (const code of codes) justUnlockedRef.current.add(code)
+      setTimeout(() => { for (const code of codes) justUnlockedRef.current.delete(code) }, 5000)
+
+      // Optimistically set seats to AVAILABLE locally
+      setSeats((prev) =>
+        prev.map((s) =>
+          codes.includes(s.seatCode)
+            ? { ...s, status: 'AVAILABLE', lockedUntil: null }
+            : s
+        )
+      )
+
       unlockSeats(codes, sessionId.current)
       try {
         await fetch('/api/seats/unlock', {
@@ -801,6 +856,19 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       .map((s) => s.seatCode)
 
     if (isLocked && zoneCodes.length > 0) {
+      // Mark as just-unlocked
+      for (const code of zoneCodes) justUnlockedRef.current.add(code)
+      setTimeout(() => { for (const code of zoneCodes) justUnlockedRef.current.delete(code) }, 5000)
+
+      // Optimistically set seats to AVAILABLE locally
+      setSeats((prev) =>
+        prev.map((s) =>
+          zoneCodes.includes(s.seatCode)
+            ? { ...s, status: 'AVAILABLE', lockedUntil: null }
+            : s
+        )
+      )
+
       unlockSeats(zoneCodes, sessionId.current)
       try {
         await fetch('/api/seats/unlock', {
