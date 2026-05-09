@@ -359,21 +359,49 @@ export default function UsherSeatMapPage() {
   // ── Fetch individual seat owner info (fallback when seatOwnerMap is empty) ──
   const fetchSeatOwner = useCallback(async (seatCode: string): Promise<SeatOwnerInfo | null> => {
     try {
-      // Try targeted lookup — this searches ALL transaction statuses (not just PAID/PENDING)
+      // Try targeted lookup — this searches ALL transaction statuses
       const res = await fetch(`/api/usher/seats-info?eventId=${eventId}&seatCode=${encodeURIComponent(seatCode)}`)
       if (res.ok) {
         const data = await res.json()
-        const ownerInfo = data.targetSeat || data.seats?.[seatCode] || null
-        if (ownerInfo) {
-          // Also update the full map so subsequent clicks are instant
-          if (data.seats && Object.keys(data.seats).length > 0) {
-            setSeatOwnerMap((prev) => {
-              const updated = { ...prev, ...data.seats }
-              return updated
-            })
-          } else {
-            setSeatOwnerMap((prev) => ({ ...prev, [seatCode]: ownerInfo }))
+
+        // Log debug info from API for troubleshooting
+        if (data._debug) {
+          console.log(`[UsherSeats] API debug for "${seatCode}":`, JSON.stringify(data._debug))
+        }
+
+        // Try multiple lookup strategies
+        let ownerInfo: SeatOwnerInfo | null = null
+
+        // 1. Direct targetSeat from API (most reliable — includes fallback DB search)
+        if (data.targetSeat) {
+          ownerInfo = data.targetSeat
+        }
+        // 2. Exact match in seats map
+        else if (data.seats?.[seatCode]) {
+          ownerInfo = data.seats[seatCode]
+        }
+        // 3. Case-insensitive match in seats map
+        else if (data.seats) {
+          const lowerCode = seatCode.toLowerCase()
+          for (const [code, info] of Object.entries(data.seats)) {
+            if (code.toLowerCase() === lowerCode) {
+              ownerInfo = info as SeatOwnerInfo
+              console.log(`[UsherSeats] Case-insensitive match: "${seatCode}" ↔ "${code}"`)
+              break
+            }
           }
+        }
+
+        if (ownerInfo) {
+          // Update the full map so subsequent clicks are instant
+          setSeatOwnerMap((prev) => {
+            const updated = { ...prev, [seatCode]: ownerInfo! }
+            // Also add all other seats from the response
+            if (data.seats && Object.keys(data.seats).length > 0) {
+              Object.assign(updated, data.seats)
+            }
+            return updated
+          })
         }
         console.log(`[UsherSeats] fetchSeatOwner for ${seatCode}:`, ownerInfo ? `found (status: ${ownerInfo.paymentStatus})` : 'not found in any transaction')
         return ownerInfo
