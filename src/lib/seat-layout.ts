@@ -63,6 +63,7 @@ export interface ParsedLayout {
     seatCode: string
     seatNum: number
     rowLabel: string
+    size?: number
   }>
   /** Full canvas bounds encompassing seats + stage + objects */
   fullCanvasBounds?: {
@@ -360,6 +361,7 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
           // seatNum is sequential display number within the row
           seatNum: s.seatNum,
           rowLabel: label,
+          size: cellSize,
         })
       }
     }
@@ -618,6 +620,7 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
           seatCode: `${label}-${seatNum}`,
           seatNum,
           rowLabel: label,
+          size: 28,
         })
       }
     }

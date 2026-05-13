@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { DoorOpen, Lock, Unlock, Check, X, Crown, User, GraduationCap, Loader2, AlertTriangle, Minus, Plus, Ticket, Clock } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
+import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
 import { Button } from '@/components/ui/button'
 import { cleanupExpiredLocks } from '@/lib/seat-cleanup'
 import { getSessionId } from '@/lib/session-id'
@@ -1145,6 +1146,8 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     const stageType = parsedLayout?.stageType || 'PROSCENIUM'
     const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
     const middleRowIndex = isInsetStage ? Math.floor(displayRows.length / 2) : -1
+    const stagePosition = parsedLayout?.stagePosition
+    const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
 
     // Check if canvas mode
     const useCanvasMode = !!canvasSeats && canvasSeats.length > 0
@@ -1159,11 +1162,68 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
               {lockRejectionMsg}
             </div>
           )}
-          <div className="flex justify-center">
-            <CanvasSeatLayoutRenderer
+          {/* If no custom stage position, show stage above canvas */}
+          {!hasCustomStagePosition && (
+            <div className="flex justify-center mb-2">
+              <StageRenderer stageType={stageType} size="md" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
+            </div>
+          )}
+          <div className="flex justify-center overflow-x-auto">
+            <CanvasSeatLayout
               parsedLayout={parsedLayout}
-              seatLookup={seatLookup}
-              renderSeatButton={renderSeatButton}
+              seatLookup={seatLookup as Map<string, any>}
+              renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+                if (!seatData) return <div key={key} className="absolute" style={{ left: scaledX, top: scaledY, width: size, height: size }} />
+                const isSelected = selectedSeatCodes.has(seatData.seatCode)
+                const isClickable = (seatData.status === 'AVAILABLE' || isSelected) && !isLocked
+                const isSold = seatData.status === 'SOLD'
+                const isLockedByOther = seatData.status === 'LOCKED_TEMPORARY' && !isSelected
+                const isUnavailable = seatData.status === 'UNAVAILABLE'
+                return (
+                  <button
+                    key={key}
+                    onClick={() => isClickable && handleSeatClick(seatData)}
+                    disabled={!isClickable}
+                    className={cn(
+                      'absolute rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-200',
+                      getSeatColor(seatData),
+                      isClickable && 'cursor-pointer hover:scale-110 hover:shadow-md',
+                      !isClickable && (isSelected ? 'cursor-default' : 'cursor-not-allowed'),
+                      isUnavailable && 'opacity-20',
+                      isSold && 'text-white',
+                      isLockedByOther && 'text-white',
+                      isSelected && 'text-charcoal font-bold'
+                    )}
+                    style={{
+                      left: scaledX,
+                      top: scaledY,
+                      width: size,
+                      height: size,
+                      ...(seatData.status === 'AVAILABLE' && !isSelected
+                        ? { borderColor: getSeatBorderColor(seatData) }
+                        : {}),
+                    }}
+                    title={
+                      isSold
+                        ? `${canvasSeat.seatCode} - Sold`
+                        : isLockedByOther
+                        ? `${canvasSeat.seatCode} - Dikunci orang lain`
+                        : isSelected
+                        ? isLocked
+                          ? `${canvasSeat.seatCode} - Terkunci`
+                          : `${canvasSeat.seatCode} - Terpilih`
+                        : `${canvasSeat.seatCode} - ${seatData.priceCategory?.name || ''} - Rp ${(seatData.priceCategory?.price || 0).toLocaleString('id-ID')}`
+                    }
+                  >
+                    {isSold && <Check className="w-3 h-3" />}
+                    {isLockedByOther && <Lock className="w-3 h-3" />}
+                    {isUnavailable && <X className="w-3 h-3" />}
+                    {!isSold && !isLockedByOther && !isUnavailable && (
+                      <span>{canvasSeat.seatNum}</span>
+                    )}
+                  </button>
+                )
+              }}
             />
           </div>
           {renderActionBar()}
@@ -1190,34 +1250,52 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         )}
 
         <div className="overflow-x-auto">
+          {/* Stage — top for PROSCENIUM/AMPHITHEATER/THRUST, middle for BLACK_BOX/ARENA */}
+          {!isInsetStage && (
+            <div className="flex justify-center mb-4">
+              <StageRenderer stageType={stageType} size="md" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
+            </div>
+          )}
+
           <div className="flex justify-center">
-            <StageRenderer stageType={stageType} size="md" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
-          </div>
-          <div className="flex justify-center" style={{ minWidth: gridW }}>
-            <div style={{ width: gridW }}>
+            <div style={{ minWidth: gridW }}>
               {displayRows.map((ri, rowIdx) => {
                 const colMap = gridLookup.get(ri)
                 if (!colMap) return null
                 const label = lLabels[ri] || String.fromCharCode(65 + ri)
                 const isMiddleRow = isInsetStage && rowIdx === middleRowIndex
+                const rowColor = getRowColorFromSections(ri)
                 return (
-                  <div key={ri} className={cn('flex items-center gap-0 justify-center', isMiddleRow && 'mt-6')}>
-                    <div className="w-6 text-center text-[9px] text-muted-foreground font-medium shrink-0">{label}</div>
-                    <div className="flex" style={{ gap: SEAT_GAP }}>
-                      {Array.from({ length: cols }, (_, ci) => {
-                        const info = colMap.get(ci)
-                        if (!info) return <div key={ci} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
-                        const seatData = seatLookup.get(info.seatCode)
-                        return renderSeatButton(seatData, info.seatCode, info.seatNum, `${ri}-${ci}`)
-                      })}
-                    </div>
-                    <div className="w-6 text-center text-[9px] text-muted-foreground font-medium shrink-0">{label}</div>
-                    {isMiddleRow && (
-                      <div className="absolute left-1/2 -translate-x-1/2" style={{ top: '50%' }}>
-                        <StageRenderer stageType="PROSCENIUM" size="sm" />
+                  <React.Fragment key={ri}>
+                    {/* Inset stage (BLACK_BOX / ARENA) in the middle of rows */}
+                    {isInsetStage && rowIdx === middleRowIndex && (
+                      <div className="flex justify-center my-3">
+                        <StageRenderer stageType={stageType} size="md" thrustWidth={parsedLayout?.thrustWidth} thrustDepth={parsedLayout?.thrustDepth} />
                       </div>
                     )}
-                  </div>
+                    <div className="flex items-center mb-[3px]" style={{ height: SEAT_W }}>
+                      <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                        {label}
+                      </div>
+                      <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
+                        {Array.from({ length: cols }, (_, ci) => {
+                          if (aisleColumns.includes(ci)) {
+                            return (
+                              <div key={ci} className="shrink-0 bg-border/30 rounded-full mx-0.5"
+                                style={{ width: 2, height: SEAT_W * 0.6 }} />
+                            )
+                          }
+                          const info = colMap.get(ci)
+                          if (!info) return <div key={ci} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+                          const seatData = seatLookup.get(info.seatCode)
+                          return renderSeatButton(seatData, info.seatCode, info.seatNum, `${ri}-${ci}`)
+                        })}
+                      </div>
+                      <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+                        {label}
+                      </div>
+                    </div>
+                  </React.Fragment>
                 )
               })}
             </div>
@@ -1251,43 +1329,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
       </div>
 
       {renderActionBar()}
-    </div>
-  )
-}
-
-// ═══════════════════════════════════════════════════════════
-// Canvas Seat Layout Renderer (helper component)
-// ═══════════════════════════════════════════════════════════
-function CanvasSeatLayoutRenderer({
-  parsedLayout,
-  seatLookup,
-  renderSeatButton,
-}: {
-  parsedLayout: ParsedLayout
-  seatLookup: Map<string, SeatData>
-  renderSeatButton: (seatData: SeatData | undefined, seatCode: string, displayNum: number, key: string) => React.ReactNode
-}) {
-  const { canvasSeats, fullCanvasBounds } = parsedLayout
-  if (!canvasSeats || canvasSeats.length === 0 || !fullCanvasBounds) return null
-
-  const { width: canvasW, height: canvasH } = fullCanvasBounds
-  const containerW = 600
-  const scale = containerW / canvasW
-  const containerH = canvasH * scale
-
-  return (
-    <div className="relative mx-auto" style={{ width: containerW, height: containerH }}>
-      {canvasSeats.map((cs, idx) => {
-        const scaledX = cs.x * scale
-        const scaledY = cs.y * scale
-        const size = cs.size * scale
-        const seatData = seatLookup.get(cs.seatCode)
-        return (
-          <div key={idx} className="absolute" style={{ left: scaledX, top: scaledY, width: size, height: size }}>
-            {renderSeatButton(seatData, cs.seatCode, cs.seatNum, `canvas-${idx}`)}
-          </div>
-        )
-      })}
     </div>
   )
 }
