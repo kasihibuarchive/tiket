@@ -84,6 +84,7 @@ export async function GET(
               if (event) {
                 const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
                   weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                  timeZone: 'Asia/Jakarta',
                 })
 
                 const { sendETicketEmail } = await import('@/lib/email')

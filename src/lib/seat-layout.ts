@@ -348,7 +348,7 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
     // CRITICAL: seatCode format must match generate-seats API output.
     // generate-seats uses `${rowLabel}${gridCol + 1}` (e.g., A1, B3, C15)
     // where gridCol is the absolute grid column index, NOT sequential seat number.
-    const canvasSeats: Array<{ x: number; y: number; seatCode: string; seatNum: number; rowLabel: string }> = []
+    const canvasSeats: Array<{ x: number; y: number; seatCode: string; seatNum: number; rowLabel: string; size?: number }> = []
     for (const [rowIdx, rowSeats] of rowSeatMap) {
       const label = rowLabels[rowIdx] || getRowLabelFromIndex(rowIdx)
       const sorted = [...rowSeats].sort((a, b) => a.c - b.c)
@@ -539,7 +539,7 @@ export function parseLayoutData(layoutData: any): ParsedLayout | null {
   }
 
   // Build canvasSeats: map each seat's grid (r,c) to canvas (x,y) and seatCode
-  let canvasSeats: Array<{ x: number; y: number; seatCode: string; seatNum: number; rowLabel: string }> | undefined
+  let canvasSeats: Array<{ x: number; y: number; seatCode: string; seatNum: number; rowLabel: string; size?: number }> | undefined
   if (Array.isArray(data.seatColumns) && data.seatColumns.length > 0) {
     // Collect all canvas seats with their column info
     type CanvasSeatRaw = { x: number; y: number; colLabel: string; colIdx: number }

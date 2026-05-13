@@ -26,7 +26,7 @@ export interface CanvasSeatLayoutProps {
   /** Render callback for individual seats */
   renderSeat: (
     seatData: any,
-    canvasSeat: { x: number; y: number; seatCode: string; seatNum: number; rowLabel: string },
+    canvasSeat: { x: number; y: number; seatCode: string; seatNum: number; rowLabel: string; size?: number },
     scaledX: number,
     scaledY: number,
     size: number,

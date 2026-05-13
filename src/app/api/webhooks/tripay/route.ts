@@ -92,6 +92,7 @@ export async function POST(request: NextRequest) {
       if (event) {
         const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
           weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+          timeZone: 'Asia/Jakarta',
         })
         console.log('[tripay-webhook] Sending e-ticket email to:', transaction.customerEmail, 'for order:', merchant_ref)
         sendETicketEmail({

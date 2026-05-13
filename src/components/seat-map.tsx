@@ -1235,8 +1235,6 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
     // (legacy grid rendering — this part is very long and mostly unchanged)
     // We'll use the same approach as before but with the new action bar
 
-    const stagePosition = parsedLayout?.stagePosition
-    const hasCustomStagePosition = stagePosition && typeof stagePosition.x === 'number'
     const csb = parsedLayout?.canvasSeatBounds
     const hasBounds = !!csb && cols > 0 && displayRows.length > 0
 

@@ -104,6 +104,7 @@ export async function GET(
         const showDate = new Date(transaction.event.showDate).toLocaleDateString('id-ID', {
           weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
           hour: '2-digit', minute: '2-digit',
+          timeZone: 'Asia/Jakarta',
         })
         sendETicketEmail({
           customerName: transaction.customerName,
