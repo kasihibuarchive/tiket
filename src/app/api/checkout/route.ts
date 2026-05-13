@@ -113,25 +113,13 @@ export async function POST(request: NextRequest) {
           if (promoTarget === 'MERCH' && !hasMerch) {
             return NextResponse.json({ error: 'Promo ini hanya berlaku untuk merchandise' }, { status: 400 })
           }
-
-          const ticketSubtotal = seatTotal + adminFeeTotal
-          const isPerItem = promoCodeData.isPerItem === true
-
-          if (promoTarget === 'TICKET') {
-            if (isPerItem) {
-              const perItemDiscount =
-                promoCodeData.discountType === 'PERCENT'
-                  ? Math.round((ticketSubtotal / seatCodes.length) * promoCodeData.discountValue / 100)
-                  : Math.min(promoCodeData.discountValue, ticketSubtotal / seatCodes.length)
-              discountAmount = perItemDiscount * seatCodes.length
-            } else {
-              discountAmount =
-                promoCodeData.discountType === 'PERCENT'
-                  ? Math.round(ticketSubtotal * promoCodeData.discountValue / 100)
-                  : Math.min(promoCodeData.discountValue, ticketSubtotal)
-            }
-          }
+        } else {
+          // Promo date invalid — clear promo so it doesn't get applied
+          promoCodeData = null
         }
+      } else {
+        // Promo inactive or max uses reached — clear promo
+        promoCodeData = null
       }
     }
 
@@ -175,25 +163,54 @@ export async function POST(request: NextRequest) {
           data: { stock: { decrement: merch.quantity } },
         })
       }
+    }
 
-      if (promoCodeData && discountAmount >= 0 && (promoTarget === 'ALL' || promoTarget === 'MERCH' || promoTarget === 'BUNDLING')) {
-        const isPerItem = promoCodeData.isPerItem === true
-        let targetSubtotal = 0
+    const merchTotalCalc = merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.price * m.quantity, 0) : 0
 
-        if (promoTarget === 'MERCH') {
-          targetSubtotal = merchTotal
-        } else if (promoTarget === 'BUNDLING') {
-          targetSubtotal = seatTotal + adminFeeTotal + merchTotal
-        } else {
-          targetSubtotal = seatTotal + adminFeeTotal + merchTotal
-        }
+    // ── Calculate discount AFTER merchandise is resolved ──
+    // This handles ALL promo targets (TICKET, ALL, MERCH, BUNDLING) in one place
+    if (promoCodeData) {
+      const isPerItem = promoCodeData.isPerItem === true
+      const ticketSubtotal = seatTotal + adminFeeTotal
 
+      if (promoTarget === 'TICKET') {
         if (isPerItem) {
-          const totalItems = seatCodes.length + (merchandise || []).reduce((s: number, m: any) => s + m.quantity, 0)
           const perItemDiscount =
             promoCodeData.discountType === 'PERCENT'
-              ? Math.round((targetSubtotal / Math.max(totalItems, 1)) * promoCodeData.discountValue / 100)
-              : Math.min(promoCodeData.discountValue, targetSubtotal / Math.max(totalItems, 1))
+              ? Math.round((ticketSubtotal / seatCodes.length) * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, ticketSubtotal / seatCodes.length)
+          discountAmount = perItemDiscount * seatCodes.length
+        } else {
+          discountAmount =
+            promoCodeData.discountType === 'PERCENT'
+              ? Math.round(ticketSubtotal * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, ticketSubtotal)
+        }
+      } else if (promoTarget === 'MERCH' && merchTotalCalc > 0) {
+        const totalMerchQty = merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0
+        if (isPerItem && totalMerchQty > 0) {
+          const perItemDiscount =
+            promoCodeData.discountType === 'PERCENT'
+              ? Math.round((merchTotalCalc / totalMerchQty) * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, merchTotalCalc / totalMerchQty)
+          discountAmount = perItemDiscount * totalMerchQty
+        } else {
+          discountAmount =
+            promoCodeData.discountType === 'PERCENT'
+              ? Math.round(merchTotalCalc * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, merchTotalCalc)
+        }
+      } else if (promoTarget === 'ALL' || promoTarget === 'BUNDLING') {
+        // ALL: discount on everything (tickets + admin fee + merch)
+        // BUNDLING: same as ALL but requires both tickets + merch (validated above)
+        const targetSubtotal = ticketSubtotal + merchTotalCalc
+        const totalItems = seatCodes.length + (merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0)
+
+        if (isPerItem && totalItems > 0) {
+          const perItemDiscount =
+            promoCodeData.discountType === 'PERCENT'
+              ? Math.round((targetSubtotal / totalItems) * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, targetSubtotal / totalItems)
           discountAmount = perItemDiscount * totalItems
         } else {
           discountAmount =
@@ -203,8 +220,6 @@ export async function POST(request: NextRequest) {
         }
       }
     }
-
-    const merchTotalCalc = merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.price * m.quantity, 0) : 0
 
     // Final total = seats + admin fee + merch - discount
     const totalAmount = Math.max(seatTotal + adminFeeTotal + merchTotalCalc - discountAmount, 1)

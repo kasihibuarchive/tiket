@@ -146,6 +146,14 @@ export async function POST(request: NextRequest) {
         data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
       })
 
+      // Roll back promo code usage
+      if (transaction.promoCodeId) {
+        await db.promoCode.update({
+          where: { id: transaction.promoCodeId },
+          data: { currentUses: { decrement: 1 } },
+        }).catch((err: any) => console.error('[tripay-webhook] Failed to decrement promo usage:', err.message))
+      }
+
       return NextResponse.json({ success: true })
     }
 
@@ -162,6 +170,14 @@ export async function POST(request: NextRequest) {
         where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
         data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
       })
+
+      // Roll back promo code usage
+      if (transaction.promoCodeId) {
+        await db.promoCode.update({
+          where: { id: transaction.promoCodeId },
+          data: { currentUses: { decrement: 1 } },
+        }).catch((err: any) => console.error('[tripay-webhook] Failed to decrement promo usage:', err.message))
+      }
 
       return NextResponse.json({ success: true })
     }
