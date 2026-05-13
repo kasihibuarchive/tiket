@@ -1,3 +1,14 @@
 {
-  "$schema": "https://openapi.vercel.sh/vercel.json"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "src/app/api/webhooks/tripay/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/admin/tickets/complimentary/route.ts": {
+      "maxDuration": 30
+    },
+    "src/app/api/usher/resend-email/route.ts": {
+      "maxDuration": 30
+    }
+  }
 }

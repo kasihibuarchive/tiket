@@ -222,7 +222,7 @@ export async function POST(request: NextRequest) {
     // Fetch active email template
     const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
 
-    // Send e-ticket email (fire-and-forget)
+    // Send e-ticket email (awaited — fire-and-forget fails on Vercel serverless)
     const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
       weekday: 'long',
       year: 'numeric',
@@ -233,38 +233,40 @@ export async function POST(request: NextRequest) {
       timeZone: 'Asia/Jakarta',
     })
 
-    sendETicketEmail({
-      customerName: guestName,
-      customerEmail: guestEmail,
-      eventName: event.title,
-      showDate,
-      location: event.location,
-      seatCodes,
-      transactionId,
-      totalAmount: 0,
-      qrCodeDataUrl: qrDataUrl,
-      template: emailTemplate
-        ? {
-            greeting: emailTemplate.greeting,
-            rules: emailTemplate.rules,
-            notes: emailTemplate.notes,
-            footer: emailTemplate.footer,
-          }
-        : undefined,
-    }).then(async () => {
+    try {
+      await sendETicketEmail({
+        customerName: guestName,
+        customerEmail: guestEmail,
+        eventName: event.title,
+        showDate,
+        location: event.location,
+        seatCodes,
+        transactionId,
+        totalAmount: 0,
+        qrCodeDataUrl: qrDataUrl,
+        template: emailTemplate
+          ? {
+              greeting: emailTemplate.greeting,
+              rules: emailTemplate.rules,
+              notes: emailTemplate.notes,
+              footer: emailTemplate.footer,
+            }
+          : undefined,
+      })
+      console.log('[comp-ticket] ✅ E-ticket email sent to:', guestEmail)
       await db.transaction.update({
         where: { transactionId },
-        data: { emailStatus: 'SENT', lastEmailSentAt: new Date() },
+        data: { emailStatus: 'SENT', emailError: null, lastEmailSentAt: new Date() },
       }).catch(() => {})
-    }).catch(async (emailError: unknown) => {
+    } catch (emailError: unknown) {
       const errMsg = emailError instanceof Error ? emailError.message : String(emailError)
-      console.error('Failed to send complimentary e-ticket email:', errMsg)
+      console.error('[comp-ticket] ❌ Failed to send e-ticket email:', errMsg)
       const isBounce = errMsg.includes('OverQuota') || errMsg.includes('out of storage') || errMsg.includes('452') || errMsg.includes('550')
       await db.transaction.update({
         where: { transactionId },
         data: { emailStatus: isBounce ? 'BOUNCED' : 'FAILED', emailError: errMsg.substring(0, 500), lastEmailSentAt: new Date() },
       }).catch(() => {})
-    })
+    }
 
     // ─── Log activity ──────────────────────────────────────────────
     const clientIp = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||

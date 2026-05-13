@@ -17,7 +17,7 @@ function getTransporter() {
     },
     tls: {
       rejectUnauthorized: false,
-      ciphers: 'SSLv3',
+      // Do NOT set ciphers: 'SSLv3' — it's been deprecated since 2014 and Gmail rejects it
     },
   })
 }
@@ -47,8 +47,9 @@ export async function sendETicketEmail(data: EmailTicketData) {
   const emailUser = process.env.EMAIL_USER
   const emailPass = process.env.EMAIL_PASS
   if (!emailUser || !emailPass) {
-    console.error('[EMAIL] Missing EMAIL_USER or EMAIL_PASS! USER:', emailUser ? 'SET' : 'UNDEF', 'PASS:', emailPass ? 'SET' : 'UNDEF')
-    return
+    const msg = `[EMAIL] Missing EMAIL_USER or EMAIL_PASS! USER: ${emailUser ? 'SET' : 'UNDEF'}, PASS: ${emailPass ? 'SET' : 'UNDEF'}. Cannot send email.`
+    console.error(msg)
+    throw new Error(msg)
   }
   console.log('[EMAIL] Env vars OK, generating PDF...')
 

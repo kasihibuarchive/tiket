@@ -95,28 +95,27 @@ export async function POST(request: NextRequest) {
           timeZone: 'Asia/Jakarta',
         })
         console.log('[tripay-webhook] Sending e-ticket email to:', transaction.customerEmail, 'for order:', merchant_ref)
-        sendETicketEmail({
-          customerName: transaction.customerName,
-          customerEmail: transaction.customerEmail,
-          eventName: event.title,
-          showDate,
-          location: event.location,
-          seatCodes,
-          transactionId: transaction.transactionId,
-          totalAmount: transaction.totalAmount,
-          qrCodeDataUrl: qrDataUrl,
-          template: emailTemplate ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer } : undefined,
-        }).then(async () => {
-          console.log('[tripay-webhook] E-ticket email sent successfully to:', transaction.customerEmail)
-          // Track successful delivery
+        try {
+          await sendETicketEmail({
+            customerName: transaction.customerName,
+            customerEmail: transaction.customerEmail,
+            eventName: event.title,
+            showDate,
+            location: event.location,
+            seatCodes,
+            transactionId: transaction.transactionId,
+            totalAmount: transaction.totalAmount,
+            qrCodeDataUrl: qrDataUrl,
+            template: emailTemplate ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer } : undefined,
+          })
+          console.log('[tripay-webhook] ✅ E-ticket email sent successfully to:', transaction.customerEmail)
           await db.transaction.update({
             where: { transactionId: transaction.transactionId },
             data: { emailStatus: 'SENT', emailError: null, lastEmailSentAt: new Date() },
           }).catch(() => {})
-        }).catch(async (emailError: any) => {
+        } catch (emailError: any) {
           const errMsg = emailError?.message || String(emailError)
-          console.error('[tripay-webhook] Failed to send E-Ticket email:', errMsg)
-          // Track failed delivery
+          console.error('[tripay-webhook] ❌ Failed to send E-Ticket email:', errMsg)
           const isBounce = errMsg.includes('OverQuota') || errMsg.includes('out of storage') || errMsg.includes('452') || errMsg.includes('550')
           await db.transaction.update({
             where: { transactionId: transaction.transactionId },
@@ -126,7 +125,7 @@ export async function POST(request: NextRequest) {
               lastEmailSentAt: new Date(),
             },
           }).catch(() => {})
-        })
+        }
       }
 
       return NextResponse.json({ success: true })
