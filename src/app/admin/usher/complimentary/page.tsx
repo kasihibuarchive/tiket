@@ -94,7 +94,6 @@ export default function OTSTicketPage() {
   // Form
   const [selectedEventId, setSelectedEventId] = useState<string>('')
   const [guestName, setGuestName] = useState('')
-  const [guestEmail, setGuestEmail] = useState('')
 
   // Submit
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -310,8 +309,8 @@ export default function OTSTicketPage() {
   // ─── Submit ──────────────────────────────────────────────────────────
 
   async function handleSubmit() {
-    if (!selectedEventId || !guestName || !guestEmail) {
-      setSubmitResult({ success: false, message: 'Harap lengkapi semua field.' })
+    if (!selectedEventId || !guestName) {
+      setSubmitResult({ success: false, message: 'Harap masukkan nama tamu.' })
       return
     }
     if (selectedSeats.length === 0) {
@@ -333,7 +332,7 @@ export default function OTSTicketPage() {
           eventId: selectedEventId,
           seatCodes: selectedSeats,
           guestName,
-          guestEmail,
+          guestEmail: '',
           guestPhone: '',
           showDateId: selectedShowDateId || undefined,
         }),
@@ -342,10 +341,9 @@ export default function OTSTicketPage() {
       const data = await res.json()
 
       if (res.ok) {
-        setSubmitResult({ success: true, message: `Tiket berhasil dikirim ke ${guestEmail}! TRX: ${data.transactionId}` })
+        setSubmitResult({ success: true, message: `Tiket OTS berhasil dibuat! TRX: ${data.transactionId}` })
         // Reset everything
         setGuestName('')
-        setGuestEmail('')
         setSelectedSeats([])
         setCurrentStep(0)
         setSelectedEventId('')
@@ -381,7 +379,7 @@ export default function OTSTicketPage() {
         </div>
         <div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">OTS Ticket</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">On The Spot — buat & kirim tiket langsung di lokasi</p>
+          <p className="text-sm text-muted-foreground mt-0.5">On The Spot — buat tiket langsung di lokasi, cukup nama pembeli</p>
         </div>
       </div>
 
@@ -476,15 +474,9 @@ export default function OTSTicketPage() {
             <div className="space-y-5 py-2">
               <div className="space-y-3">
                 <Label className="text-sm font-medium flex items-center gap-2"><Users className="w-4 h-4 text-gold" />Informasi Tamu</Label>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Nama <span className="text-danger">*</span></Label>
-                    <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Nama tamu" className="bg-white" autoFocus />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs text-muted-foreground">Email <span className="text-danger">*</span></Label>
-                    <Input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} placeholder="email@contoh.com" className="bg-white" />
-                  </div>
+                <div className="space-y-1.5 max-w-md">
+                  <Label className="text-xs text-muted-foreground">Nama <span className="text-danger">*</span></Label>
+                  <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Nama pembeli" className="bg-white" autoFocus />
                 </div>
               </div>
 
@@ -501,7 +493,7 @@ export default function OTSTicketPage() {
               <div className="flex items-center gap-3 justify-between">
                 <Button variant="outline" onClick={() => goToStep(0)}>Kembali</Button>
                 <Button
-                  disabled={!guestName || !guestEmail}
+                  disabled={!guestName}
                   onClick={() => { fetchSeatsForEvent(selectedEventId, selectedShowDateId || undefined); goToStep(2) }}
                   className="bg-charcoal hover:bg-charcoal/90 text-gold"
                 >
@@ -818,7 +810,6 @@ export default function OTSTicketPage() {
                 <p className="font-medium text-charcoal text-sm">Ringkasan</p>
                 <div className="grid grid-cols-2 gap-2">
                   <div><span className="text-muted-foreground">Nama:</span> <span className="font-medium">{guestName}</span></div>
-                  <div><span className="text-muted-foreground">Email:</span> <span className="font-medium">{guestEmail}</span></div>
                   <div><span className="text-muted-foreground">Event:</span> <span className="font-medium">{selectedEvent?.title}</span></div>
                   <div>
                     <span className="text-muted-foreground">Kursi:</span>{' '}
@@ -841,7 +832,7 @@ export default function OTSTicketPage() {
                   disabled={isSubmitting || selectedSeats.length === 0}
                   className="bg-charcoal hover:bg-charcoal/90 text-gold min-w-[180px]"
                 >
-                  {isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Mengirim...</> : <><Send className="w-4 h-4 mr-2" />Kirim Tiket</>}
+                  {isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{'Menyimpan...'}</> : <><Send className="w-4 h-4 mr-2" />Simpan Tiket</>}
                 </Button>
               </div>
             </div>

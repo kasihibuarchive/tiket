@@ -81,10 +81,10 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { eventId, seatCodes, guestName, guestEmail, guestPhone, showDateId } = body
 
-    // Validate required fields
-    if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0 || !guestName || !guestEmail) {
+    // Validate required fields (guestEmail is optional for OTS tickets)
+    if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0 || !guestName) {
       return NextResponse.json(
-        { error: 'eventId, seatCodes (non-empty array), guestName, and guestEmail are required' },
+        { error: 'eventId, seatCodes (non-empty array), and guestName are required' },
         { status: 400 }
       )
     }
@@ -192,13 +192,13 @@ export async function POST(request: NextRequest) {
     // Generate unique transaction ID
     const transactionId = await generateUniqueCompTransactionId()
 
-    // Create transaction
+    // Create transaction (customerEmail is optional for OTS walk-in tickets)
     const transaction = await db.transaction.create({
       data: {
         transactionId,
         eventId,
         customerName: guestName,
-        customerEmail: guestEmail,
+        customerEmail: guestEmail || '',
         customerWa: guestPhone || '',
         seatCodes: JSON.stringify(seatCodes),
         totalAmount: 0,
@@ -219,32 +219,34 @@ export async function POST(request: NextRequest) {
       data: { qrCodeUrl: qrDataUrl },
     })
 
-    // Fetch active email template
-    const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
+    // Only send e-ticket email if guestEmail is provided (OTS walk-in tickets may not have email)
+    if (guestEmail && guestEmail.trim()) {
+      // Fetch active email template
+      const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
 
-    // Send e-ticket email (awaited — fire-and-forget fails on Vercel serverless)
-    const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Jakarta',
-    })
+      // Send e-ticket email (awaited — fire-and-forget fails on Vercel serverless)
+      const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Jakarta',
+      })
 
-    try {
-      await sendETicketEmail({
-        customerName: guestName,
-        customerEmail: guestEmail,
-        eventName: event.title,
-        showDate,
-        location: event.location,
-        seatCodes,
-        transactionId,
-        totalAmount: 0,
-        qrCodeDataUrl: qrDataUrl,
-        template: emailTemplate
+      try {
+        await sendETicketEmail({
+          customerName: guestName,
+          customerEmail: guestEmail,
+          eventName: event.title,
+          showDate,
+          location: event.location,
+          seatCodes,
+          transactionId,
+          totalAmount: 0,
+          qrCodeDataUrl: qrDataUrl,
+          template: emailTemplate
           ? {
               greeting: emailTemplate.greeting,
               rules: emailTemplate.rules,
@@ -252,19 +254,27 @@ export async function POST(request: NextRequest) {
               footer: emailTemplate.footer,
             }
           : undefined,
-      })
-      console.log('[comp-ticket] ✅ E-ticket email sent to:', guestEmail)
+        })
+        console.log('[comp-ticket] ✅ E-ticket email sent to:', guestEmail)
+        await db.transaction.update({
+          where: { transactionId },
+          data: { emailStatus: 'SENT', emailError: null, lastEmailSentAt: new Date() },
+        }).catch(() => {})
+      } catch (emailError: unknown) {
+        const errMsg = emailError instanceof Error ? emailError.message : String(emailError)
+        console.error('[comp-ticket] ❌ Failed to send e-ticket email:', errMsg)
+        const isBounce = errMsg.includes('OverQuota') || errMsg.includes('out of storage') || errMsg.includes('452') || errMsg.includes('550')
+        await db.transaction.update({
+          where: { transactionId },
+          data: { emailStatus: isBounce ? 'BOUNCED' : 'FAILED', emailError: errMsg.substring(0, 500), lastEmailSentAt: new Date() },
+        }).catch(() => {})
+      }
+    } else {
+      // OTS ticket without email — mark email status as skipped
+      console.log('[comp-ticket] ℹ️ No email provided — skipping e-ticket email for OTS ticket:', transactionId)
       await db.transaction.update({
         where: { transactionId },
-        data: { emailStatus: 'SENT', emailError: null, lastEmailSentAt: new Date() },
-      }).catch(() => {})
-    } catch (emailError: unknown) {
-      const errMsg = emailError instanceof Error ? emailError.message : String(emailError)
-      console.error('[comp-ticket] ❌ Failed to send e-ticket email:', errMsg)
-      const isBounce = errMsg.includes('OverQuota') || errMsg.includes('out of storage') || errMsg.includes('452') || errMsg.includes('550')
-      await db.transaction.update({
-        where: { transactionId },
-        data: { emailStatus: isBounce ? 'BOUNCED' : 'FAILED', emailError: errMsg.substring(0, 500), lastEmailSentAt: new Date() },
+        data: { emailStatus: 'SKIPPED', emailError: null },
       }).catch(() => {})
     }
 
@@ -277,7 +287,7 @@ export async function POST(request: NextRequest) {
           adminId,
           adminName,
           action: 'COMPLIMENTARY_TICKET',
-          details: `Tiket komplimen untuk "${guestName}" (${guestEmail}) — Event: ${event.title} — ${seatCodes.length} tiket: ${seatCodes.join(', ')} — TRX: ${transactionId}`,
+          details: `Tiket komplimen/OTS untuk "${guestName}"${guestEmail ? ` (${guestEmail})` : ''} — Event: ${event.title} — ${seatCodes.length} tiket: ${seatCodes.join(', ')} — TRX: ${transactionId}`,
           ipAddress: clientIp,
         },
       })
