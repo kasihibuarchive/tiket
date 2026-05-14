@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
     }
 
     let discountAmount = 0
-    let promoCodeData = null
+    let promoCodeData: Awaited<ReturnType<typeof db.promoCode.findUnique>> | null = null
     let promoTarget = 'ALL'
     if (promoCodeId) {
       promoCodeData = await db.promoCode.findUnique({ where: { id: promoCodeId } })
