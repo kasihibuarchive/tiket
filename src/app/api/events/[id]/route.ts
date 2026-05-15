@@ -8,6 +8,9 @@ export async function GET(
   try {
     const { id } = await params
 
+    // Check if request comes from admin/usher (they can access unpublished events)
+    const isAdmin = !!(request.headers.get('x-admin-id') || request.nextUrl.searchParams.get('admin'))
+
     const data = await withDbRetry(async () => {
       // Single query to get event — use select to avoid unnecessary fields
       const event = await db.event.findUnique({
@@ -33,6 +36,11 @@ export async function GET(
       })
 
       if (!event) return null
+
+      // Block unpublished events for non-admin guests
+      if (!event.isPublished && !isAdmin) {
+        return { unpublished: true, title: event.title }
+      }
 
       // Run price categories and show dates in parallel (only 2 queries)
       const [priceCategories, showDates, seatStats] = await Promise.all([
@@ -76,6 +84,14 @@ export async function GET(
 
     if (!data) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+    }
+
+    // Return special response for unpublished events (guest access)
+    if ('unpublished' in data && data.unpublished) {
+      return NextResponse.json(
+        { error: 'Penjualan tiket untuk event ini sudah ditutup.', isUnpublished: true, title: data.title },
+        { status: 403 }
+      )
     }
 
     return NextResponse.json(data)

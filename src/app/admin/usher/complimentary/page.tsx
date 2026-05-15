@@ -207,14 +207,14 @@ export default function OTSTicketPage() {
     setEventLayoutImage(null)
 
     try {
-      const seatsUrl = `/api/events/${eventId}/seats${showDateFilter ? `?showDateId=${showDateFilter}` : ''}`
+      const seatsUrl = `/api/events/${eventId}/seats?admin=1${showDateFilter ? `&showDateId=${showDateFilter}` : ''}`
       const seatsRes = await fetch(seatsUrl)
       if (seatsRes.ok) {
         const data = await seatsRes.json()
         setSeats(data.seats || [])
       }
 
-      const eventRes = await fetch(`/api/events/${eventId}`)
+      const eventRes = await fetch(`/api/events/${eventId}?admin=1`)
       if (eventRes.ok) {
         const eventData = await eventRes.json()
         setEventSeatType(eventData.seatType || null)

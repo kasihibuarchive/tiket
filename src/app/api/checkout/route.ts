@@ -48,8 +48,13 @@ export async function POST(request: NextRequest) {
       data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
     })
 
-    // Get event for admin fee
-    const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true } })
+    // Get event for admin fee + publish check
+    const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true, isPublished: true } })
+
+    // Block checkout for unpublished events
+    if (!event?.isPublished) {
+      return NextResponse.json({ error: 'Penjualan tiket untuk event ini sudah ditutup.' }, { status: 403 })
+    }
 
     // Resolve payment method — accept Tripay channel codes or legacy QRIS/NON_QRIS
     let resolvedMethod = paymentMethod || 'BCAVA'

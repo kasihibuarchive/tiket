@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import {
-  Calendar, MapPin, Clock, Tag,
+  Calendar, MapPin, Clock, Tag, Ticket,
   Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck, Play,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
@@ -97,6 +97,7 @@ export default function EventDetailPage() {
   const [showCheckout, setShowCheckout] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [isUnpublished, setIsUnpublished] = useState(false)
   const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
 
   // Fetch event data — with retry logic for Supabase RAM exhaustion
@@ -111,6 +112,14 @@ export default function EventDetailPage() {
           const eventData = await eventRes.json()
           if (!cancelled) { setEvent(eventData); setIsLoading(false) }
           return
+        }
+        // Check if event is unpublished (403 with isUnpublished flag)
+        if (eventRes.status === 403) {
+          const errData = await eventRes.json().catch(() => ({}))
+          if (errData.isUnpublished) {
+            if (!cancelled) { setIsUnpublished(true); setIsLoading(false) }
+            return
+          }
         }
         throw new Error('HTTP ' + eventRes.status)
       } catch (err) {
@@ -202,6 +211,26 @@ export default function EventDetailPage() {
         <Navbar />
         <div className="flex-1 flex items-center justify-center">
           <Loader2 className="w-8 h-8 text-gold animate-spin" />
+        </div>
+      </div>
+    )
+  }
+
+  if (isUnpublished) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Navbar />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center px-4 max-w-md">
+            <div className="w-20 h-20 rounded-full bg-charcoal/10 flex items-center justify-center mx-auto mb-6">
+              <Ticket className="w-10 h-10 text-charcoal/40" />
+            </div>
+            <h2 className="font-serif text-2xl font-bold text-charcoal mb-3">Penjualan Sudah Ditutup</h2>
+            <p className="text-muted-foreground mb-6">Maaf, tiket untuk event ini sudah tidak tersedia untuk dibeli. Penjualan telah ditutup oleh penyelenggara.</p>
+            <Button variant="outline" onClick={() => router.push('/')} className="border-charcoal/20 hover:bg-charcoal/5">
+              Kembali ke Beranda
+            </Button>
+          </div>
         </div>
       </div>
     )

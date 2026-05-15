@@ -225,7 +225,7 @@ export default function ComplimentaryTicketsPage() {
 
     try {
       // Fetch seats with optional showDateId filter
-      const seatsUrl = `/api/events/${eventId}/seats${showDateFilter ? `?showDateId=${showDateFilter}` : ''}`
+      const seatsUrl = `/api/events/${eventId}/seats?admin=1${showDateFilter ? `&showDateId=${showDateFilter}` : ''}`
       const seatsRes = await fetch(seatsUrl)
       if (seatsRes.ok) {
         const data = await seatsRes.json()
@@ -234,7 +234,7 @@ export default function ComplimentaryTicketsPage() {
       }
 
       // Fetch event detail to get seatMapId, showDates, seatType, layoutImage
-      const eventRes = await fetch(`/api/events/${eventId}`)
+      const eventRes = await fetch(`/api/events/${eventId}?admin=1`)
       if (eventRes.ok) {
         const eventData = await eventRes.json()
         // Store seatType and layoutImage for GA detection and display

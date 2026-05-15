@@ -253,7 +253,7 @@ export default function UsherSeatMapPage() {
 
     async function fetchEvent() {
       try {
-        const eventRes = await fetch(`/api/events/${eventId}`)
+        const eventRes = await fetch(`/api/events/${eventId}?admin=1`)
         if (!eventRes.ok) throw new Error('Failed to fetch event data')
         const eventData = await eventRes.json()
         setEvent({
@@ -286,8 +286,8 @@ export default function UsherSeatMapPage() {
     async function fetchSeats() {
       try {
         const seatsUrl = activeShowDate?.id
-          ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
-          : `/api/events/${eventId}/seats`
+          ? `/api/events/${eventId}/seats?admin=1&showDateId=${activeShowDate.id}`
+          : `/api/events/${eventId}/seats?admin=1`
         const [seatsRes, infoRes] = await Promise.all([
           fetch(seatsUrl),
           fetch(`/api/usher/seats-info?eventId=${eventId}`),
@@ -321,8 +321,8 @@ export default function UsherSeatMapPage() {
     const interval = setInterval(async () => {
       try {
         const seatsUrl = activeShowDate?.id
-          ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
-          : `/api/events/${eventId}/seats`
+          ? `/api/events/${eventId}/seats?admin=1&showDateId=${activeShowDate.id}`
+          : `/api/events/${eventId}/seats?admin=1`
         const [seatsRes, infoRes] = await Promise.all([
           fetch(seatsUrl),
           fetch(`/api/usher/seats-info?eventId=${eventId}`),

@@ -675,7 +675,7 @@ export default function SeatEditorPage() {
     async function fetchData() {
       try {
         const [seatsRes, eventRes] = await Promise.all([
-          fetch(`/api/events/${eventId}/seats`),
+          fetch(`/api/events/${eventId}/seats?admin=1`),
           fetch(`/api/admin/events/${eventId}`),
         ])
 

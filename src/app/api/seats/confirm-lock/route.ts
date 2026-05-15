@@ -19,6 +19,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
     }
 
+    // Check if event is still published before confirming seat locks
+    const event = await db.event.findUnique({ where: { id: eventId }, select: { isPublished: true } })
+    if (!event?.isPublished) {
+      return NextResponse.json({ error: 'Penjualan tiket untuk event ini sudah ditutup.' }, { status: 403 })
+    }
+
     // Checkout session ID (prefixed to take priority over seat-map locks)
     const checkoutId = CHECKOUT_PREFIX + sessionId
 

@@ -21,12 +21,18 @@ export async function GET(
         } catch { /* non-critical */ }
       }
 
-      // Quick event existence check
+      // Quick event existence + publish check
       const event = await db.event.findUnique({
         where: { id },
-        select: { id: true },
+        select: { id: true, isPublished: true },
       })
       if (!event) return null
+
+      // Block unpublished events for non-admin guests
+      const isAdmin = !!(request.headers.get('x-admin-id') || request.nextUrl.searchParams.get('admin'))
+      if (!event.isPublished && !isAdmin) {
+        return { unpublished: true }
+      }
 
       // Build where clause
       const seatWhere: Record<string, unknown> = { eventId: id }
@@ -74,6 +80,13 @@ export async function GET(
 
     if (!data) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+    }
+
+    if ('unpublished' in data && data.unpublished) {
+      return NextResponse.json(
+        { error: 'Penjualan tiket untuk event ini sudah ditutup.', isUnpublished: true },
+        { status: 403 }
+      )
     }
 
     return NextResponse.json(data)

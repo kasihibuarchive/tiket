@@ -17,6 +17,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing sessionId' }, { status: 400 })
     }
 
+    // Check if event is still published before allowing seat locks
+    const event = await db.event.findUnique({ where: { id: eventId }, select: { isPublished: true } })
+    if (!event?.isPublished) {
+      return NextResponse.json({ error: 'Penjualan tiket untuk event ini sudah ditutup.' }, { status: 403 })
+    }
+
     const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
     if (showDateId) seatWhere.eventShowDateId = showDateId
 
