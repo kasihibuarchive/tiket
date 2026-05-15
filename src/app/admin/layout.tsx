@@ -7,7 +7,7 @@ import Image from 'next/image'
 import { cn } from '@/lib/utils'
 import {
   Calendar, LayoutGrid, Mail, ChevronLeft,
-  LogOut, Loader2, ShieldCheck, ShoppingBag, Tag, ScanLine, Users, Gift, Zap, Map, Activity
+  LogOut, Loader2, ShieldCheck, ShoppingBag, Tag, ScanLine, Users, Gift, Zap, Map
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -23,7 +23,6 @@ const adminLinks = [
   { href: '/admin/merchandise', label: 'Merchandise', icon: ShoppingBag },
   { href: '/admin/promo-codes', label: 'Kode Promo', icon: Tag },
   { href: '/admin/scanner', label: 'Scanner Tiket', icon: ScanLine },
-  { href: '/admin/activity-logs', label: 'Log Aktivitas', icon: Activity },
 ]
 
 const usherLinks = [
