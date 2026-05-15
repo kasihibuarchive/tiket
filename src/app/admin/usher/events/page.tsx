@@ -34,7 +34,7 @@ export default function UsherEventsPage() {
   useEffect(() => {
     async function fetchEvents() {
       try {
-        const res = await fetch('/api/events?published=true')
+        const res = await fetch('/api/events')
         if (!res.ok) throw new Error('Failed to fetch events')
         const data = await res.json()
         setEvents(data.events || [])
@@ -96,7 +96,7 @@ export default function UsherEventsPage() {
     return (
       <div className="text-center py-20">
         <Calendar className="w-12 h-12 text-muted-foreground/30 mx-auto mb-4" />
-        <p className="text-muted-foreground text-sm">Belum ada event yang dipublikasikan</p>
+        <p className="text-muted-foreground text-sm">Belum ada event</p>
       </div>
     )
   }
