@@ -10,12 +10,18 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || undefined
     const dateFrom = searchParams.get('dateFrom') || undefined
     const dateTo = searchParams.get('dateTo') || undefined
+    const role = searchParams.get('role') || undefined // 'usher' | 'admin'
     const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
     const offset = Number(searchParams.get('offset')) || 0
 
     const where: any = {}
     if (adminId) where.adminId = adminId
     if (action) where.action = action
+
+    // Role filter: join with Admin table to filter by role
+    if (role) {
+      where.admin = { role }
+    }
 
     // Search filter: match against details or adminName
     if (search) {

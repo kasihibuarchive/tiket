@@ -154,7 +154,8 @@ export default function ActivityLogsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [page, setPage] = useState(0)
 
-  // Filters
+  // Filters — default: only show usher activity
+  const [roleFilter, setRoleFilter] = useState('usher') // 'usher' | 'admin' | ''
   const [search, setSearch] = useState('')
   const [searchInput, setSearchInput] = useState('')
   const [actionFilter, setActionFilter] = useState('')
@@ -168,6 +169,7 @@ export default function ActivityLogsPage() {
       const params = new URLSearchParams()
       params.set('limit', String(PAGE_SIZE))
       params.set('offset', String(page * PAGE_SIZE))
+      if (roleFilter) params.set('role', roleFilter)
       if (search) params.set('search', search)
       if (actionFilter) params.set('action', actionFilter)
       if (dateFrom) params.set('dateFrom', dateFrom)
@@ -184,7 +186,7 @@ export default function ActivityLogsPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [page, search, actionFilter, dateFrom, dateTo])
+  }, [page, search, actionFilter, dateFrom, dateTo, roleFilter])
 
   useEffect(() => {
     fetchLogs()
@@ -200,6 +202,7 @@ export default function ActivityLogsPage() {
   }
 
   const clearFilters = () => {
+    setRoleFilter('usher')
     setSearch('')
     setSearchInput('')
     setActionFilter('')
@@ -209,7 +212,7 @@ export default function ActivityLogsPage() {
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
-  const hasActiveFilters = search || actionFilter || dateFrom || dateTo
+  const hasActiveFilters = roleFilter !== 'usher' || search || actionFilter || dateFrom || dateTo
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('id-ID', {
@@ -246,7 +249,7 @@ export default function ActivityLogsPage() {
             Log Aktivitas
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Pantau semua aktivitas yang terjadi di sistem
+            Pantau aktivitas usher — scan tiket, OTS, check-in, dan lainnya
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -295,6 +298,43 @@ export default function ActivityLogsPage() {
           >
             Cari
           </Button>
+        </div>
+
+        {/* Role tabs */}
+        <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg w-fit">
+          <button
+            onClick={() => { setRoleFilter('usher'); setPage(0) }}
+            className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              roleFilter === 'usher'
+                ? 'bg-charcoal text-gold shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`
+            }
+          >
+            Aktivitas Usher
+          </button>
+          <button
+            onClick={() => { setRoleFilter('admin'); setPage(0) }}
+            className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              roleFilter === 'admin'
+                ? 'bg-charcoal text-gold shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`
+            }
+          >
+            Aktivitas Admin
+          </button>
+          <button
+            onClick={() => { setRoleFilter(''); setPage(0) }}
+            className={`px-4 py-1.5 rounded-md text-xs font-medium transition-colors ${
+              roleFilter === ''
+                ? 'bg-charcoal text-gold shadow-sm'
+                : 'text-muted-foreground hover:text-foreground'
+            }`
+            }
+          >
+            Semua
+          </button>
         </div>
 
         {/* Filter panel */}
