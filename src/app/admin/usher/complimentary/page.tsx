@@ -172,7 +172,7 @@ export default function OTSTicketPage() {
         const res = await fetch('/api/admin/events')
         if (res.ok) {
           const data = await res.json()
-          setEvents((data.events || []).filter((e: any) => e.isPublished))
+          setEvents(data.events || [])
         }
       } catch {}
       finally { setIsLoadingEvents(false) }
