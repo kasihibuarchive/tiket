@@ -16,6 +16,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose
 } from '@/components/ui/dialog'
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import {
@@ -104,6 +107,11 @@ export default function AdminEventsPage() {
   const [selectedSeatMapId, setSelectedSeatMapId] = useState('')
   const [isLoadingMaps, setIsLoadingMaps] = useState(false)
   const [isGeneratingSeats, setIsGeneratingSeats] = useState(false)
+
+  // Publish/unpublish confirmation dialog
+  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false)
+  const [publishEvent, setPublishEvent] = useState<EventData | null>(null)
+  const [isTogglingPublish, setIsTogglingPublish] = useState(false)
 
   // Queue config dialog state
   const [isQueueDialogOpen, setIsQueueDialogOpen] = useState(false)
@@ -275,16 +283,28 @@ export default function AdminEventsPage() {
     }
   }
 
-  async function handleTogglePublish(event: EventData) {
+  function openPublishDialog(event: EventData) {
+    setPublishEvent(event)
+    setIsPublishDialogOpen(true)
+  }
+
+  async function handleTogglePublish() {
+    if (!publishEvent) return
+    setIsTogglingPublish(true)
     try {
-      const res = await fetch(`/api/admin/events/${event.id}`, {
+      const res = await fetch(`/api/admin/events/${publishEvent.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...event, isPublished: !event.isPublished }),
+        body: JSON.stringify({ ...publishEvent, isPublished: !publishEvent.isPublished }),
       })
-      if (res.ok) fetchEvents()
+      if (res.ok) {
+        fetchEvents()
+        setIsPublishDialogOpen(false)
+      }
     } catch (err) {
       console.error('Toggle publish error:', err)
+    } finally {
+      setIsTogglingPublish(false)
     }
   }
 
@@ -561,7 +581,7 @@ export default function AdminEventsPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() => handleTogglePublish(event)}
+                          onClick={() => openPublishDialog(event)}
                           title={event.isPublished ? 'Unpublish' : 'Publish'}
                         >
                           {event.isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -1051,6 +1071,44 @@ export default function AdminEventsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Publish/Unpublish Confirmation Dialog */}
+      <AlertDialog open={isPublishDialogOpen} onOpenChange={setIsPublishDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-serif">
+              {publishEvent?.isPublished ? 'Unpublish Event?' : 'Publish Event?'}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {publishEvent?.isPublished ? (
+                <>
+                  Event <strong>{publishEvent?.title}</strong> akan di-unpublish. Tamu tidak bisa lagi melihat atau membeli tiket event ini. Tiket yang sudah terlanjur dibeli tetap valid.
+                </>
+              ) : (
+                <>
+                  Event <strong>{publishEvent?.title}</strong> akan dipublish dan dapat dilihat serta dibeli tiketnya oleh tamu. Pastikan semua data event sudah benar sebelum publish.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isTogglingPublish}>Batal</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleTogglePublish}
+              disabled={isTogglingPublish}
+              className={publishEvent?.isPublished ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
+            >
+              {isTogglingPublish ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{'Memproses...'}</>
+              ) : publishEvent?.isPublished ? (
+                <><EyeOff className="w-4 h-4 mr-2" />Ya, Unpublish</>
+              ) : (
+                <><Eye className="w-4 h-4 mr-2" />Ya, Publish</>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
