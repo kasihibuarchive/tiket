@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET(
   request: NextRequest,
@@ -54,6 +55,7 @@ export async function PUT(
       },
     })
 
+    await logActivity(request, 'UPDATE_PROMO', `Promo code "${existing.code}" diperbarui`)
     return NextResponse.json({ promoCode })
   } catch (error) {
     console.error('Error updating promo code:', error)
@@ -71,6 +73,7 @@ export async function DELETE(
     if (!existing) {
       return NextResponse.json({ error: 'Promo code not found' }, { status: 404 })
     }
+    await logActivity(request, 'DELETE_PROMO', `Menghapus promo code "${existing.code}"`)
     await db.promoCode.delete({ where: { id } })
     return NextResponse.json({ message: 'Promo code deleted successfully' })
   } catch (error) {

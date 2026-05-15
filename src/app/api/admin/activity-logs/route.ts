@@ -7,12 +7,36 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const adminId = searchParams.get('adminId') || undefined
     const action = searchParams.get('action') || undefined
+    const search = searchParams.get('search') || undefined
+    const dateFrom = searchParams.get('dateFrom') || undefined
+    const dateTo = searchParams.get('dateTo') || undefined
     const limit = Math.min(Number(searchParams.get('limit')) || 50, 200)
     const offset = Number(searchParams.get('offset')) || 0
 
     const where: any = {}
     if (adminId) where.adminId = adminId
     if (action) where.action = action
+
+    // Search filter: match against details or adminName
+    if (search) {
+      where.OR = [
+        { details: { contains: search, mode: 'insensitive' } },
+        { adminName: { contains: search, mode: 'insensitive' } },
+        { action: { contains: search, mode: 'insensitive' } },
+      ]
+    }
+
+    // Date range filter
+    if (dateFrom || dateTo) {
+      where.createdAt = {}
+      if (dateFrom) where.createdAt.gte = new Date(dateFrom)
+      if (dateTo) {
+        // Include the entire end day
+        const toDate = new Date(dateTo)
+        toDate.setHours(23, 59, 59, 999)
+        where.createdAt.lte = toDate
+      }
+    }
 
     const [logs, total] = await Promise.all([
       db.activityLog.findMany({

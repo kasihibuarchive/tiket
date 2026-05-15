@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET(
   request: NextRequest,
@@ -48,6 +49,7 @@ export async function PUT(
       },
     })
 
+    await logActivity(request, 'UPDATE_MERCHANDISE', `Merchandise "${existing.name}" diperbarui`)
     return NextResponse.json({ merchandise })
   } catch (error) {
     console.error('Error updating merchandise:', error)
@@ -70,6 +72,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Merchandise not found' }, { status: 404 })
     }
 
+    await logActivity(request, 'DELETE_MERCHANDISE', `Menghapus merchandise "${existing.name}"`)
     await db.merchandise.delete({ where: { id } })
 
     return NextResponse.json({ message: 'Merchandise deleted successfully' })

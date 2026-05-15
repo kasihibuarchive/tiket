@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET(request: NextRequest) {
   try {
@@ -53,6 +54,7 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    await logActivity(request, 'CREATE_PROMO', `Membuat promo code "${code.toUpperCase()}" — ${discountType} ${discountValue}${discountType === 'PERCENTAGE' ? '%' : ''} — Max: ${maxUses}x`)
     return NextResponse.json({ promoCode }, { status: 201 })
   } catch (error) {
     console.error('Error creating promo code:', error)

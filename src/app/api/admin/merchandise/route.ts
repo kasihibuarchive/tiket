@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET(request: NextRequest) {
   try {
@@ -44,6 +45,8 @@ export async function POST(request: NextRequest) {
       },
     })
 
+    const event = await db.event.findUnique({ where: { id: eventId }, select: { title: true } })
+    await logActivity(request, 'CREATE_MERCHANDISE', `Membuat merchandise "${name}" — Event: ${event?.title || eventId}`)
     return NextResponse.json({ merchandise }, { status: 201 })
   } catch (error) {
     console.error('Error creating merchandise:', error)

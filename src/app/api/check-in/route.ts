@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function POST(request: NextRequest) {
   try {
@@ -61,6 +62,8 @@ export async function POST(request: NextRequest) {
       where: { transactionId },
       data: { checkInTime: new Date() },
     })
+
+    await logActivity(request, 'CHECK_IN', `Check-in tiket ${transactionId} — ${checkedIn.customerName}`)
 
     // Fetch event title separately — NO include
     const event = await db.event.findUnique({ where: { id: checkedIn.eventId } })

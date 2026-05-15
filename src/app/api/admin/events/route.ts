@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, withDbRetry } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET() {
   try {
@@ -160,6 +161,7 @@ export async function POST(request: NextRequest) {
       orderBy: { date: 'asc' },
     })
 
+    await logActivity(request, 'CREATE_EVENT', `Membuat event "${title}"`)
     return NextResponse.json({
       event: { ...event, priceCategories: createdPriceCats, showDates: createdShowDates },
     }, { status: 201 })

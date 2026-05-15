@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 /**
  * POST /api/cancel/[transactionId]
@@ -54,6 +55,8 @@ export async function POST(
         lockedBy: null,
       },
     })
+
+    await logActivity(request, 'CANCEL_TRANSACTION', `Membatalkan transaksi ${transactionId} — Kursi dilepas: ${seatCodes.join(', ')}`)
 
     console.log('[cancel] Transaction cancelled:', transactionId, 'Seats released:', seatCodes)
 

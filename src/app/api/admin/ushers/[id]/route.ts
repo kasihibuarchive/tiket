@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { hashPassword } from '@/lib/auth'
+import { logActivity } from '@/lib/activity-log'
 
 // GET — Get single usher details
 export async function GET(
@@ -105,7 +106,7 @@ export async function PUT(
 
 // DELETE — Delete usher account
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -118,6 +119,8 @@ export async function DELETE(
     if (!existing) {
       return NextResponse.json({ error: 'Usher tidak ditemukan' }, { status: 404 })
     }
+
+    await logActivity(request, 'DELETE_ACCOUNT', `Menghapus akun usher "${existing.username}"`)
 
     // Delete activity logs first (cascade should handle this, but explicit for clarity)
     await db.activityLog.deleteMany({ where: { adminId: id } })

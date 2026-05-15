@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET() {
   try {
@@ -56,6 +57,8 @@ export async function POST(request: NextRequest) {
         layoutData: layoutData !== undefined ? layoutData : [],
       },
     })
+
+    await logActivity(request, 'CREATE_SEAT_MAP', `Membuat seat map "${name}" (${seatType || 'NUMBERED'})`)
 
     return NextResponse.json({ seatMap }, { status: 201 })
   } catch (error) {

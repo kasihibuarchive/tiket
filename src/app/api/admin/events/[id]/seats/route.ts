@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function PUT(
   request: NextRequest,
@@ -46,6 +47,8 @@ export async function PUT(
       })
     }
 
+    await logActivity(request, 'UPDATE_SEATS', `Update ${seats.length} kursi — Event: "${event.title}"`)
+
     return NextResponse.json({ message: 'Seats updated successfully', updatedCount: seats.length })
   } catch (error) {
     console.error('Error updating seats:', error)
@@ -80,6 +83,8 @@ export async function DELETE(
         { status: 409 }
       )
     }
+
+    await logActivity(request, 'DELETE_SEATS', `Menghapus semua kursi event "${event.title}"`)
 
     // Delete all seats
     const result = await db.seat.deleteMany({ where: { eventId: id } })

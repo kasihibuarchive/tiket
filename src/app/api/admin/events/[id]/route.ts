@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, withDbRetry } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET(
   request: NextRequest,
@@ -217,6 +218,16 @@ export async function PUT(
       orderBy: { date: 'asc' },
     })
 
+    // Log specific changes
+    const logDetails: string[] = []
+    if (title && title !== event.title) logDetails.push(`judul: "${event.title}" → "${title}"`)
+    if (isPublished !== undefined && isPublished !== event.isPublished) {
+      logDetails.push(isPublished ? 'dipublish' : 'di-unpublish')
+    }
+    if (location && location !== event.location) logDetails.push(`lokasi diubah`)
+    if (synopsis && synopsis !== event.synopsis) logDetails.push(`sinopsis diubah`)
+    await logActivity(request, 'UPDATE_EVENT', `Event "${event.title}": ${logDetails.length > 0 ? logDetails.join(', ') : 'diperbarui'}`)
+
     return NextResponse.json({
       event: { ...updatedEvent, priceCategories: updatedPriceCats, showDates: updatedShowDates },
     })
@@ -241,6 +252,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
+    await logActivity(request, 'DELETE_EVENT', `Menghapus event "${event.title}" beserta semua data terkait`)
     await db.transaction.deleteMany({ where: { eventId: id } })
     await db.seat.deleteMany({ where: { eventId: id } })
     await db.priceCategory.deleteMany({ where: { eventId: id } })

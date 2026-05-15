@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sendETicketEmail } from '@/lib/email'
 import QRCode from 'qrcode'
+import { logActivity } from '@/lib/activity-log'
 
 // POST /api/usher/resend-email
 // Resend e-ticket email for a given transactionId
@@ -110,6 +111,8 @@ export async function POST(request: NextRequest) {
         where: { transactionId },
         data: { emailStatus: 'SENT', emailError: null, lastEmailSentAt: new Date() },
       }).catch(() => {})
+
+      await logActivity(request, 'RESEND_EMAIL', `Kirim ulang e-tiket ${transactionId} ke ${transaction.customerEmail}`)
 
       return NextResponse.json({
         success: true,

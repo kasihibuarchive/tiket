@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET(
   _request: NextRequest,
@@ -54,6 +55,8 @@ export async function PUT(
       },
     })
 
+    await logActivity(request, 'UPDATE_SEAT_MAP', `Seat map "${seatMap.name}" diperbarui`)
+
     return NextResponse.json({ seatMap: updated })
   } catch (error) {
     console.error('Error updating seat map:', error)
@@ -65,7 +68,7 @@ export async function PUT(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -97,6 +100,8 @@ export async function DELETE(
         { status: 409 }
       )
     }
+
+    await logActivity(request, 'DELETE_SEAT_MAP', `Menghapus seat map "${seatMap.name}"`)
 
     await db.mapEditorLock.deleteMany({ where: { seatMapId: id } })
     await db.seatMap.delete({ where: { id } })

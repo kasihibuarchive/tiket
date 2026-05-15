@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 // ─── Helper: determine category from sections ─────────────────────────────
 
@@ -344,6 +345,8 @@ export async function POST(
     const perDayLabel = showDates.length > 1
       ? ` (${showDates.length} hari × ${uniqueSeatData.length} kursi/hari)`
       : ''
+
+    await logActivity(request, 'GENERATE_SEATS', `Generate ${totalCreated} kursi untuk event "${event.title}"${perDayLabel}`)
 
     return NextResponse.json({
       message: useGaZoneConfig

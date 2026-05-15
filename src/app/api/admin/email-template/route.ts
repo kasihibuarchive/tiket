@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import { logActivity } from '@/lib/activity-log'
 
 export async function GET() {
   try {
@@ -59,6 +60,8 @@ export async function PUT(request: NextRequest) {
         },
       })
 
+      await logActivity(request, 'UPDATE_EMAIL_TEMPLATE', 'Template email diperbarui')
+
       return NextResponse.json({ template: updated })
     } else {
       // Create new template
@@ -72,6 +75,8 @@ export async function PUT(request: NextRequest) {
           isActive: true,
         },
       })
+
+      await logActivity(request, 'UPDATE_EMAIL_TEMPLATE', 'Template email baru dibuat')
 
       return NextResponse.json({ template: created }, { status: 201 })
     }
