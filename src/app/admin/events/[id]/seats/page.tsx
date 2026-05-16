@@ -112,7 +112,7 @@ function GaZoneManagementPanel({
   setNewZone: React.Dispatch<React.SetStateAction<GaZoneDef>>
   priceCategories: PriceCategoryData[]
   fileInputRef: React.RefObject<HTMLInputElement | null>
-  existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number }>
+  existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number; invitation: number }>
   existingSeatsCount?: number
 }) {
   const hasExistingSeats = (existingSeatsCount ?? 0) > 0
@@ -520,7 +520,7 @@ function GaZoneManagementPanel({
               {Object.entries(existingZoneSummary).map(([zoneName, stats]) => (
                 <div key={zoneName} className="rounded-lg border border-border/50 p-3 bg-white">
                   <p className="text-sm font-semibold text-charcoal">{zoneName}</p>
-                  <div className="grid grid-cols-3 gap-2 mt-2">
+                  <div className="grid grid-cols-4 gap-2 mt-2">
                     <div>
                       <p className="text-lg font-bold text-emerald-600">{stats.available}</p>
                       <p className="text-[10px] text-muted-foreground">Tersedia</p>
@@ -530,15 +530,31 @@ function GaZoneManagementPanel({
                       <p className="text-[10px] text-muted-foreground">Terjual</p>
                     </div>
                     <div>
+                      <p className="text-lg font-bold text-purple-600">{stats.invitation}</p>
+                      <p className="text-[10px] text-muted-foreground">Undangan</p>
+                    </div>
+                    <div>
                       <p className="text-lg font-bold text-amber-500">{stats.locked}</p>
                       <p className="text-[10px] text-muted-foreground">Dikunci</p>
                     </div>
                   </div>
                   {/* Progress bar */}
-                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
                     <div
-                      className="h-full bg-emerald-500 rounded-full transition-all"
+                      className="h-full bg-emerald-500 rounded-l-full transition-all"
                       style={{ width: `${stats.total > 0 ? (stats.available / stats.total) * 100 : 0}%` }}
+                    />
+                    <div
+                      className="h-full bg-red-400 transition-all"
+                      style={{ width: `${stats.total > 0 ? (stats.sold / stats.total) * 100 : 0}%` }}
+                    />
+                    <div
+                      className="h-full bg-purple-400 transition-all"
+                      style={{ width: `${stats.total > 0 ? (stats.invitation / stats.total) * 100 : 0}%` }}
+                    />
+                    <div
+                      className="h-full bg-amber-400 rounded-r-full transition-all"
+                      style={{ width: `${stats.total > 0 ? (stats.locked / stats.total) * 100 : 0}%` }}
                     />
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1">
@@ -1239,15 +1255,16 @@ export default function SeatEditorPage() {
   // regardless of whether seats already exist or not.
   if (isEventGA) {
     // Build zone summary from existing seats (grouped by zoneName)
-    const zoneSummary = new Map<string, { total: number; available: number; sold: number; locked: number }>()
+    const zoneSummary = new Map<string, { total: number; available: number; sold: number; locked: number; invitation: number }>()
     for (const s of allSeats) {
       const zone = s.zoneName || 'Tanpa Zona'
-      if (!zoneSummary.has(zone)) zoneSummary.set(zone, { total: 0, available: 0, sold: 0, locked: 0 })
+      if (!zoneSummary.has(zone)) zoneSummary.set(zone, { total: 0, available: 0, sold: 0, locked: 0, invitation: 0 })
       const z = zoneSummary.get(zone)!
       z.total++
       if (s.status === 'AVAILABLE') z.available++
       else if (s.status === 'SOLD') z.sold++
       else if (s.status === 'LOCKED_TEMPORARY') z.locked++
+      else if (s.status === 'INVITATION') z.invitation++
     }
 
     return <GaZoneManagementPanel
@@ -1587,7 +1604,65 @@ export default function SeatEditorPage() {
                           <div className="flex items-center gap-4 mt-2 text-xs">
                             <span className="text-green-600">{available} tersedia</span>
                             <span className="text-red-500">{sold} terjual</span>
+                            <span className="text-purple-600">{zoneSeats.filter((s) => s.status === 'INVITATION').length} undangan</span>
                             <span className="text-amber-600">{locked} terkunci</span>
+                          </div>
+                          {/* Reserve invitation button */}
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const qtyStr = prompt(`Reservi slot undangan di zona "${zone.name}"\nTersedia: ${available} kursi\n\nJumlah slot:`)
+                                if (!qtyStr) return
+                                const qty = parseInt(qtyStr)
+                                if (!qty || qty < 1) return
+                                try {
+                                  const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ zoneName: zone.name, quantity: qty }),
+                                  })
+                                  const data = await res.json()
+                                  if (res.ok) {
+                                    alert(data.message)
+                                    window.location.reload()
+                                  } else {
+                                    alert(data.error || 'Gagal reservi')
+                                  }
+                                } catch { alert('Gagal reservi') }
+                              }}
+                              className="text-[10px] px-2 py-1 rounded-md bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors"
+                            >
+                              <Crown className="w-3 h-3 inline mr-0.5" />
+                              Reservi Undangan
+                            </button>
+                            {zoneSeats.filter((s) => s.status === 'INVITATION').length > 0 && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const invCount = zoneSeats.filter((s) => s.status === 'INVITATION').length
+                                  const qtyStr = prompt(`Lepas slot undangan di zona "${zone.name}"\nSaat ini: ${invCount} slot undangan\n\nJumlah yang dilepas:`)
+                                  if (!qtyStr) return
+                                  const qty = parseInt(qtyStr)
+                                  if (!qty || qty < 1) return
+                                  try {
+                                    const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation?zoneName=${encodeURIComponent(zone.name)}&quantity=${qty}`, {
+                                      method: 'DELETE',
+                                    })
+                                    const data = await res.json()
+                                    if (res.ok) {
+                                      alert(data.message)
+                                      window.location.reload()
+                                    } else {
+                                      alert(data.error || 'Gagal melepas')
+                                    }
+                                  } catch { alert('Gagal melepas') }
+                                }}
+                                className="text-[10px] px-2 py-1 rounded-md bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 transition-colors"
+                              >
+                                Lepas Slot
+                              </button>
+                            )}
                           </div>
                         </div>
                       )
