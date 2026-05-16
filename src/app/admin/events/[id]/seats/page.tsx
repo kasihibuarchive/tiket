@@ -665,7 +665,7 @@ function GaZoneManagementPanel({
                         </Badge>
                       )}
                     </div>
-                  <div className="grid grid-cols-4 gap-2 mt-2">
+                  <div className="grid grid-cols-5 gap-2 mt-2">
                     <div>
                       <p className="text-lg font-bold text-emerald-600">{stats.available}</p>
                       <p className="text-[10px] text-muted-foreground">Tersedia</p>
@@ -677,6 +677,10 @@ function GaZoneManagementPanel({
                     <div>
                       <p className="text-lg font-bold text-purple-600">{stats.invitation}</p>
                       <p className="text-[10px] text-muted-foreground">Undangan</p>
+                    </div>
+                    <div>
+                      <p className="text-lg font-bold text-amber-500">{stats.locked}</p>
+                      <p className="text-[10px] text-muted-foreground">Dikunci</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-gray-500">{stats.unavailable || 0}</p>
@@ -696,6 +700,10 @@ function GaZoneManagementPanel({
                     <div
                       className="h-full bg-purple-400 transition-all"
                       style={{ width: `${stats.total > 0 ? (stats.invitation / stats.total) * 100 : 0}%` }}
+                    />
+                    <div
+                      className="h-full bg-amber-400 transition-all"
+                      style={{ width: `${stats.total > 0 ? (stats.locked / stats.total) * 100 : 0}%` }}
                     />
                     <div
                       className="h-full bg-gray-400 rounded-r-full transition-all"
