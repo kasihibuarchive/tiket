@@ -261,20 +261,51 @@ export async function POST(request: NextRequest) {
     const signature = createTransactionSignature(tid, totalAmount)
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
 
-    // Build order_items for Tripay
-    const orderItems = discountAmount === 0
-      ? items.map((item) => ({
+    // Build order_items for Tripay — always itemized so admin fee is visible
+    let orderItems: { sku: string; name: string; price: number; quantity: number }[]
+
+    if (discountAmount === 0) {
+      orderItems = items.map((item) => ({
+        sku: item.id,
+        name: item.name,
+        price: item.price,
+        quantity: item.quantity,
+      }))
+    } else {
+      // Distribute discount proportionally across items so the total matches
+      const totalItemValue = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+      let remainingDiscount = discountAmount
+
+      orderItems = items.map((item, idx) => {
+        const itemSubtotal = item.price * item.quantity
+        let itemDiscount: number
+
+        if (idx === items.length - 1) {
+          // Last item gets the remaining discount to avoid rounding issues
+          itemDiscount = remainingDiscount
+        } else {
+          itemDiscount = Math.round(discountAmount * (itemSubtotal / totalItemValue))
+          remainingDiscount -= itemDiscount
+        }
+
+        const discountedPrice = Math.max(itemSubtotal - itemDiscount, 1)
+        return {
           sku: item.id,
-          name: item.name,
-          price: item.price,
+          name: item.name + (itemDiscount > 0 ? ' (diskon)' : ''),
+          price: Math.ceil(discountedPrice / item.quantity),
           quantity: item.quantity,
-        }))
-      : [{
-          sku: 'SUMMARY',
-          name: seatCodes.length + ' Tiket' + (merchDataToSave ? ' + Merchandise' : ''),
-          price: totalAmount,
-          quantity: 1,
-        }]
+        }
+      })
+    }
+
+    // Verify order_items total matches amount (Tripay validates this)
+    const itemsTotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    if (itemsTotal !== totalAmount) {
+      // Adjust the last item's price to fix rounding differences
+      const diff = totalAmount - itemsTotal
+      const lastItem = orderItems[orderItems.length - 1]
+      lastItem.price = Math.max(lastItem.price + Math.round(diff / lastItem.quantity), 1)
+    }
 
     const tripayPayload = {
       method: resolvedMethod,
