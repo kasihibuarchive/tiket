@@ -30,6 +30,7 @@ export async function GET(
           seatType: true,
           layoutImage: true,
           gaZoneConfig: true,
+          adminFee: true,
           createdAt: true,
           updatedAt: true,
         },
