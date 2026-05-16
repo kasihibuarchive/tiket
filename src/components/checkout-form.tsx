@@ -510,13 +510,11 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
               </button>
             </div>
 
-            {/* Admin fee notice for non-QRIS */}
-            {paymentMethod !== 'QRIS' && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                <CreditCard className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <p>Pembayaran selain QRIS dikenakan biaya admin tambahan sesuai ketentuan masing-masing bank/e-wallet.</p>
-              </div>
-            )}
+            {/* Admin fee notice */}
+            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              <CreditCard className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <p>Pembayaran selain QRIS dikenakan biaya admin tambahan sesuai ketentuan masing-masing bank/e-wallet. Total akhir akan ditampilkan di halaman pembayaran Tripay.</p>
+            </div>
 
             {/* Promo Code */}
             <div className="space-y-2">
