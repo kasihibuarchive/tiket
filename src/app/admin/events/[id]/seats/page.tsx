@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
-  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users
+  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, Ticket, MinusCircle
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
@@ -114,8 +114,69 @@ function GaZoneManagementPanel({
   fileInputRef: React.RefObject<HTMLInputElement | null>
   existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number; invitation: number }>
   existingSeatsCount?: number
+  showDates?: ShowDateData[]
+  onRefresh?: () => void
 }) {
   const hasExistingSeats = (existingSeatsCount ?? 0) > 0
+
+  // ─── Reservation state ──────────────────────────────────────────────
+  const [reserveQty, setReserveQty] = useState<Record<string, number>>({})
+  const [isReserving, setIsReserving] = useState<Record<string, boolean>>({})
+  const [isReleasing, setIsReleasing] = useState<Record<string, boolean>>({})
+
+  async function handleReserve(zoneName: string) {
+    const qty = reserveQty[zoneName] || 0
+    if (qty < 1) {
+      alert('Masukkan jumlah slot yang ingin direservasi')
+      return
+    }
+    setIsReserving(prev => ({ ...prev, [zoneName]: true }))
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zoneName, quantity: qty }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        alert(data.message)
+        setReserveQty(prev => ({ ...prev, [zoneName]: 0 }))
+        onRefresh?.()
+      } else {
+        alert(data.error || 'Gagal reservasi slot undangan')
+      }
+    } catch {
+      alert('Gagal reservasi slot undangan')
+    } finally {
+      setIsReserving(prev => ({ ...prev, [zoneName]: false }))
+    }
+  }
+
+  async function handleRelease(zoneName: string) {
+    const qty = reserveQty[zoneName] || 0
+    if (qty < 1) {
+      alert('Masukkan jumlah slot yang ingin dilepas')
+      return
+    }
+    setIsReleasing(prev => ({ ...prev, [zoneName]: true }))
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation?zoneName=${encodeURIComponent(zoneName)}&quantity=${qty}`, {
+        method: 'DELETE',
+      })
+      const data = await res.json()
+      if (res.ok) {
+        alert(data.message)
+        setReserveQty(prev => ({ ...prev, [zoneName]: 0 }))
+        onRefresh?.()
+      } else {
+        alert(data.error || 'Gagal melepas slot undangan')
+      }
+    } catch {
+      alert('Gagal melepas slot undangan')
+    } finally {
+      setIsReleasing(prev => ({ ...prev, [zoneName]: false }))
+    }
+  }
 
   // ─── Image upload handler ───────────────────────────────────────────
   async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -560,6 +621,56 @@ function GaZoneManagementPanel({
                   <p className="text-[10px] text-muted-foreground mt-1">
                     {stats.total > 0 ? Math.round((stats.available / stats.total) * 100) : 0}% tersisa
                   </p>
+                  {/* Reservasi Undangan */}
+                  <div className="mt-3 pt-3 border-t border-border/30">
+                    <div className="flex items-center gap-1 mb-2">
+                      <Ticket className="w-3 h-3 text-purple-500" />
+                      <span className="text-[10px] font-medium text-muted-foreground">Reservasi Undangan</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={stats.available}
+                        value={reserveQty[zoneName] || ''}
+                        onChange={(e) => setReserveQty(prev => ({ ...prev, [zoneName]: Math.max(0, parseInt(e.target.value) || 0) }))}
+                        placeholder="0"
+                        className="w-16 h-7 px-2 text-xs rounded border border-border bg-white text-center focus:outline-none focus:ring-1 focus:ring-purple-400"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleReserve(zoneName)}
+                        disabled={isReserving[zoneName] || !reserveQty[zoneName] || reserveQty[zoneName] < 1}
+                        className="h-7 text-[10px] px-2 bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 hover:text-purple-800"
+                      >
+                        {isReserving[zoneName] ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          '+ Reservasi'
+                        )}
+                      </Button>
+                      {stats.invitation > 0 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleRelease(zoneName)}
+                          disabled={isReleasing[zoneName] || !reserveQty[zoneName] || reserveQty[zoneName] < 1}
+                          className="h-7 text-[10px] px-2 bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:text-amber-800"
+                        >
+                          {isReleasing[zoneName] ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <MinusCircle className="w-3 h-3 mr-0.5" />
+                          )}
+                          Lepas
+                        </Button>
+                      )}
+                    </div>
+                    <p className="text-[9px] text-muted-foreground/70 mt-1">
+                      Tersedia: {stats.available} slot &middot; Undangan: {stats.invitation} slot
+                    </p>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1288,6 +1399,8 @@ export default function SeatEditorPage() {
       fileInputRef={fileInputRef}
       existingZoneSummary={Object.fromEntries(zoneSummary)}
       existingSeatsCount={allSeats.length}
+      showDates={showDates}
+      onRefresh={() => window.location.reload()}
     />
   }
 
