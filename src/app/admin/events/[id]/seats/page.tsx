@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
-  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, Ticket, MinusCircle
+  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, LockOpen
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
@@ -1688,16 +1688,21 @@ export default function SeatEditorPage() {
                       const available = zoneSeats.filter((s) => s.status === 'AVAILABLE').length
                       const sold = zoneSeats.filter((s) => s.status === 'SOLD').length
                       const locked = zoneSeats.filter((s) => s.status === 'LOCKED_TEMPORARY').length
+                      const unavailable = zoneSeats.filter((s) => s.status === 'UNAVAILABLE').length
+                      const invitation = zoneSeats.filter((s) => s.status === 'INVITATION').length
                       const isSelected = zoneSeats.some((s) => selectedSeatCodes.has(s.seatCode))
+                      const isZoneLocked = unavailable > 0 && available === 0
 
                       return (
                         <div
                           key={zone.id}
                           className={cn(
                             'p-4 rounded-xl border-2 transition-all',
-                            isSelected
-                              ? 'border-gold bg-gold/5 shadow-sm'
-                              : 'border-border/50 hover:border-gold/30'
+                            isZoneLocked
+                              ? 'border-gray-400 bg-gray-50/50'
+                              : isSelected
+                                ? 'border-gold bg-gold/5 shadow-sm'
+                                : 'border-border/50 hover:border-gold/30'
                           )}
                         >
                           <div className="flex items-center gap-3">
@@ -1706,55 +1711,65 @@ export default function SeatEditorPage() {
                               style={{ backgroundColor: zone.color }}
                             />
                             <div className="flex-1 min-w-0">
-                              <h3 className="font-semibold text-sm text-charcoal truncate">
-                                {zone.name}
-                              </h3>
+                              <div className="flex items-center gap-2">
+                                <h3 className="font-semibold text-sm text-charcoal truncate">
+                                  {zone.name}
+                                </h3>
+                                {isZoneLocked && (
+                                  <Badge variant="secondary" className="text-[9px] bg-gray-200 text-gray-600 px-1.5 py-0">
+                                    <Lock className="w-2.5 h-2.5 mr-0.5" />TERKUNCI
+                                  </Badge>
+                                )}
+                              </div>
                               <p className="text-xs text-muted-foreground mt-0.5">
                                 Kapasitas: {zone.capacity} orang
                               </p>
                             </div>
                           </div>
-                          <div className="flex items-center gap-4 mt-2 text-xs">
+                          <div className="flex items-center gap-4 mt-2 text-xs flex-wrap">
                             <span className="text-green-600">{available} tersedia</span>
                             <span className="text-red-500">{sold} terjual</span>
-                            <span className="text-purple-600">{zoneSeats.filter((s) => s.status === 'INVITATION').length} undangan</span>
-                            <span className="text-amber-600">{locked} terkunci</span>
+                            <span className="text-purple-600">{invitation} undangan</span>
+                            {unavailable > 0 && <span className="text-gray-500">{unavailable} ditutup</span>}
+                            {locked > 0 && <span className="text-amber-600">{locked} proses</span>}
                           </div>
-                          {/* Reserve invitation button */}
-                          <div className="mt-2 flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const qtyStr = prompt(`Reservi slot undangan di zona "${zone.name}"\nTersedia: ${available} kursi\n\nJumlah slot:`)
-                                if (!qtyStr) return
-                                const qty = parseInt(qtyStr)
-                                if (!qty || qty < 1) return
-                                try {
-                                  const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ zoneName: zone.name, quantity: qty }),
-                                  })
-                                  const data = await res.json()
-                                  if (res.ok) {
-                                    alert(data.message)
-                                    window.location.reload()
-                                  } else {
-                                    alert(data.error || 'Gagal reservi')
-                                  }
-                                } catch { alert('Gagal reservi') }
-                              }}
-                              className="text-[10px] px-2 py-1 rounded-md bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors"
-                            >
-                              <Crown className="w-3 h-3 inline mr-0.5" />
-                              Reservi Undangan
-                            </button>
-                            {zoneSeats.filter((s) => s.status === 'INVITATION').length > 0 && (
+                          {/* Zone actions */}
+                          <div className="mt-3 flex items-center gap-2 flex-wrap">
+                            {/* Reservi Undangan */}
+                            {!isZoneLocked && (
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const invCount = zoneSeats.filter((s) => s.status === 'INVITATION').length
-                                  const qtyStr = prompt(`Lepas slot undangan di zona "${zone.name}"\nSaat ini: ${invCount} slot undangan\n\nJumlah yang dilepas:`)
+                                  const qtyStr = prompt(`Reservi slot undangan di zona "${zone.name}"\nTersedia: ${available} kursi\n\nJumlah slot:`)
+                                  if (!qtyStr) return
+                                  const qty = parseInt(qtyStr)
+                                  if (!qty || qty < 1) return
+                                  try {
+                                    const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ zoneName: zone.name, quantity: qty }),
+                                    })
+                                    const data = await res.json()
+                                    if (res.ok) {
+                                      alert(data.message)
+                                      window.location.reload()
+                                    } else {
+                                      alert(data.error || 'Gagal reservi')
+                                    }
+                                  } catch { alert('Gagal reservi') }
+                                }}
+                                className="text-[10px] px-2 py-1 rounded-md bg-purple-50 text-purple-700 border border-purple-200 hover:bg-purple-100 transition-colors"
+                              >
+                                <Crown className="w-3 h-3 inline mr-0.5" />
+                                Reservi Undangan
+                              </button>
+                            )}
+                            {invitation > 0 && !isZoneLocked && (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const qtyStr = prompt(`Lepas slot undangan di zona "${zone.name}"\nSaat ini: ${invitation} slot undangan\n\nJumlah yang dilepas:`)
                                   if (!qtyStr) return
                                   const qty = parseInt(qtyStr)
                                   if (!qty || qty < 1) return
@@ -1774,6 +1789,56 @@ export default function SeatEditorPage() {
                                 className="text-[10px] px-2 py-1 rounded-md bg-gray-50 text-gray-600 border border-gray-200 hover:bg-gray-100 transition-colors"
                               >
                                 Lepas Slot
+                              </button>
+                            )}
+                            {/* Lock / Unlock Zone */}
+                            {isZoneLocked ? (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!confirm(`Buka kunci zona "${zone.name}"?\n${unavailable} kursi akan tersedia kembali untuk pembelian.`)) return
+                                  try {
+                                    const res = await fetch(`/api/admin/events/${eventId}/zone-lock?zoneName=${encodeURIComponent(zone.name)}`, {
+                                      method: 'DELETE',
+                                    })
+                                    const data = await res.json()
+                                    if (res.ok) {
+                                      alert(data.message)
+                                      window.location.reload()
+                                    } else {
+                                      alert(data.error || 'Gagal membuka zona')
+                                    }
+                                  } catch { alert('Gagal membuka zona') }
+                                }}
+                                className="text-[10px] px-2 py-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+                              >
+                                <LockOpen className="w-3 h-3 inline mr-0.5" />
+                                Buka Penjualan
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  if (!confirm(`Kunci zona "${zone.name}"?\n${available} kursi akan ditutup dari penjualan. Zona tidak bisa dibeli sampai dibuka kembali.`)) return
+                                  try {
+                                    const res = await fetch(`/api/admin/events/${eventId}/zone-lock`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ zoneName: zone.name }),
+                                    })
+                                    const data = await res.json()
+                                    if (res.ok) {
+                                      alert(data.message)
+                                      window.location.reload()
+                                    } else {
+                                      alert(data.error || 'Gagal mengunci zona')
+                                    }
+                                  } catch { alert('Gagal mengunci zona') }
+                                }}
+                                className="text-[10px] px-2 py-1 rounded-md bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 transition-colors"
+                              >
+                                <Lock className="w-3 h-3 inline mr-0.5" />
+                                Kunci Penjualan
                               </button>
                             )}
                           </div>
