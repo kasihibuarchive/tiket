@@ -12,7 +12,7 @@ import {
 import { cn } from '@/lib/utils'
 import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
-  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, LockOpen
+  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, LockOpen, Ticket, MinusCircle
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
