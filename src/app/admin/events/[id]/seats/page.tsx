@@ -69,6 +69,7 @@ interface GaZoneDef {
   price: number
   color: string
   priceCategoryName: string
+  notes?: string
 }
 
 // ─── GA Zone Management Panel (always shown for GA events) ──
@@ -253,7 +254,7 @@ function GaZoneManagementPanel({
       return
     }
     setGaZonesDef([...gaZonesDef, { ...newZone, name: newZone.name.trim() }])
-    setNewZone({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '' })
+    setNewZone({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '', notes: '' })
   }
 
   function handleRemoveZone(index: number) {
@@ -447,34 +448,50 @@ function GaZoneManagementPanel({
               {gaZonesDef.map((zone, idx) => (
                 <div
                   key={idx}
-                  className="flex items-center gap-3 p-3 rounded-lg border border-border/50 bg-white"
+                  className="p-3 rounded-lg border border-border/50 bg-white"
                 >
-                  <div
-                    className="w-4 h-4 rounded-sm shrink-0"
-                    style={{ backgroundColor: zone.color }}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <span className="font-medium text-sm text-charcoal">{zone.name}</span>
-                    <span className="text-xs text-muted-foreground ml-2">
-                      {zone.capacity} kursi
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-4 h-4 rounded-sm shrink-0"
+                      style={{ backgroundColor: zone.color }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <span className="font-medium text-sm text-charcoal">{zone.name}</span>
+                      <span className="text-xs text-muted-foreground ml-2">
+                        {zone.capacity} kursi
+                      </span>
+                      {zone.priceCategoryName && (
+                        <Badge variant="secondary" className="text-[10px] ml-2">
+                          {zone.priceCategoryName}
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="text-xs font-medium text-charcoal">
+                      Rp {zone.price.toLocaleString('id-ID')}
                     </span>
-                    {zone.priceCategoryName && (
-                      <Badge variant="secondary" className="text-[10px] ml-2">
-                        {zone.priceCategoryName}
-                      </Badge>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveZone(idx)}
+                      className="text-red-400 hover:text-red-600 h-7 w-7 p-0"
+                    >
+                      <TrashIcon className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
-                  <span className="text-xs font-medium text-charcoal">
-                    Rp {zone.price.toLocaleString('id-ID')}
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleRemoveZone(idx)}
-                    className="text-red-400 hover:text-red-600 h-7 w-7 p-0"
-                  >
-                    <TrashIcon className="w-3.5 h-3.5" />
-                  </Button>
+                  {/* Notes inline edit */}
+                  <div className="mt-2 ml-7">
+                    <input
+                      type="text"
+                      value={zone.notes || ''}
+                      onChange={(e) => {
+                        const updated = [...gaZonesDef]
+                        updated[idx] = { ...updated[idx], notes: e.target.value }
+                        setGaZonesDef(updated)
+                      }}
+                      placeholder="Catatan zona (muncul di halaman pembelian)..."
+                      className="w-full h-7 px-2 text-xs rounded border border-border/50 bg-gray-50/50 focus:outline-none focus:ring-1 focus:ring-gold/30 focus:border-gold/50"
+                    />
+                  </div>
                 </div>
               ))}
               <div className="text-xs text-muted-foreground pt-1">
@@ -549,6 +566,16 @@ function GaZoneManagementPanel({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="sm:col-span-2 lg:col-span-1">
+                <label className="text-xs text-muted-foreground mb-1 block">Catatan Zona</label>
+                <input
+                  type="text"
+                  value={newZone.notes || ''}
+                  onChange={(e) => setNewZone({ ...newZone, notes: e.target.value })}
+                  placeholder="cth: Area tanpa atap, wajib pakai sepatu"
+                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+                />
               </div>
               <div className="flex items-end">
                 <Button
@@ -768,7 +795,7 @@ export default function SeatEditorPage() {
   const [isUploading, setIsUploading] = useState(false)
   const [isSavingZones, setIsSavingZones] = useState(false)
   const [isGeneratingFromZones, setIsGeneratingFromZones] = useState(false)
-  const [newZone, setNewZone] = useState<GaZoneDef>({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '' })
+  const [newZone, setNewZone] = useState<GaZoneDef>({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '', notes: '' })
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const isDraggingRef = useRef(false)

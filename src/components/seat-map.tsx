@@ -719,6 +719,7 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
         color: z.color || '#22c55e',
         price: z.price || 0,
         priceCategoryName: z.priceCategoryName || '',
+        notes: z.notes || '',
       }))
     } catch { return null }
   }, [gaZoneConfig, parsedLayout?.isGA])
@@ -1039,6 +1040,11 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                     </p>
                   )}
                 </div>
+                {zone.notes && (
+                  <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 mt-2 leading-snug">
+                    {zone.notes}
+                  </p>
+                )}
               </button>
             )
           })}

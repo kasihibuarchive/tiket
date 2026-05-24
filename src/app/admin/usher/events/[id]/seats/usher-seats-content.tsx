@@ -64,6 +64,7 @@ interface GaZoneDef {
   price: number
   color: string
   priceCategoryName: string
+  notes?: string
 }
 
 interface EventData {
@@ -82,6 +83,7 @@ interface EventData {
 interface GaZoneSummary {
   name: string
   color: string
+  notes?: string
   configuredCapacity: number
   total: number
   available: number
@@ -193,6 +195,7 @@ export default function UsherSeatMapPage() {
       zoneSummaries.push({
         name: zoneName,
         color: zoneDef?.color || '#8B8680',
+        notes: zoneDef?.notes || '',
         configuredCapacity: zoneDef?.capacity || 0,
         total: zoneSeats.length,
         available,
@@ -708,6 +711,11 @@ export default function UsherSeatMapPage() {
                                   : `${zone.total} kursi`
                                 }
                               </p>
+                              {zone.notes && (
+                                <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded px-1.5 py-0.5 mt-1 leading-snug">
+                                  {zone.notes}
+                                </p>
+                              )}
                             </div>
                           </div>
 
