@@ -58,6 +58,7 @@ interface EventInfo {
   title: string
   seatMapId: string | null
   seatType?: string
+  seatMapSeatType?: string | null
   showDates?: ShowDateData[]
   layoutImage?: string | null
   gaZoneConfig?: string | null
@@ -842,7 +843,6 @@ export default function SeatEditorPage() {
         if (eventRes.ok) {
           const data = await eventRes.json()
           const ev = data.event || null
-          setEventInfo(ev)
           // Populate show dates
           if (ev?.showDates && ev.showDates.length > 1) {
             setShowDates(ev.showDates)
@@ -859,6 +859,7 @@ export default function SeatEditorPage() {
             setLayoutImagePreview(ev.layoutImage)
           }
           // Fetch layoutData from the seat map
+          let seatMapSeatType: string | null = null
           if (ev?.seatMapId) {
             try {
               const mapRes = await fetch(`/api/admin/seat-maps/${ev.seatMapId}`)
@@ -867,9 +868,14 @@ export default function SeatEditorPage() {
                 if (mapData.seatMap?.layoutData) {
                   setLayoutData(mapData.seatMap.layoutData)
                 }
+                if (mapData.seatMap?.seatType) {
+                  seatMapSeatType = mapData.seatMap.seatType
+                }
               }
             } catch { /* ignore */ }
           }
+          // Set eventInfo with all data including seatMapSeatType
+          setEventInfo(ev ? { ...ev, seatMapSeatType } : null)
         }
       } catch (err) {
         console.error('Failed to fetch seats:', err)
@@ -1385,9 +1391,10 @@ export default function SeatEditorPage() {
   }
 
   // ─── Determine if this event is GA type ──
-  // GA if: event has seatType GENERAL_ADMISSION, OR has manual zone config
-  // PIANO_ROLL must NOT be treated as GA — it has its own panel flow.
-  const isEventGA = eventInfo?.seatType === 'GENERAL_ADMISSION' || !!eventInfo?.gaZoneConfig
+  // GA if: event has seatType GENERAL_ADMISSION, OR has manual zone config,
+  // OR the linked seat map is GA type (event.seatType may be null)
+  const effectiveSeatType = eventInfo?.seatType || eventInfo?.seatMapSeatType
+  const isEventGA = effectiveSeatType === 'GENERAL_ADMISSION' || !!eventInfo?.gaZoneConfig
 
   // ─── For GA events: ALWAYS show the GA Zone Management Panel ────────
   // regardless of whether seats already exist or not.
