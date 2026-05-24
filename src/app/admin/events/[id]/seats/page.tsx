@@ -114,7 +114,7 @@ function GaZoneManagementPanel({
   setNewZone: React.Dispatch<React.SetStateAction<GaZoneDef>>
   priceCategories: PriceCategoryData[]
   fileInputRef: React.RefObject<HTMLInputElement | null>
-  existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number; invitation: number }>
+  existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number; invitation: number; unavailable: number }>
   existingSeatsCount?: number
   showDates?: ShowDateData[]
   onRefresh?: () => void
@@ -125,7 +125,51 @@ function GaZoneManagementPanel({
   const [reserveQty, setReserveQty] = useState<Record<string, number>>({})
   const [isReserving, setIsReserving] = useState<Record<string, boolean>>({})
   const [isReleasing, setIsReleasing] = useState<Record<string, boolean>>({})
+  const [isZoneLocking, setIsZoneLocking] = useState<Record<string, boolean>>({})
 
+  async function handleZoneLock(zoneName: string) {
+    if (!confirm(`Kunci zona "${zoneName}"?\nSemua kursi tersedia akan ditutup dari penjualan.`)) return
+    setIsZoneLocking(prev => ({ ...prev, [zoneName]: true }))
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/zone-lock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ zoneName }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        alert(data.message)
+        onRefresh?.()
+      } else {
+        alert(data.error || 'Gagal mengunci zona')
+      }
+    } catch {
+      alert('Gagal mengunci zona')
+    } finally {
+      setIsZoneLocking(prev => ({ ...prev, [zoneName]: false }))
+    }
+  }
+
+  async function handleZoneUnlock(zoneName: string) {
+    if (!confirm(`Buka kunci zona "${zoneName}"?\nSemua kursi yang ditutup akan tersedia kembali.`)) return
+    setIsZoneLocking(prev => ({ ...prev, [zoneName]: true }))
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}/zone-lock?zoneName=${encodeURIComponent(zoneName)}`, {
+        method: 'DELETE',
+      })
+      const data = await res.json()
+      if (res.ok) {
+        alert(data.message)
+        onRefresh?.()
+      } else {
+        alert(data.error || 'Gagal membuka zona')
+      }
+    } catch {
+      alert('Gagal membuka zona')
+    } finally {
+      setIsZoneLocking(prev => ({ ...prev, [zoneName]: false }))
+    }
+  }
   async function handleReserve(zoneName: string) {
     const qty = reserveQty[zoneName] || 0
     if (qty < 1) {
@@ -606,9 +650,21 @@ function GaZoneManagementPanel({
               </Badge>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {Object.entries(existingZoneSummary).map(([zoneName, stats]) => (
-                <div key={zoneName} className="rounded-lg border border-border/50 p-3 bg-white">
-                  <p className="text-sm font-semibold text-charcoal">{zoneName}</p>
+              {Object.entries(existingZoneSummary).map(([zoneName, stats]) => {
+                const isZoneLocked = (stats.unavailable || 0) > 0 && stats.available === 0
+                return (
+                  <div key={zoneName} className={cn(
+                    "rounded-lg border p-3",
+                    isZoneLocked ? "border-gray-400 bg-gray-50/50" : "border-border/50 bg-white"
+                  )}>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold text-charcoal">{zoneName}</p>
+                      {isZoneLocked && (
+                        <Badge variant="secondary" className="text-[9px] bg-gray-200 text-gray-600 px-1.5 py-0">
+                          <Lock className="w-2.5 h-2.5 mr-0.5" />TERKUNCI
+                        </Badge>
+                      )}
+                    </div>
                   <div className="grid grid-cols-4 gap-2 mt-2">
                     <div>
                       <p className="text-lg font-bold text-emerald-600">{stats.available}</p>
@@ -623,8 +679,8 @@ function GaZoneManagementPanel({
                       <p className="text-[10px] text-muted-foreground">Undangan</p>
                     </div>
                     <div>
-                      <p className="text-lg font-bold text-amber-500">{stats.locked}</p>
-                      <p className="text-[10px] text-muted-foreground">Dikunci</p>
+                      <p className="text-lg font-bold text-gray-500">{stats.unavailable || 0}</p>
+                      <p className="text-[10px] text-muted-foreground">Ditutup</p>
                     </div>
                   </div>
                   {/* Progress bar */}
@@ -642,14 +698,53 @@ function GaZoneManagementPanel({
                       style={{ width: `${stats.total > 0 ? (stats.invitation / stats.total) * 100 : 0}%` }}
                     />
                     <div
-                      className="h-full bg-amber-400 rounded-r-full transition-all"
-                      style={{ width: `${stats.total > 0 ? (stats.locked / stats.total) * 100 : 0}%` }}
+                      className="h-full bg-gray-400 rounded-r-full transition-all"
+                      style={{ width: `${stats.total > 0 ? ((stats.unavailable || 0) / stats.total) * 100 : 0}%` }}
                     />
                   </div>
                   <p className="text-[10px] text-muted-foreground mt-1">
                     {stats.total > 0 ? Math.round((stats.available / stats.total) * 100) : 0}% tersisa
                   </p>
-                  {/* Reservasi Undangan */}
+
+                  {/* Lock / Unlock Zone */}
+                  <div className="mt-3 pt-3 border-t border-border/30">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {isZoneLocked ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleZoneUnlock(zoneName)}
+                          disabled={isZoneLocking[zoneName]}
+                          className="h-7 text-[10px] px-2 bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+                        >
+                          {isZoneLocking[zoneName] ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <LockOpen className="w-3 h-3 mr-0.5" />
+                          )}
+                          Buka Penjualan
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleZoneLock(zoneName)}
+                          disabled={isZoneLocking[zoneName] || stats.available === 0}
+                          className="h-7 text-[10px] px-2 bg-red-50 border-red-200 text-red-600 hover:bg-red-100 hover:text-red-700"
+                        >
+                          {isZoneLocking[zoneName] ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <Lock className="w-3 h-3 mr-0.5" />
+                          )}
+                          Kunci Penjualan
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Reservasi Undangan (hidden when zone is locked) */}
+                  {!isZoneLocked && (
                   <div className="mt-3 pt-3 border-t border-border/30">
                     <div className="flex items-center gap-1 mb-2">
                       <Ticket className="w-3 h-3 text-purple-500" />
@@ -699,8 +794,9 @@ function GaZoneManagementPanel({
                       Tersedia: {stats.available} slot &middot; Undangan: {stats.invitation} slot
                     </p>
                   </div>
+                  )}
                 </div>
-              ))}
+              )})}
             </div>
           </CardContent>
         </Card>
@@ -1400,16 +1496,17 @@ export default function SeatEditorPage() {
   // regardless of whether seats already exist or not.
   if (isEventGA) {
     // Build zone summary from existing seats (grouped by zoneName)
-    const zoneSummary = new Map<string, { total: number; available: number; sold: number; locked: number; invitation: number }>()
+    const zoneSummary = new Map<string, { total: number; available: number; sold: number; locked: number; invitation: number; unavailable: number }>()
     for (const s of allSeats) {
       const zone = s.zoneName || 'Tanpa Zona'
-      if (!zoneSummary.has(zone)) zoneSummary.set(zone, { total: 0, available: 0, sold: 0, locked: 0, invitation: 0 })
+      if (!zoneSummary.has(zone)) zoneSummary.set(zone, { total: 0, available: 0, sold: 0, locked: 0, invitation: 0, unavailable: 0 })
       const z = zoneSummary.get(zone)!
       z.total++
       if (s.status === 'AVAILABLE') z.available++
       else if (s.status === 'SOLD') z.sold++
       else if (s.status === 'LOCKED_TEMPORARY') z.locked++
       else if (s.status === 'INVITATION') z.invitation++
+      else if (s.status === 'UNAVAILABLE') z.unavailable++
     }
 
     return <GaZoneManagementPanel
