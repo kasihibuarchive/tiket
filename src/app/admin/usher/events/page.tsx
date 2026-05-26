@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Calendar, MapPin, Users, ChevronRight, ImageOff, Loader2, ArrowLeft } from 'lucide-react'
+import { Calendar, MapPin, Users, ChevronRight, ImageOff, Loader2, ArrowLeft, Download } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface EventData {
@@ -30,6 +30,7 @@ export default function UsherEventsPage() {
   const [events, setEvents] = useState<EventData[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [exportingEventId, setExportingEventId] = useState<string | null>(null)
 
   useEffect(() => {
     async function fetchEvents() {
@@ -63,6 +64,38 @@ export default function UsherEventsPage() {
       hour: '2-digit',
       minute: '2-digit',
     })
+  }
+
+  async function handleExport(eventId: string) {
+    setExportingEventId(eventId)
+    try {
+      const res = await fetch(`/api/usher/export/buyers?eventId=${eventId}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Gagal mengekspor' }))
+        alert(data.error || 'Gagal mengekspor data pembeli')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      // Extract filename from Content-Disposition header
+      const disposition = res.headers.get('Content-Disposition')
+      let filename = 'Data_Pembeli.xlsx'
+      if (disposition) {
+        const match = disposition.match(/filename\*?=(?:UTF-8'')?([^;]+)/i)
+        if (match) filename = decodeURIComponent(match[1].replace(/"/g, ''))
+      }
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      alert('Gagal mengekspor data pembeli')
+    } finally {
+      setExportingEventId(null)
+    }
   }
 
   if (isLoading) {
@@ -181,6 +214,29 @@ export default function UsherEventsPage() {
                       </span>
                       <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/50 group-hover:text-gold group-hover:translate-x-0.5 transition-all" />
                     </div>
+                  </div>
+
+                  {/* Export Button */}
+                  <div className="pt-2" onClick={(e) => e.preventDefault()}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs h-7 border-gold/30 text-gold-dark hover:bg-gold/10 hover:border-gold/50"
+                      disabled={exportingEventId === event.id || event.seatSummary.sold === 0}
+                      onClick={() => handleExport(event.id)}
+                    >
+                      {exportingEventId === event.id ? (
+                        <>
+                          <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                          Mengekspor...
+                        </>
+                      ) : (
+                        <>
+                          <Download className="w-3 h-3 mr-1" />
+                          Export Data Pembeli
+                        </>
+                      )}
+                    </Button>
                   </div>
                 </div>
               </CardContent>

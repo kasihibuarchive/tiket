@@ -679,8 +679,8 @@ function GaZoneManagementPanel({
                       <p className="text-[10px] text-muted-foreground">Undangan</p>
                     </div>
                     <div>
-                      <p className="text-lg font-bold text-amber-500">{stats.locked}</p>
-                      <p className="text-[10px] text-muted-foreground">Dikunci</p>
+                      <p className="text-lg font-bold text-gray-500">{stats.unavailable || 0}</p>
+                      <p className="text-[10px] text-muted-foreground">Ditutup</p>
                     </div>
                     <div>
                       <p className="text-lg font-bold text-gray-500">{stats.unavailable || 0}</p>

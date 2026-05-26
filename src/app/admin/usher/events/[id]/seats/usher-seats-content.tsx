@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   Check, X, Map as MapIcon, Ticket, User, Users, ArrowLeft,
   ChevronDown, ChevronRight, Loader2, Crown, GraduationCap,
-  Minimize2, Maximize2, Hash, Mail, Phone, CreditCard, Clock, Send,
+  Minimize2, Maximize2, Hash, Mail, Phone, CreditCard, Clock, Send, Download,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -129,6 +129,7 @@ export default function UsherSeatMapPage() {
   const [infoSheetOpen, setInfoSheetOpen] = useState(false)
   const [expandedZones, setExpandedZones] = useState<Set<string>>(new Set())
   const [isFetchingOwner, setIsFetchingOwner] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
 
   // Parse layout data from event's seat map
   const parsedLayout = useMemo(() => {
@@ -523,6 +524,38 @@ export default function UsherSeatMapPage() {
     const section = parsedLayout.sections.find((s: any) => rowIdx >= s.fromRow && rowIdx <= s.toRow)
     if (section) return CATEGORY_CONFIG[section.name]?.defaultColor || section.colorCode
     return '#8B8680'
+  }
+
+  // ── Export buyer data ──
+  async function handleExportBuyers() {
+    setIsExporting(true)
+    try {
+      const res = await fetch(`/api/usher/export/buyers?eventId=${eventId}`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: 'Gagal mengekspor' }))
+        alert(data.error || 'Gagal mengekspor data pembeli')
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const disposition = res.headers.get('Content-Disposition')
+      let filename = 'Data_Pembeli.xlsx'
+      if (disposition) {
+        const match = disposition.match(/filename\*?=(?:UTF-8'')?([^;]+)/i)
+        if (match) filename = decodeURIComponent(match[1].replace(/"/g, ''))
+      }
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('Gagal mengekspor data pembeli')
+    } finally {
+      setIsExporting(false)
+    }
   }
 
   // ── Render seat button (shared by both modes) ──
@@ -1210,8 +1243,31 @@ export default function UsherSeatMapPage() {
           )}
         </div>
 
-        {/* Stage size selector — only for NUMBERED events */}
-        {!isGA && (
+        {/* Action buttons */}
+        <div className="flex items-center gap-2">
+          {/* Export button */}
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-xs border-gold/30 text-gold-dark hover:bg-gold/10 hover:border-gold/50"
+            disabled={isExporting || (soldSeats + invitationSeats) === 0}
+            onClick={handleExportBuyers}
+          >
+            {isExporting ? (
+              <>
+                <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                Mengekspor...
+              </>
+            ) : (
+              <>
+                <Download className="w-3 h-3 mr-1" />
+                Export Data
+              </>
+            )}
+          </Button>
+
+          {/* Stage size selector — only for NUMBERED events */}
+          {!isGA && (
           <div className="flex items-center gap-2">
             <span className="text-xs text-muted-foreground hidden sm:inline">Ukuran Panggung:</span>
             <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
@@ -1251,6 +1307,7 @@ export default function UsherSeatMapPage() {
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* ── GA Dashboard View ── */}
