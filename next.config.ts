@@ -11,6 +11,7 @@ const nextConfig: NextConfig = {
   // Force webpack to transpile radix-ui packages to fix ESM/CJS interop
   // issues that cause "X.A is not a constructor" errors in production builds
   transpilePackages: [
+    'recharts',
     '@radix-ui/react-dialog',
     '@radix-ui/react-collapsible',
     '@radix-ui/react-scroll-area',

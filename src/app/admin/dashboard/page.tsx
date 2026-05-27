@@ -14,15 +14,12 @@ import {
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-  ChartLegend,
-  ChartLegendContent,
   type ChartConfig,
 } from '@/components/ui/chart'
 import {
   Bar, BarChart, XAxis, YAxis, CartesianGrid,
   PieChart, Pie, Cell,
   Area, AreaChart,
-  ResponsiveContainer,
 } from 'recharts'
 
 // ── Types ──
