@@ -74,6 +74,8 @@ export async function PUT(
       layoutImage,
       gaZoneConfig,
       seatType,
+      castData,
+      reviewsData,
     } = body
 
     const event = await db.event.findUnique({ where: { id } })
@@ -113,6 +115,8 @@ export async function PUT(
         layoutImage: layoutImage !== undefined ? layoutImage : event.layoutImage,
         gaZoneConfig: gaZoneConfig !== undefined ? gaZoneConfig : event.gaZoneConfig,
         seatType: seatType !== undefined ? seatType : event.seatType,
+        castData: castData !== undefined ? castData : event.castData,
+        reviewsData: reviewsData !== undefined ? reviewsData : event.reviewsData,
       },
     })
 

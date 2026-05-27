@@ -590,10 +590,12 @@ export default function AdminEventsPage() {
                           variant="ghost"
                           size="icon"
                           className="h-8 w-8"
-                          onClick={() => openEditDialog(event)}
-                          title="Edit"
+                          asChild
+                          title="Edit Event"
                         >
-                          <Edit className="w-3.5 h-3.5" />
+                          <Link href={`/admin/events/${event.id}`}>
+                            <Edit className="w-3.5 h-3.5" />
+                          </Link>
                         </Button>
                         <Button
                           variant="ghost"

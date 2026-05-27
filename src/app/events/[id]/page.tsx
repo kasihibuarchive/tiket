@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
@@ -16,6 +16,7 @@ import { Progress } from '@/components/ui/progress'
 import {
   Calendar, MapPin, Clock, Tag, Ticket,
   Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck, Play,
+  Star, Users, MessageSquareQuote,
 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
@@ -37,6 +38,8 @@ interface EventData {
   seatSummary: { total: number; available: number; sold: number }
   seatMapLayout?: any
   showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
+  castData?: string | null     // JSON: [{name, role, imageUrl}]
+  reviewsData?: string | null  // JSON: [{authorName, rating: 1-5, comment, createdAt}]
 }
 
 interface SeatData {
@@ -99,6 +102,8 @@ export default function EventDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [isUnpublished, setIsUnpublished] = useState(false)
   const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
+  const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number; passed: boolean } | null>(null)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // Fetch event data — with retry logic for Supabase RAM exhaustion
   useEffect(() => {
@@ -135,6 +140,50 @@ export default function EventDetailPage() {
     if (eventId) fetchWithRetry(3, 1500)
     return () => { cancelled = true }
   }, [eventId])
+
+  // Countdown timer to next show date
+  useEffect(() => {
+    if (!event) return
+    const targetDateStr = activeShowDate?.date || event.showDate
+    if (!targetDateStr) return
+
+    function calcCountdown() {
+      const target = new Date(targetDateStr).getTime()
+      const now = Date.now()
+      const diff = target - now
+      if (diff <= 0) {
+        setCountdown({ days: 0, hours: 0, minutes: 0, seconds: 0, passed: true })
+        if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null }
+        return
+      }
+      const days = Math.floor(diff / (1000 * 60 * 60 * 24))
+      const hours = Math.floor((diff / (1000 * 60 * 60)) % 24)
+      const minutes = Math.floor((diff / (1000 * 60)) % 60)
+      const seconds = Math.floor((diff / 1000) % 60)
+      setCountdown({ days, hours, minutes, seconds, passed: false })
+    }
+
+    calcCountdown()
+    countdownRef.current = setInterval(calcCountdown, 1000)
+    return () => { if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null } }
+  }, [event, activeShowDate?.date])
+
+  // Parse cast & reviews data
+  const castMembers = useMemo(() => {
+    if (!event?.castData) return []
+    try {
+      const parsed = JSON.parse(event.castData)
+      return Array.isArray(parsed) ? parsed : []
+    } catch { return [] }
+  }, [event?.castData])
+
+  const reviews = useMemo(() => {
+    if (!event?.reviewsData) return []
+    try {
+      const parsed = JSON.parse(event.reviewsData)
+      return Array.isArray(parsed) ? parsed : []
+    } catch { return [] }
+  }, [event?.reviewsData])
 
   // Show dates with fallback
   const showDates = useMemo(() =>
@@ -349,6 +398,40 @@ export default function EventDetailPage() {
                   </div>
                 )}
 
+                {/* Countdown Timer */}
+                {countdown && (
+                  <div className="mb-6">
+                    {countdown.passed ? (
+                      <div className="bg-gold/10 border border-gold/20 rounded-lg px-4 py-3 text-center">
+                        <p className="font-serif text-gold text-sm font-semibold">
+                          Pertunjukan sudah dimulai!
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center gap-2 sm:gap-3">
+                        {[
+                          { value: countdown.days, label: 'HARI' },
+                          { value: countdown.hours, label: 'JAM' },
+                          { value: countdown.minutes, label: 'MENIT' },
+                          { value: countdown.seconds, label: 'DETIK' },
+                        ].map((item, idx) => (
+                          <div key={item.label} className="flex items-center gap-2 sm:gap-3">
+                            <div className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 sm:px-4 sm:py-3 text-center min-w-[60px] sm:min-w-[72px]">
+                              <span className="font-serif text-2xl sm:text-3xl font-bold text-gold">
+                                {String(item.value).padStart(2, '0')}
+                              </span>
+                              <p className="text-[10px] sm:text-xs text-white/50 mt-0.5 tracking-wider">{item.label}</p>
+                            </div>
+                            {idx < 3 && (
+                              <span className="font-serif text-xl text-gold/50 hidden sm:block">:</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="bg-white/5 rounded-lg p-4 mb-6">
                   <h3 className="font-serif text-sm text-gold mb-2">Sinopsis</h3>
                   <p className="text-sm text-white/70 leading-relaxed whitespace-pre-line">
@@ -420,6 +503,86 @@ export default function EventDetailPage() {
             </div>
           </div>
         </section>
+
+        {/* Cast & Crew Section */}
+        {castMembers.length > 0 && (
+          <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 bg-white">
+            <div className="max-w-5xl mx-auto">
+              <div className="text-center mb-8">
+                <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2 flex items-center justify-center gap-2">
+                  <Users className="w-4 h-4" />
+                  Pemeran & Kru
+                </p>
+                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">PEMERAN & KRU</h2>
+                <div className="zen-divider w-16 mx-auto mt-4" />
+              </div>
+              <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-thin">
+                {castMembers.map((member: { name: string; role: string; imageUrl?: string }, idx: number) => (
+                  <div
+                    key={idx}
+                    className="shrink-0 w-36 sm:w-40 bg-white border border-charcoal/10 rounded-xl p-4 text-center hover:shadow-md transition-shadow"
+                  >
+                    <div className="w-20 h-20 mx-auto mb-3 rounded-full overflow-hidden bg-charcoal/5 border-2 border-gold/20">
+                      {member.imageUrl ? (
+                        <img src={member.imageUrl} alt={member.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-charcoal/10 to-charcoal/5">
+                          <span className="font-serif text-2xl text-gold">
+                            {member.name.charAt(0).toUpperCase()}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <h4 className="font-serif text-sm font-semibold text-charcoal truncate">{member.name}</h4>
+                    <p className="text-xs text-muted-foreground mt-0.5 truncate">{member.role}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Reviews / Testimonials Section */}
+        {reviews.length > 0 && (
+          <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 bg-gray-50">
+            <div className="max-w-5xl mx-auto">
+              <div className="text-center mb-8">
+                <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2 flex items-center justify-center gap-2">
+                  <MessageSquareQuote className="w-4 h-4" />
+                  Ulasan Penonton
+                </p>
+                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">ULASAN PENONTON</h2>
+                <div className="zen-divider w-16 mx-auto mt-4" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                {reviews.map((review: { authorName: string; rating: number; comment: string; createdAt?: string }, idx: number) => (
+                  <div
+                    key={idx}
+                    className="bg-white border border-charcoal/10 rounded-xl p-5 hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex items-center gap-1 mb-3">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star
+                          key={i}
+                          className={cn('w-4 h-4', i < review.rating ? 'text-gold fill-gold' : 'text-charcoal/20')}
+                        />
+                      ))}
+                    </div>
+                    <p className="text-sm text-charcoal/80 leading-relaxed mb-3 line-clamp-4">{review.comment}</p>
+                    <div className="flex items-center justify-between pt-3 border-t border-charcoal/5">
+                      <span className="text-sm font-semibold text-charcoal">{review.authorName}</span>
+                      {review.createdAt && (
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(review.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* Seat Selection — wrapped with QueueGate for virtual waiting room */}
         <QueueGate eventId={eventId}>

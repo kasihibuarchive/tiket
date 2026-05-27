@@ -31,6 +31,8 @@ export async function GET(
           layoutImage: true,
           gaZoneConfig: true,
           adminFee: true,
+          castData: true,
+          reviewsData: true,
           createdAt: true,
           updatedAt: true,
         },

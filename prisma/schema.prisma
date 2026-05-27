@@ -88,6 +88,8 @@ model Event {
   layoutImage     String?   // base64 or URL for uploaded layout image for GA
   gaZoneConfig    String?   // JSON string for manually defined GA zones: [{name, capacity, price, color, priceCategoryName}]
   seatType        String?   // NUMBERED, GENERAL_ADMISSION, or PIANO_ROLL — overrides linked SeatMap's seatType
+  castData        String?   // JSON: [{name, role, imageUrl}] — Cast & Crew
+  reviewsData     String?   // JSON: [{authorName, rating: 1-5, comment, createdAt}] — Reviews/Testimonials
 }
 
 // =====================

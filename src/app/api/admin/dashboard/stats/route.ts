@@ -20,12 +20,14 @@ export async function GET() {
         customerEmail: true,
         paymentMethod: true,
         promoCodeId: true,
+        checkInTime: true,
       },
     })
 
     const pendingCount = await db.transaction.count({ where: { paymentStatus: 'PENDING' } })
     const expiredCount = await db.transaction.count({ where: { paymentStatus: 'EXPIRED' } })
     const failedCount = await db.transaction.count({ where: { paymentStatus: 'FAILED' } })
+    const cancelledCount = await db.transaction.count({ where: { paymentStatus: 'CANCELLED' } })
 
     // ── Events ──
     const events = await db.event.findMany({
@@ -54,6 +56,7 @@ export async function GET() {
       grossRevenue: number
       netRevenue: number
       transactionCount: number
+      checkedIn: number
     }> = {}
 
     // Initialize all events (including those with 0 transactions)
@@ -71,6 +74,7 @@ export async function GET() {
         grossRevenue: 0,
         netRevenue: 0,
         transactionCount: 0,
+        checkedIn: 0,
       }
     }
 
@@ -80,6 +84,9 @@ export async function GET() {
       if (!stat) continue
 
       stat.transactionCount++
+
+      // Check-in
+      if (tx.checkInTime) stat.checkedIn++
 
       // Parse seat codes to count tickets
       let seatCodesArr: string[] = []
@@ -105,15 +112,10 @@ export async function GET() {
       stat.merchRevenue += merchTotal
 
       // Ticket revenue = totalAmount - adminFee - merchTotal
-      // (This is the pure ticket price the customer paid for seats)
       const ticketRevenue = tx.totalAmount - adminFee - merchTotal
       stat.ticketRevenue += Math.max(ticketRevenue, 0)
 
-      // Gross revenue = everything the customer paid
       stat.grossRevenue += tx.totalAmount
-
-      // Net revenue = gross - admin fee (admin fee goes to payment gateway/platform)
-      // The organizer keeps: ticket price + merch - admin fee
       stat.netRevenue += tx.totalAmount - adminFee
     }
 
@@ -124,6 +126,73 @@ export async function GET() {
     const totalMerchRevenue = Object.values(eventStats).reduce((sum, s) => sum + s.merchRevenue, 0)
     const totalNetRevenue = totalGrossRevenue - totalAdminFee
     const totalTickets = Object.values(eventStats).reduce((sum, s) => sum + s.ticketCount, 0)
+    const totalCheckedIn = paidTransactions.filter(tx => tx.checkInTime).length
+
+    // ── Check-in stats ──
+    const checkInStats = {
+      checkedIn: totalCheckedIn,
+      notCheckedIn: paidTransactions.length - totalCheckedIn,
+      total: paidTransactions.length,
+    }
+
+    // ── Ticket Category Breakdown ──
+    // Get all seats with price category info
+    const seatsWithCategory = await db.seat.findMany({
+      where: { status: 'SOLD' },
+      select: {
+        priceCategoryId: true,
+        priceCategory: { select: { name: true, colorCode: true } },
+      },
+    })
+
+    const categoryMap = new Map<string, { name: string; color: string; count: number }>()
+    for (const seat of seatsWithCategory) {
+      const catId = seat.priceCategoryId || 'unknown'
+      if (!categoryMap.has(catId)) {
+        categoryMap.set(catId, {
+          name: seat.priceCategory?.name || 'Lainnya',
+          color: seat.priceCategory?.colorCode || '#8B8680',
+          count: 0,
+        })
+      }
+      categoryMap.get(catId)!.count++
+    }
+
+    // Calculate revenue per category by distributing total ticket revenue proportionally
+    const totalSoldSeats = seatsWithCategory.length
+    const categoryBreakdown = Array.from(categoryMap.entries()).map(([id, cat]) => {
+      const proportion = totalSoldSeats > 0 ? cat.count / totalSoldSeats : 0
+      return {
+        id,
+        name: cat.name,
+        color: cat.color,
+        count: cat.count,
+        revenue: Math.round(totalTicketRevenue * proportion),
+      }
+    }).sort((a, b) => b.count - a.count)
+
+    // ── Seat Status Summary (for conversion funnel) ──
+    const seatStatusCounts = await db.seat.groupBy({
+      by: ['status'],
+      _count: true,
+    })
+    const seatFunnel = {
+      total: 0,
+      available: 0,
+      sold: 0,
+      invitation: 0,
+      locked: 0,
+      unavailable: 0,
+    }
+    for (const row of seatStatusCounts) {
+      seatFunnel.total += row._count
+      const status = row.status as string
+      if (status === 'AVAILABLE') seatFunnel.available = row._count
+      else if (status === 'SOLD') seatFunnel.sold = row._count
+      else if (status === 'INVITATION') seatFunnel.invitation = row._count
+      else if (status === 'LOCKED_TEMPORARY') seatFunnel.locked = row._count
+      else if (status === 'UNAVAILABLE') seatFunnel.unavailable = row._count
+    }
 
     // ── Recent transactions (last 10) ──
     const recentTxs = paidTransactions
@@ -143,6 +212,7 @@ export async function GET() {
           paidAt: tx.paidAt?.toISOString(),
           eventId: tx.eventId,
           eventTitle: eventStats[tx.eventId]?.eventTitle || 'Unknown',
+          checkedIn: !!tx.checkInTime,
         }
       })
 
@@ -153,19 +223,27 @@ export async function GET() {
       (tx) => tx.paidAt && tx.paidAt >= thirtyDaysAgo
     )
 
-    const revenueByDay: Record<string, { date: string; revenue: number; tickets: number }> = {}
+    const revenueByDay: Record<string, { date: string; revenue: number; tickets: number; transactions: number }> = {}
     for (const tx of recentPaid) {
       if (!tx.paidAt) continue
-      const dayKey = tx.paidAt.toISOString().slice(0, 10) // YYYY-MM-DD
+      const dayKey = tx.paidAt.toISOString().slice(0, 10)
       if (!revenueByDay[dayKey]) {
-        revenueByDay[dayKey] = { date: dayKey, revenue: 0, tickets: 0 }
+        revenueByDay[dayKey] = { date: dayKey, revenue: 0, tickets: 0, transactions: 0 }
       }
       revenueByDay[dayKey].revenue += tx.totalAmount
       let seatCodesArr: string[] = []
       try { seatCodesArr = JSON.parse(tx.seatCodes) } catch { seatCodesArr = tx.seatCodes.split(',') }
       revenueByDay[dayKey].tickets += seatCodesArr.length
+      revenueByDay[dayKey].transactions++
     }
     const revenueTimeline = Object.values(revenueByDay).sort((a, b) => a.date.localeCompare(b.date))
+
+    // Cumulative revenue for area chart
+    let cumulativeRevenue = 0
+    const cumulativeTimeline = revenueTimeline.map(d => {
+      cumulativeRevenue += d.revenue
+      return { ...d, cumulativeRevenue }
+    })
 
     // ── Payment method breakdown ──
     const paymentMethodStats: Record<string, { method: string; count: number; revenue: number }> = {}
@@ -186,12 +264,22 @@ export async function GET() {
       pendingTransactions: pendingCount,
       expiredTransactions: expiredCount,
       failedTransactions: failedCount,
+      cancelledTransactions: cancelledCount,
       totalTickets,
       totalTicketRevenue,
       totalMerchRevenue,
       totalAdminFee,
       totalGrossRevenue,
       totalNetRevenue,
+
+      // Check-in
+      checkInStats,
+
+      // Category breakdown
+      categoryBreakdown,
+
+      // Seat funnel
+      seatFunnel,
 
       // Per-event breakdown
       eventBreakdown: Object.values(eventStats).sort((a, b) => b.grossRevenue - a.grossRevenue),
@@ -201,6 +289,7 @@ export async function GET() {
 
       // Charts
       revenueTimeline,
+      cumulativeTimeline,
       paymentMethodStats: Object.values(paymentMethodStats).sort((a, b) => b.revenue - a.revenue),
     })
   } catch (error) {
