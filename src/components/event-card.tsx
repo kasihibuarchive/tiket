@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Calendar, MapPin, Tag } from 'lucide-react'
+import { Calendar, MapPin, Tag, CheckCircle2, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,6 +18,7 @@ interface EventCardProps {
   priceCategories: Array<{ name: string; price: number; colorCode: string }>
   seatSummary: { total: number; available: number; sold: number }
   isPublished?: boolean
+  isCompleted?: boolean
 }
 
 export function EventCard({
@@ -31,6 +32,7 @@ export function EventCard({
   priceCategories,
   seatSummary,
   isPublished = true,
+  isCompleted = false,
 }: EventCardProps) {
   const dateStr = formatEventDate(showDate)
   const timeStr = formatEventTime(showDate)
@@ -71,8 +73,15 @@ export function EventCard({
             </Badge>
           </div>
 
-          {/* Available seats indicator */}
-          {seatSummary.total > 0 && (
+          {/* Completed badge or available seats indicator */}
+          {isCompleted ? (
+            <div className="absolute top-3 right-3">
+              <Badge className="bg-emerald-600/90 text-white text-xs backdrop-blur-sm">
+                <CheckCircle2 className="w-3 h-3 mr-1" />
+                Selesai
+              </Badge>
+            </div>
+          ) : seatSummary.total > 0 ? (
             <div className="absolute top-3 right-3">
               <Badge
                 variant="secondary"
@@ -89,7 +98,7 @@ export function EventCard({
                   : `${seatSummary.available} kursi`}
               </Badge>
             </div>
-          )}
+          ) : null}
 
           {/* Gradient overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
@@ -116,34 +125,41 @@ export function EventCard({
           </div>
 
           {/* Price */}
-          <div className="flex items-center justify-between">
-            <span className="font-serif text-sm font-semibold text-charcoal">{priceRange}</span>
-            <span className="text-xs text-muted-foreground">per kursi</span>
-          </div>
+          {!isCompleted && (
+            <div className="flex items-center justify-between">
+              <span className="font-serif text-sm font-semibold text-charcoal">{priceRange}</span>
+              <span className="text-xs text-muted-foreground">per kursi</span>
+            </div>
+          )}
 
           {/* Price Categories Pills */}
-          <div className="flex flex-wrap gap-1.5">
-            {priceCategories.map((pc) => (
-              <span
-                key={pc.name}
-                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-white"
-                style={{ backgroundColor: pc.colorCode || '#8B8680' }}
-              >
-                {pc.name}
-              </span>
-            ))}
-          </div>
+          {!isCompleted && (
+            <div className="flex flex-wrap gap-1.5">
+              {priceCategories.map((pc) => (
+                <span
+                  key={pc.name}
+                  className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium text-white"
+                  style={{ backgroundColor: pc.colorCode || '#8B8680' }}
+                >
+                  {pc.name}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* CTA */}
-          {!isPublished && (
+          {isCompleted ? (
+            <Button className="w-full bg-charcoal hover:bg-charcoal/90 text-gold text-sm font-medium">
+              <Star className="w-4 h-4 mr-2" />
+              Beri Review
+            </Button>
+          ) : !isPublished ? (
             <p className="text-xs text-muted-foreground italic">Belum dipublikasi</p>
-          )}
-          {isPublished && seatSummary.available > 0 && (
+          ) : seatSummary.available > 0 ? (
             <Button className="w-full bg-charcoal hover:bg-charcoal/90 text-gold text-sm font-medium">
               Beli Tiket
             </Button>
-          )}
-          {isPublished && seatSummary.available === 0 && (
+          ) : (
             <Button disabled className="w-full text-sm">
               Tiket Habis
             </Button>

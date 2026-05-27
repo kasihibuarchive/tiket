@@ -12,10 +12,133 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import {
-  Loader2, Save, ArrowLeft, Users, Star, Plus, Trash2, Edit, X, Check,
+  Loader2, Save, ArrowLeft, Users, Star, Plus, Trash2, Edit, X, Check, MessageSquareQuote,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────
+
+interface GuestReview {
+  id: string
+  authorName: string
+  rating: number
+  comment: string
+  createdAt: string
+}
+
+// ─── Guest Reviews Card (reads from Review model via API) ────────────
+
+function GuestReviewsCard({ eventId, isCompleted }: { eventId: string; isCompleted: boolean }) {
+  const [reviews, setReviews] = useState<GuestReview[]>([])
+  const [stats, setStats] = useState<{ average: number; total: number } | null>(null)
+  const [isLoading, setIsLoading] = useState(isCompleted)
+
+  useEffect(() => {
+    if (!isCompleted) return
+    fetch(`/api/events/${eventId}/reviews`)
+      .then((res) => res.ok ? res.json() : { reviews: [], stats: null })
+      .then((data) => {
+        setReviews(data.reviews || [])
+        setStats(data.stats || null)
+      })
+      .catch(() => {})
+      .finally(() => setIsLoading(false))
+  }, [eventId, isCompleted])
+
+  async function handleDeleteReview(reviewId: string) {
+    if (!confirm('Hapus review ini?')) return
+    try {
+      const res = await fetch(`/api/admin/reviews/${reviewId}`, { method: 'DELETE' })
+      if (res.ok) {
+        setReviews(reviews.filter((r) => r.id !== reviewId))
+      }
+    } catch (err) {
+      console.error('Delete review error:', err)
+    }
+  }
+
+  if (!isCompleted) return null
+
+  return (
+    <Card className="border-border/50">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <MessageSquareQuote className="w-5 h-5 text-gold" />
+            <CardTitle className="font-serif text-lg text-charcoal">Guest Reviews</CardTitle>
+            <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+              {reviews.length} review
+            </Badge>
+          </div>
+          {stats && stats.total > 0 && (
+            <div className="flex items-center gap-1">
+              <Star className="w-4 h-4 text-gold fill-gold" />
+              <span className="text-sm font-semibold text-charcoal">{stats.average}</span>
+              <span className="text-xs text-muted-foreground">/5</span>
+            </div>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="flex justify-center py-6">
+            <Loader2 className="w-5 h-5 text-gold animate-spin" />
+          </div>
+        ) : reviews.length === 0 ? (
+          <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+            <MessageSquareQuote className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Belum ada review dari guest</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-96 overflow-y-auto">
+            {reviews.map((review) => (
+              <div
+                key={review.id}
+                className="rounded-lg border border-border/60 p-3 bg-white"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-charcoal">{review.authorName}</span>
+                    <div className="flex items-center gap-0.5">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <Star
+                          key={star}
+                          className={cn(
+                            'w-3 h-3',
+                            star <= review.rating ? 'fill-gold text-gold' : 'fill-none text-muted-foreground/30'
+                          )}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground/50">
+                      {new Date(review.createdAt).toLocaleDateString('id-ID', {
+                        day: 'numeric', month: 'short', year: 'numeric',
+                      })}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"
+                      onClick={() => handleDeleteReview(review.id)}
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+                {review.comment && (
+                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+                    &ldquo;{review.comment}&rdquo;
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
 
 interface CastMember {
   name: string
@@ -55,6 +178,7 @@ interface EventData {
   synopsis: string
   teaserVideoUrl: string | null
   isPublished: boolean
+  isCompleted?: boolean
   adminFee: number
   adminFeeQris: number
   adminFeeNonQris: number
@@ -139,6 +263,7 @@ export default function AdminEventEditPage() {
   const [synopsis, setSynopsis] = useState('')
   const [adminFee, setAdminFee] = useState(0)
   const [isPublished, setIsPublished] = useState(false)
+  const [isCompleted, setIsCompleted] = useState(false)
 
   // Cast & Crew
   const [cast, setCast] = useState<CastMember[]>([])
@@ -176,6 +301,7 @@ export default function AdminEventEditPage() {
         setSynopsis(ev.synopsis || '')
         setAdminFee(ev.adminFee || 0)
         setIsPublished(ev.isPublished)
+        setIsCompleted(ev.isCompleted || false)
 
         // Parse cast & reviews
         setCast(safeParseArray<CastMember>(ev.castData, []))
@@ -206,6 +332,7 @@ export default function AdminEventEditPage() {
           synopsis,
           adminFee,
           isPublished,
+          isCompleted,
           castData: JSON.stringify(cast),
           reviewsData: JSON.stringify(reviews),
         }),
@@ -442,6 +569,34 @@ export default function AdminEventEditPage() {
                   {isPublished ? 'Published' : 'Draft'}
                 </span>
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Status Pementasan</Label>
+              <div className="flex items-center gap-3 h-9">
+                <button
+                  type="button"
+                  onClick={() => setIsCompleted(!isCompleted)}
+                  className={cn(
+                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+                    isCompleted ? 'bg-emerald-600' : 'bg-muted'
+                  )}
+                >
+                  <span
+                    className={cn(
+                      'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                      isCompleted ? 'translate-x-6' : 'translate-x-1'
+                    )}
+                  />
+                </button>
+                <span className="text-sm text-muted-foreground">
+                  {isCompleted ? 'Selesai (Guest bisa review)' : 'Aktif (Bisa beli tiket)'}
+                </span>
+              </div>
+              {isCompleted && (
+                <p className="text-xs text-emerald-600 font-medium">
+                  Pementasan selesai — tiket tidak bisa dibeli, guest bisa memberikan review.
+                </p>
+              )}
             </div>
           </div>
         </CardContent>
@@ -821,6 +976,9 @@ export default function AdminEventEditPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── Guest Reviews Card (from Review model) ──────────────────── */}
+      <GuestReviewsCard eventId={eventId} isCompleted={isCompleted} />
 
       {/* ─── Bottom Actions ──────────────────────────────────────── */}
       <div className="flex items-center justify-between pt-2 pb-8">

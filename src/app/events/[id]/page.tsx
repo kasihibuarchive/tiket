@@ -13,10 +13,12 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
+import { Textarea } from '@/components/ui/textarea'
+import { Input } from '@/components/ui/input'
 import {
   Calendar, MapPin, Clock, Tag, Ticket,
   Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck, Play,
-  Star, Users, MessageSquareQuote,
+  Star, Users, MessageSquareQuote, Send, CheckCircle2, BarChart3,
 } from 'lucide-react'
 
 
@@ -31,6 +33,7 @@ interface EventData {
   teaserVideoUrl: string | null
   synopsis: string
   isPublished: boolean
+  isCompleted?: boolean
   seatType?: string | null
   layoutImage?: string | null
   gaZoneConfig?: string | null
@@ -38,8 +41,9 @@ interface EventData {
   seatSummary: { total: number; available: number; sold: number }
   seatMapLayout?: any
   showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
-  castData?: string | null     // JSON: [{name, role, imageUrl}]
-  reviewsData?: string | null  // JSON: [{authorName, rating: 1-5, comment, createdAt}]
+  castData?: string | null
+  reviewsData?: string | null
+  reviewStats?: { average: number; total: number }
 }
 
 interface SeatData {
@@ -51,6 +55,14 @@ interface SeatData {
   priceCategory: { id: string; name: string; price: number; colorCode: string } | null
   lockedUntil: string | null
   eventShowDateId?: string | null
+}
+
+interface ReviewData {
+  id: string
+  authorName: string
+  rating: number
+  comment: string
+  createdAt: string
 }
 
 const CATEGORY_ICONS: Record<string, typeof Crown> = {
@@ -88,6 +100,33 @@ function getEmbedUrl(url: string): string | null {
   return null
 }
 
+// ─── Star Rating Interactive Component ────────────────────────────────
+
+function StarRatingInput({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center gap-1">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <button
+          key={star}
+          type="button"
+          onClick={() => onChange(star)}
+          className="cursor-pointer hover:scale-110 transition-transform"
+        >
+          <Star
+            className={cn(
+              'w-7 h-7',
+              star <= value
+                ? 'fill-gold text-gold'
+                : 'fill-none text-charcoal/20 hover:text-gold/50'
+            )}
+          />
+        </button>
+      ))}
+      <span className="ml-2 text-sm font-medium text-charcoal">{value}/5</span>
+    </div>
+  )
+}
+
 export default function EventDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -104,6 +143,14 @@ export default function EventDetailPage() {
   const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
   const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number; passed: boolean } | null>(null)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Review state
+  const [reviews, setReviews] = useState<ReviewData[]>([])
+  const [reviewStats, setReviewStats] = useState<{ average: number; total: number; distribution: Record<number, number> } | null>(null)
+  const [reviewForm, setReviewForm] = useState({ authorName: '', rating: 5, comment: '' })
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false)
+  const [reviewSubmitted, setReviewSubmitted] = useState(false)
+  const [reviewError, setReviewError] = useState<string | null>(null)
 
   // Fetch event data — with retry logic for Supabase RAM exhaustion
   useEffect(() => {
@@ -141,6 +188,26 @@ export default function EventDetailPage() {
     return () => { cancelled = true }
   }, [eventId])
 
+  // Fetch reviews when event is loaded & completed
+  useEffect(() => {
+    if (!eventId || !event?.isCompleted) return
+    let cancelled = false
+    async function fetchReviews() {
+      try {
+        const res = await fetch(`/api/events/${eventId}/reviews`)
+        if (res.ok && !cancelled) {
+          const data = await res.json()
+          setReviews(data.reviews || [])
+          setReviewStats(data.stats || null)
+        }
+      } catch (err) {
+        console.error('Fetch reviews error:', err)
+      }
+    }
+    fetchReviews()
+    return () => { cancelled = true }
+  }, [eventId, event?.isCompleted, reviewSubmitted]) // re-fetch after submission
+
   // Show dates with fallback — MUST be declared before the useEffect that references activeShowDate
   const showDates = useMemo(() =>
     event?.showDates && event.showDates.length > 0
@@ -151,7 +218,7 @@ export default function EventDetailPage() {
 
   const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
 
-  // Parse cast & reviews data
+  // Parse cast data
   const castMembers = useMemo(() => {
     if (!event?.castData) return []
     try {
@@ -159,14 +226,6 @@ export default function EventDetailPage() {
       return Array.isArray(parsed) ? parsed : []
     } catch { return [] }
   }, [event?.castData])
-
-  const reviews = useMemo(() => {
-    if (!event?.reviewsData) return []
-    try {
-      const parsed = JSON.parse(event.reviewsData)
-      return Array.isArray(parsed) ? parsed : []
-    } catch { return [] }
-  }, [event?.reviewsData])
 
   // Countdown timer to next show date
   useEffect(() => {
@@ -195,16 +254,14 @@ export default function EventDetailPage() {
     return () => { if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null } }
   }, [event, activeShowDate?.date])
 
-  // Fetch seats filtered by active show date — runs on mount AND when show date changes.
-  // This is the ONLY place seats are fetched (no separate initial fetch),
-  // preventing race conditions between unfiltered and filtered seat data.
+  // Fetch seats filtered by active show date — only if NOT completed
   useEffect(() => {
-    if (!eventId || !event) return
+    if (!eventId || !event || event.isCompleted) return
     let cancelled = false
     async function fetchSeatsByDate() {
-      setAllSeats([]) // Clear immediately so stale data never shows
+      setAllSeats([])
       try {
-        const url = activeShowDate?.id 
+        const url = activeShowDate?.id
           ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
           : `/api/events/${eventId}/seats`
         const res = await fetch(url)
@@ -252,6 +309,33 @@ export default function EventDetailPage() {
     setSelectedSeats([])
     setTotalPrice(0)
     window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
+  // ─── Review submission handler ──────────────────────────────────────
+  async function handleSubmitReview(e: React.FormEvent) {
+    e.preventDefault()
+    if (!reviewForm.authorName.trim() || !reviewForm.comment.trim()) return
+
+    setIsSubmittingReview(true)
+    setReviewError(null)
+    try {
+      const res = await fetch(`/api/events/${eventId}/reviews`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reviewForm),
+      })
+      if (res.ok) {
+        setReviewSubmitted(true)
+        setReviewForm({ authorName: '', rating: 5, comment: '' })
+      } else {
+        const data = await res.json()
+        setReviewError(data.error || 'Gagal mengirim review')
+      }
+    } catch (err) {
+      setReviewError('Terjadi kesalahan saat mengirim review')
+    } finally {
+      setIsSubmittingReview(false)
+    }
   }
 
   if (isLoading) {
@@ -317,6 +401,10 @@ export default function EventDetailPage() {
     ? Math.round((seatSummary.available / seatSummary.total) * 100)
     : 0
 
+  const isCompleted = event?.isCompleted || false
+  const avgRating = reviewStats?.average || event?.reviewStats?.average || 0
+  const totalReviews = reviewStats?.total || event?.reviewStats?.total || 0
+
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
@@ -328,12 +416,21 @@ export default function EventDetailPage() {
             <div className="flex flex-col lg:flex-row gap-8">
               {/* Poster */}
               <div className="lg:w-1/3 shrink-0">
-                <div className="aspect-[3/4] rounded-xl overflow-hidden shadow-2xl bg-charcoal/50">
+                <div className="aspect-[3/4] rounded-xl overflow-hidden shadow-2xl bg-charcoal/50 relative">
                   {event.posterUrl ? (
                     <img src={event.posterUrl} alt={event.title} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-charcoal to-charcoal/60">
                       <span className="font-serif text-gold text-5xl">{event.title.charAt(0)}</span>
+                    </div>
+                  )}
+                  {/* Completed overlay badge */}
+                  {isCompleted && (
+                    <div className="absolute top-3 right-3">
+                      <Badge className="bg-emerald-600 text-white text-xs px-3 py-1 shadow-lg">
+                        <CheckCircle2 className="w-3 h-3 mr-1" />
+                        Selesai
+                      </Badge>
                     </div>
                   )}
                 </div>
@@ -346,11 +443,16 @@ export default function EventDetailPage() {
                     <Tag className="w-3 h-3 mr-1" />
                     {event.category}
                   </Badge>
-                  {event.isPublished && (
+                  {isCompleted ? (
+                    <Badge variant="secondary" className="bg-emerald-500/20 text-emerald-300 text-xs">
+                      <CheckCircle2 className="w-3 h-3 mr-1" />
+                      Pementasan Selesai
+                    </Badge>
+                  ) : event.isPublished ? (
                     <Badge variant="secondary" className="bg-success/20 text-success text-xs">
                       Aktif
                     </Badge>
-                  )}
+                  ) : null}
                   {showDates.length > 1 && (
                     <Badge variant="secondary" className="bg-blue-500/20 text-blue-300 text-xs">
                       Multi-Hari
@@ -361,6 +463,22 @@ export default function EventDetailPage() {
                 <h1 className="font-serif text-3xl sm:text-4xl font-bold mb-4">
                   {event.title}
                 </h1>
+
+                {/* Average rating display for completed events */}
+                {isCompleted && totalReviews > 0 && (
+                  <div className="flex items-center gap-3 mb-4 bg-white/5 rounded-lg px-4 py-2 w-fit">
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: 5 }).map((_, i) => (
+                        <Star
+                          key={i}
+                          className={cn('w-5 h-5', i < Math.round(avgRating) ? 'text-gold fill-gold' : 'text-white/20')}
+                        />
+                      ))}
+                    </div>
+                    <span className="font-serif text-2xl font-bold text-gold">{avgRating}</span>
+                    <span className="text-sm text-white/50">({totalReviews} review)</span>
+                  </div>
+                )}
 
                 <div className="space-y-2 mb-6">
                   <div className="flex items-center gap-2 text-sm text-white/60">
@@ -398,8 +516,8 @@ export default function EventDetailPage() {
                   </div>
                 )}
 
-                {/* Countdown Timer */}
-                {countdown && (
+                {/* Countdown Timer — only for active events */}
+                {!isCompleted && countdown && (
                   <div className="mb-6">
                     {countdown.passed ? (
                       <div className="bg-gold/10 border border-gold/20 rounded-lg px-4 py-3 text-center">
@@ -432,6 +550,16 @@ export default function EventDetailPage() {
                   </div>
                 )}
 
+                {/* Completed event banner */}
+                {isCompleted && (
+                  <div className="mb-6 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-3">
+                    <p className="text-emerald-300 text-sm font-medium flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" />
+                      Pementasan telah selesai. Berikan review Anda di bawah!
+                    </p>
+                  </div>
+                )}
+
                 <div className="bg-white/5 rounded-lg p-4 mb-6">
                   <h3 className="font-serif text-sm text-gold mb-2">Sinopsis</h3>
                   <p className="text-sm text-white/70 leading-relaxed whitespace-pre-line">
@@ -460,21 +588,24 @@ export default function EventDetailPage() {
                   </div>
                 )}
 
-                <div className="bg-white/5 rounded-lg p-4 mb-6">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm text-white/70">
-                      {event.seatType === 'GENERAL_ADMISSION' ? 'Ketersediaan Tiket' : 'Ketersediaan Kursi'}
-                    </span>
-                    <span className="text-sm font-semibold text-gold">
-                      {seatSummary.available} / {seatSummary.total}
-                    </span>
+                {/* Seat/Ticket availability — only for active events */}
+                {!isCompleted && (
+                  <div className="bg-white/5 rounded-lg p-4 mb-6">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm text-white/70">
+                        {event.seatType === 'GENERAL_ADMISSION' ? 'Ketersediaan Tiket' : 'Ketersediaan Kursi'}
+                      </span>
+                      <span className="text-sm font-semibold text-gold">
+                        {seatSummary.available} / {seatSummary.total}
+                      </span>
+                    </div>
+                    <Progress value={availablePercent} className="h-2 bg-white/10" />
+                    <div className="flex justify-between mt-2 text-xs text-white/40">
+                      <span>{availablePercent}% tersedia</span>
+                      <span>{seatSummary.sold} terjual</span>
+                    </div>
                   </div>
-                  <Progress value={availablePercent} className="h-2 bg-white/10" />
-                  <div className="flex justify-between mt-2 text-xs text-white/40">
-                    <span>{availablePercent}% tersedia</span>
-                    <span>{seatSummary.sold} terjual</span>
-                  </div>
-                </div>
+                )}
 
                 <div className="flex flex-wrap gap-3 mt-4">
                   {event.priceCategories.map((pc) => {
@@ -542,9 +673,11 @@ export default function EventDetailPage() {
           </section>
         )}
 
-        {/* Reviews / Testimonials Section */}
-        {reviews.length > 0 && (
-          <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 bg-gray-50">
+        {/* ═══════════════════════════════════════════════════════════════
+            REVIEW SECTION — Only for completed events
+            ═══════════════════════════════════════════════════════════════ */}
+        {isCompleted && (
+          <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 bg-gray-50" id="reviews">
             <div className="max-w-5xl mx-auto">
               <div className="text-center mb-8">
                 <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2 flex items-center justify-center gap-2">
@@ -554,76 +687,258 @@ export default function EventDetailPage() {
                 <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">ULASAN PENONTON</h2>
                 <div className="zen-divider w-16 mx-auto mt-4" />
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                {reviews.map((review: { authorName: string; rating: number; comment: string; createdAt?: string }, idx: number) => (
-                  <div
-                    key={idx}
-                    className="bg-white border border-charcoal/10 rounded-xl p-5 hover:shadow-md transition-shadow"
-                  >
-                    <div className="flex items-center gap-1 mb-3">
-                      {Array.from({ length: 5 }).map((_, i) => (
-                        <Star
-                          key={i}
-                          className={cn('w-4 h-4', i < review.rating ? 'text-gold fill-gold' : 'text-charcoal/20')}
-                        />
-                      ))}
+
+              {/* Review Stats Summary */}
+              {totalReviews > 0 && reviewStats && (
+                <div className="bg-white rounded-xl border border-charcoal/10 p-6 mb-8 shadow-sm">
+                  <div className="flex flex-col sm:flex-row items-center gap-6">
+                    {/* Average score */}
+                    <div className="text-center sm:text-left">
+                      <div className="font-serif text-5xl font-bold text-charcoal">{avgRating}</div>
+                      <div className="flex items-center gap-1 mt-1 justify-center sm:justify-start">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star
+                            key={i}
+                            className={cn('w-5 h-5', i < Math.round(avgRating) ? 'text-gold fill-gold' : 'text-charcoal/20')}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-sm text-muted-foreground mt-1">{totalReviews} review</p>
                     </div>
-                    <p className="text-sm text-charcoal/80 leading-relaxed mb-3 line-clamp-4">{review.comment}</p>
-                    <div className="flex items-center justify-between pt-3 border-t border-charcoal/5">
-                      <span className="text-sm font-semibold text-charcoal">{review.authorName}</span>
-                      {review.createdAt && (
+                    {/* Distribution bars */}
+                    <div className="flex-1 w-full max-w-sm">
+                      {[5, 4, 3, 2, 1].map((star) => {
+                        const count = reviewStats.distribution[star] || 0
+                        const pct = totalReviews > 0 ? Math.round((count / totalReviews) * 100) : 0
+                        return (
+                          <div key={star} className="flex items-center gap-2 mb-1">
+                            <span className="text-xs text-muted-foreground w-6 text-right">{star}</span>
+                            <Star className="w-3 h-3 text-gold fill-gold shrink-0" />
+                            <div className="flex-1 h-2 bg-charcoal/5 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-gold rounded-full transition-all"
+                                style={{ width: `${pct}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-muted-foreground w-8">{count}</span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Review Submission Form */}
+              <div className="bg-white rounded-xl border border-charcoal/10 p-6 mb-8 shadow-sm">
+                <h3 className="font-serif text-lg font-semibold text-charcoal mb-4 flex items-center gap-2">
+                  <Star className="w-5 h-5 text-gold" />
+                  Berikan Review Anda
+                </h3>
+
+                {reviewSubmitted ? (
+                  <div className="text-center py-8">
+                    <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto mb-3" />
+                    <h4 className="font-serif text-lg font-semibold text-charcoal mb-2">Review Terkirim!</h4>
+                    <p className="text-sm text-muted-foreground mb-4">Terima kasih atas review Anda.</p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setReviewSubmitted(false)}
+                      className="text-xs"
+                    >
+                      Tulis Review Lagi
+                    </Button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleSubmitReview} className="space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-sm font-medium text-charcoal mb-1 block">Nama *</label>
+                        <Input
+                          value={reviewForm.authorName}
+                          onChange={(e) => setReviewForm({ ...reviewForm, authorName: e.target.value })}
+                          placeholder="Nama Anda"
+                          required
+                          maxLength={50}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium text-charcoal mb-1 block">Rating</label>
+                        <StarRatingInput
+                          value={reviewForm.rating}
+                          onChange={(v) => setReviewForm({ ...reviewForm, rating: v })}
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium text-charcoal mb-1 block">Komentar *</label>
+                      <Textarea
+                        value={reviewForm.comment}
+                        onChange={(e) => setReviewForm({ ...reviewForm, comment: e.target.value })}
+                        placeholder="Bagikan pengalaman Anda menonton pertunjukan ini..."
+                        rows={3}
+                        required
+                        maxLength={1000}
+                      />
+                      <p className="text-xs text-muted-foreground mt-1 text-right">{reviewForm.comment.length}/1000</p>
+                    </div>
+                    {reviewError && (
+                      <p className="text-sm text-red-500">{reviewError}</p>
+                    )}
+                    <div className="flex justify-end">
+                      <Button
+                        type="submit"
+                        disabled={isSubmittingReview || !reviewForm.authorName.trim() || !reviewForm.comment.trim()}
+                        className="bg-charcoal hover:bg-charcoal/90 text-gold"
+                      >
+                        {isSubmittingReview ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <Send className="w-4 h-4 mr-2" />
+                        )}
+                        Kirim Review
+                      </Button>
+                    </div>
+                  </form>
+                )}
+              </div>
+
+              {/* Reviews List */}
+              {reviews.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {reviews.map((review) => (
+                    <div
+                      key={review.id}
+                      className="bg-white border border-charcoal/10 rounded-xl p-5 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-center gap-1 mb-3">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star
+                            key={i}
+                            className={cn('w-4 h-4', i < review.rating ? 'text-gold fill-gold' : 'text-charcoal/20')}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-sm text-charcoal/80 leading-relaxed mb-3 line-clamp-4">{review.comment}</p>
+                      <div className="flex items-center justify-between pt-3 border-t border-charcoal/5">
+                        <span className="text-sm font-semibold text-charcoal">{review.authorName}</span>
                         <span className="text-xs text-muted-foreground">
                           {new Date(review.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
                         </span>
-                      )}
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-8 bg-white rounded-xl border border-charcoal/10">
+                  <MessageSquareQuote className="w-10 h-10 text-charcoal/20 mx-auto mb-3" />
+                  <p className="text-muted-foreground text-sm">Belum ada review</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Jadilah yang pertama memberikan review!</p>
+                </div>
+              )}
             </div>
           </section>
         )}
 
-        {/* Seat Selection — wrapped with QueueGate for virtual waiting room */}
-        <QueueGate eventId={eventId}>
-          <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 abstract-bg">
-            <div className="max-w-7xl mx-auto">
-              <div className="text-center mb-8">
-                <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">
-                  {event.seatType === 'GENERAL_ADMISSION' ? 'Pilih zona Anda' : 'Pilih kursi Anda'}
-                </p>
-                <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">
-                  {event.seatType === 'GENERAL_ADMISSION' ? 'PILIH ZONA' : 'PILIH KURSI'}
-                </h2>
-                <div className="zen-divider w-16 mx-auto mt-4" />
+        {/* ═══════════════════════════════════════════════════════════════
+            LEGACY REVIEWS — From admin-managed reviewsData (for non-completed events)
+            ═══════════════════════════════════════════════════════════════ */}
+        {!isCompleted && (() => {
+          const legacyReviews = (() => {
+            if (!event?.reviewsData) return []
+            try {
+              const parsed = JSON.parse(event.reviewsData)
+              return Array.isArray(parsed) ? parsed : []
+            } catch { return [] }
+          })()
+          if (legacyReviews.length === 0) return null
+          return (
+            <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 bg-gray-50">
+              <div className="max-w-5xl mx-auto">
+                <div className="text-center mb-8">
+                  <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2 flex items-center justify-center gap-2">
+                    <MessageSquareQuote className="w-4 h-4" />
+                    Ulasan
+                  </p>
+                  <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">ULASAN</h2>
+                  <div className="zen-divider w-16 mx-auto mt-4" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                  {legacyReviews.map((review: { authorName: string; rating: number; comment: string; createdAt?: string }, idx: number) => (
+                    <div
+                      key={idx}
+                      className="bg-white border border-charcoal/10 rounded-xl p-5 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex items-center gap-1 mb-3">
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <Star
+                            key={i}
+                            className={cn('w-4 h-4', i < review.rating ? 'text-gold fill-gold' : 'text-charcoal/20')}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-sm text-charcoal/80 leading-relaxed mb-3 line-clamp-4">{review.comment}</p>
+                      <div className="flex items-center justify-between pt-3 border-t border-charcoal/5">
+                        <span className="text-sm font-semibold text-charcoal">{review.authorName}</span>
+                        {review.createdAt && (
+                          <span className="text-xs text-muted-foreground">
+                            {new Date(review.createdAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
+            </section>
+          )
+        })()}
 
-              {!showCheckout ? (
-                  <SeatMap
-                    key={activeShowDate?.id || 'default'}
+        {/* ═══════════════════════════════════════════════════════════════
+            SEAT SELECTION — Only for active (non-completed) events
+            ═══════════════════════════════════════════════════════════════ */}
+        {!isCompleted && (
+          <QueueGate eventId={eventId}>
+            <section className="py-12 sm:py-16 px-4 sm:px-6 lg:px-8 abstract-bg">
+              <div className="max-w-7xl mx-auto">
+                <div className="text-center mb-8">
+                  <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">
+                    {event.seatType === 'GENERAL_ADMISSION' ? 'Pilih zona Anda' : 'Pilih kursi Anda'}
+                  </p>
+                  <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">
+                    {event.seatType === 'GENERAL_ADMISSION' ? 'PILIH ZONA' : 'PILIH KURSI'}
+                  </h2>
+                  <div className="zen-divider w-16 mx-auto mt-4" />
+                </div>
+
+                {!showCheckout ? (
+                    <SeatMap
+                      key={activeShowDate?.id || 'default'}
+                      eventId={eventId}
+                      showDateId={activeShowDate?.id || null}
+                      seats={filteredSeats}
+                      priceCategories={event.priceCategories}
+                      layoutData={event.seatMapLayout}
+                      layoutImage={event.layoutImage}
+                      gaZoneConfig={event.gaZoneConfig}
+                      seatType={event.seatType}
+                      onSelectionChange={handleSelectionChange}
+                      onProceedToCheckout={handleProceedToCheckout}
+                    />
+                ) : (
+                  <CheckoutForm
                     eventId={eventId}
                     showDateId={activeShowDate?.id || null}
-                    seats={filteredSeats}
-                    priceCategories={event.priceCategories}
-                    layoutData={event.seatMapLayout}
-                    layoutImage={event.layoutImage}
-                    gaZoneConfig={event.gaZoneConfig}
-                    seatType={event.seatType}
-                    onSelectionChange={handleSelectionChange}
-                    onProceedToCheckout={handleProceedToCheckout}
+                    selectedSeats={selectedSeats}
+                    totalPrice={totalPrice}
+                    onBack={handleBackToSeats}
                   />
-              ) : (
-                <CheckoutForm
-                  eventId={eventId}
-                  showDateId={activeShowDate?.id || null}
-                  selectedSeats={selectedSeats}
-                  totalPrice={totalPrice}
-                  onBack={handleBackToSeats}
-                />
-              )}
-            </div>
-          </section>
-        </QueueGate>
+                )}
+              </div>
+            </section>
+          </QueueGate>
+        )}
       </main>
 
       <Footer />

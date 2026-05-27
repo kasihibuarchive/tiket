@@ -65,6 +65,7 @@ export async function PUT(
       posterUrl,
       synopsis,
       isPublished,
+      isCompleted,
       adminFee,
       adminFeeQris,
       adminFeeNonQris,
@@ -109,6 +110,7 @@ export async function PUT(
         teaserVideoUrl: teaserVideoUrl !== undefined ? teaserVideoUrl : event.teaserVideoUrl,
         synopsis: synopsis ?? event.synopsis,
         isPublished: isPublished !== undefined ? isPublished : event.isPublished,
+        isCompleted: isCompleted !== undefined ? isCompleted : event.isCompleted,
         adminFee: adminFee !== undefined ? adminFee : event.adminFee,
         adminFeeQris: adminFeeQris !== undefined ? adminFeeQris : event.adminFeeQris,
         adminFeeNonQris: adminFeeNonQris !== undefined ? adminFeeNonQris : event.adminFeeNonQris,
@@ -227,6 +229,9 @@ export async function PUT(
     if (title && title !== event.title) logDetails.push(`judul: "${event.title}" → "${title}"`)
     if (isPublished !== undefined && isPublished !== event.isPublished) {
       logDetails.push(isPublished ? 'dipublish' : 'di-unpublish')
+    }
+    if (isCompleted !== undefined && isCompleted !== event.isCompleted) {
+      logDetails.push(isCompleted ? 'ditandai selesai' : 'dibuka kembali')
     }
     if (location && location !== event.location) logDetails.push(`lokasi diubah`)
     if (synopsis && synopsis !== event.synopsis) logDetails.push(`sinopsis diubah`)

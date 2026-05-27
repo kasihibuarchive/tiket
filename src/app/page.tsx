@@ -5,7 +5,7 @@ import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
 import { EventCard } from '@/components/event-card'
 import { formatEventDate } from '@/lib/date'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Star, CheckCircle2 } from 'lucide-react'
 
 // Homepage uses client-side fetching to avoid exhausting Supabase connection pool.
 // Server-side Prisma connections on every homepage visit was the main cause of EMAXCONNSESSION.
@@ -29,6 +29,10 @@ export default function HomePage() {
     load()
     return () => { cancelled = true }
   }, [])
+
+  // Separate active and completed events
+  const activeEvents = events.filter((e: any) => !e.isCompleted)
+  const completedEvents = events.filter((e: any) => e.isCompleted)
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -58,16 +62,16 @@ export default function HomePage() {
             </p>
 
             {/* Featured Event */}
-            {!loading && events.length > 0 && (
+            {!loading && activeEvents.length > 0 && (
               <div className="mt-10 animate-fade-in">
                 <h2 className="font-serif text-2xl sm:text-3xl text-white font-semibold">
-                  {events[0].title}
+                  {activeEvents[0].title}
                 </h2>
                 <p className="text-white/40 text-sm mt-1">
-                  {formatEventDate(events[0].showDate)}
+                  {formatEventDate(activeEvents[0].showDate)}
                 </p>
                 <a
-                  href={`/events/${events[0].id}`}
+                  href={`/events/${activeEvents[0].id}`}
                   className="inline-flex items-center mt-6 px-6 py-3 bg-gold text-charcoal rounded-full text-sm font-semibold hover:bg-gold-light transition-colors"
                 >
                   Beli Tiket Sekarang
@@ -81,7 +85,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* All Events */}
+      {/* Active Events */}
       <section id="events" className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 abstract-bg">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
@@ -96,20 +100,48 @@ export default function HomePage() {
             <div className="flex justify-center py-16">
               <Loader2 className="w-6 h-6 text-gold animate-spin" />
             </div>
-          ) : events.length === 0 ? (
+          ) : activeEvents.length === 0 && completedEvents.length === 0 ? (
             <div className="text-center py-16">
               <p className="text-muted-foreground text-sm">Belum ada pertunjukan yang tersedia</p>
               <p className="text-muted-foreground/50 text-xs mt-2">Silakan cek kembali nanti</p>
             </div>
+          ) : activeEvents.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-muted-foreground text-sm">Saat ini tidak ada pertunjukan aktif</p>
+            </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {events.map((event: any) => (
+              {activeEvents.map((event: any) => (
                 <EventCard key={event.id} {...event} />
               ))}
             </div>
           )}
         </div>
       </section>
+
+      {/* Completed Events Section */}
+      {completedEvents.length > 0 && (
+        <section className="py-16 sm:py-20 px-4 sm:px-6 lg:px-8 bg-gray-50">
+          <div className="max-w-7xl mx-auto">
+            <div className="text-center mb-12">
+              <p className="text-emerald-600 text-xs tracking-[0.3em] uppercase font-medium mb-2 flex items-center justify-center gap-2">
+                <CheckCircle2 className="w-4 h-4" />
+                Selesai
+              </p>
+              <h2 className="font-serif text-3xl sm:text-4xl font-bold text-charcoal">
+                PEMENTASAN SELESAI
+              </h2>
+              <p className="text-muted-foreground text-sm mt-2">Pertunjukan sudah selesai — berikan review Anda!</p>
+              <div className="zen-divider w-16 mx-auto mt-4" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {completedEvents.map((event: any) => (
+                <EventCard key={event.id} {...event} />
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       <Footer />
     </div>

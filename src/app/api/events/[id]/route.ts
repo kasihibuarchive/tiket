@@ -26,6 +26,7 @@ export async function GET(
           teaserVideoUrl: true,
           synopsis: true,
           isPublished: true,
+          isCompleted: true,
           seatMapId: true,
           seatType: true,
           layoutImage: true,
@@ -40,13 +41,13 @@ export async function GET(
 
       if (!event) return null
 
-      // Block unpublished events for non-admin guests
-      if (!event.isPublished && !isAdmin) {
+      // Block unpublished events for non-admin guests (unless completed — completed events can be viewed)
+      if (!event.isPublished && !event.isCompleted && !isAdmin) {
         return { unpublished: true, title: event.title }
       }
 
-      // Run price categories and show dates in parallel (only 2 queries)
-      const [priceCategories, showDates, seatStats] = await Promise.all([
+      // Run price categories, show dates, seat stats, and review stats in parallel
+      const [priceCategories, showDates, seatStats, reviewStats] = await Promise.all([
         db.priceCategory.findMany({
           where: { eventId: id },
         }),
@@ -60,6 +61,14 @@ export async function GET(
           where: { eventId: id },
           _count: { status: true },
         }),
+        // Review stats for completed events
+        event.isCompleted
+          ? db.review.aggregate({
+              where: { eventId: id },
+              _avg: { rating: true },
+              _count: { id: true },
+            })
+          : Promise.resolve({ _avg: { rating: null }, _count: { id: 0 } }),
       ])
 
       const totalSeats = seatStats.reduce((sum, s) => sum + s._count.status, 0)
@@ -82,6 +91,10 @@ export async function GET(
         showDates,
         seatSummary: { total: totalSeats, available: availableSeats, sold: soldSeats },
         seatMapLayout,
+        reviewStats: {
+          average: reviewStats._avg.rating ? Math.round(reviewStats._avg.rating * 10) / 10 : 0,
+          total: reviewStats._count.id,
+        },
       }
     })
 

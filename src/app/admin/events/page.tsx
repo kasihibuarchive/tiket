@@ -25,7 +25,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import {
-  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users
+  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users, RotateCcw, Star
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 
@@ -36,6 +36,7 @@ interface EventData {
   showDate: string
   location: string
   isPublished: boolean
+  isCompleted?: boolean
   priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
   seatSummary?: { total: number; available: number; sold: number }
   seatMapId: string | null
@@ -308,6 +309,35 @@ export default function AdminEventsPage() {
     }
   }
 
+  // ─── Toggle Completed ────────────────────────────────────────────────
+
+  async function handleToggleComplete(event: EventData) {
+    const newCompleted = !event.isCompleted
+    const confirmed = confirm(
+      newCompleted
+        ? `Tandai "${event.title}" sebagai SELESAI?\n\nTiket tidak bisa dibeli lagi, tapi guest bisa memberikan review.`
+        : `Buka kembali "${event.title}"?\n\nEvent akan bisa dibeli tiketnya lagi.`
+    )
+    if (!confirmed) return
+
+    try {
+      const res = await fetch(`/api/admin/events/${event.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isCompleted: newCompleted }),
+      })
+      if (res.ok) {
+        fetchEvents()
+      } else {
+        const data = await res.json()
+        alert(data.error || 'Gagal mengubah status')
+      }
+    } catch (err) {
+      console.error('Toggle complete error:', err)
+      alert('Terjadi kesalahan')
+    }
+  }
+
   // ─── Queue Management ────────────────────────────────────────────────
 
   async function openQueueDialog(eventId: string, eventTitle: string) {
@@ -539,12 +569,20 @@ export default function AdminEventsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant="secondary"
-                        className={`text-xs ${event.isPublished ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}
-                      >
-                        {event.isPublished ? 'Published' : 'Draft'}
-                      </Badge>
+                      <div className="flex flex-col gap-1">
+                        <Badge
+                          variant="secondary"
+                          className={`text-xs ${event.isPublished ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}
+                        >
+                          {event.isPublished ? 'Published' : 'Draft'}
+                        </Badge>
+                        {event.isCompleted && (
+                          <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-700">
+                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                            Selesai
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
@@ -585,6 +623,20 @@ export default function AdminEventsPage() {
                           title={event.isPublished ? 'Unpublish' : 'Publish'}
                         >
                           {event.isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className={cn(
+                            'h-8 w-8',
+                            event.isCompleted
+                              ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50'
+                              : 'text-muted-foreground hover:text-charcoal'
+                          )}
+                          onClick={() => handleToggleComplete(event)}
+                          title={event.isCompleted ? 'Buka Kembali (Reopen)' : 'Tandai Selesai'}
+                        >
+                          {event.isCompleted ? <RotateCcw className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                         </Button>
                         <Button
                           variant="ghost"

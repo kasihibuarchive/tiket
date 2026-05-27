@@ -10,7 +10,7 @@ export async function GET() {
         orderBy: { createdAt: 'desc' },
         select: {
           id: true, title: true, category: true, showDate: true,
-          location: true, posterUrl: true, isPublished: true,
+          location: true, posterUrl: true, isPublished: true, isCompleted: true,
           adminFee: true, seatMapId: true, seatType: true,
           createdAt: true, updatedAt: true,
         },

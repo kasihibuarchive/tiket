@@ -89,7 +89,11 @@ model Event {
   gaZoneConfig    String?   // JSON string for manually defined GA zones: [{name, capacity, price, color, priceCategoryName}]
   seatType        String?   // NUMBERED, GENERAL_ADMISSION, or PIANO_ROLL — overrides linked SeatMap's seatType
   castData        String?   // JSON: [{name, role, imageUrl}] — Cast & Crew
-  reviewsData     String?   // JSON: [{authorName, rating: 1-5, comment, createdAt}] — Reviews/Testimonials
+  reviewsData     String?   // JSON: [{authorName, rating: 1-5, comment, createdAt}] — Legacy admin reviews (kept for backward compat)
+  isCompleted     Boolean   @default(false) // Event performance has ended — guests can review but can't buy tickets
+
+  // Relations
+  reviews         Review[]
 }
 
 // =====================
@@ -364,4 +368,24 @@ model EventQueueToken {
   @@index([eventId, sessionId])
   @@index([eventId, status])
   @@index([expiresAt])
+}
+
+// =====================
+// REVIEW MODEL (Guest Reviews)
+// =====================
+model Review {
+  id          String   @id @default(cuid())
+  eventId     String
+  authorName  String   // Guest name
+  rating      Int      // 1-5 stars
+  comment     String   // Review text
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+  @@index([rating])
+  @@index([createdAt])
 }
