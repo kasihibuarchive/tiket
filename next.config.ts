@@ -42,6 +42,18 @@ const nextConfig: NextConfig = {
     'class-variance-authority',
   ],
   serverExternalPackages: ['@prisma/client', '@prisma/engines'],
+  // Disable webpack module concatenation to prevent TDZ errors from
+  // circular dependencies (e.g. recharts ChartUtils ↔ getLegendProps).
+  // "Cannot access 'K' before initialization" is caused by webpack inlining
+  // circular-dependent modules into a single scope where const/let variables
+  // are referenced before their declaration.
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.optimization = config.optimization || {};
+      config.optimization.concatenateModules = false;
+    }
+    return config;
+  },
 };
 
 export default nextConfig;
