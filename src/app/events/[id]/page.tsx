@@ -18,7 +18,7 @@ import {
   Crown, User, GraduationCap, Loader2, AlertTriangle, ShieldCheck, Play,
   Star, Users, MessageSquareQuote,
 } from 'lucide-react'
-import { useToast } from '@/hooks/use-toast'
+
 
 interface EventData {
   id: string
@@ -141,6 +141,33 @@ export default function EventDetailPage() {
     return () => { cancelled = true }
   }, [eventId])
 
+  // Show dates with fallback — MUST be declared before the useEffect that references activeShowDate
+  const showDates = useMemo(() =>
+    event?.showDates && event.showDates.length > 0
+      ? event.showDates
+      : [{ id: null, date: event?.showDate, openGate: event?.openGate, label: null }],
+    [event]
+  )
+
+  const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
+
+  // Parse cast & reviews data
+  const castMembers = useMemo(() => {
+    if (!event?.castData) return []
+    try {
+      const parsed = JSON.parse(event.castData)
+      return Array.isArray(parsed) ? parsed : []
+    } catch { return [] }
+  }, [event?.castData])
+
+  const reviews = useMemo(() => {
+    if (!event?.reviewsData) return []
+    try {
+      const parsed = JSON.parse(event.reviewsData)
+      return Array.isArray(parsed) ? parsed : []
+    } catch { return [] }
+  }, [event?.reviewsData])
+
   // Countdown timer to next show date
   useEffect(() => {
     if (!event) return
@@ -167,33 +194,6 @@ export default function EventDetailPage() {
     countdownRef.current = setInterval(calcCountdown, 1000)
     return () => { if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null } }
   }, [event, activeShowDate?.date])
-
-  // Parse cast & reviews data
-  const castMembers = useMemo(() => {
-    if (!event?.castData) return []
-    try {
-      const parsed = JSON.parse(event.castData)
-      return Array.isArray(parsed) ? parsed : []
-    } catch { return [] }
-  }, [event?.castData])
-
-  const reviews = useMemo(() => {
-    if (!event?.reviewsData) return []
-    try {
-      const parsed = JSON.parse(event.reviewsData)
-      return Array.isArray(parsed) ? parsed : []
-    } catch { return [] }
-  }, [event?.reviewsData])
-
-  // Show dates with fallback
-  const showDates = useMemo(() =>
-    event?.showDates && event.showDates.length > 0
-      ? event.showDates
-      : [{ id: null, date: event?.showDate, openGate: event?.openGate, label: null }],
-    [event]
-  )
-
-  const activeShowDate = showDates[selectedShowDateIdx] || showDates[0]
 
   // Fetch seats filtered by active show date — runs on mount AND when show date changes.
   // This is the ONLY place seats are fetched (no separate initial fetch),
