@@ -21,8 +21,8 @@ export async function GET(request: NextRequest) {
 
       const eventIds = events.map((e) => e.id)
 
-      // Run all 3 queries in parallel
-      const [allPriceCategories, allSeats, allShowDates] = await Promise.all([
+      // Run all 4 queries in parallel (added review stats)
+      const [allPriceCategories, allSeats, allShowDates, reviewStats] = await Promise.all([
         db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
         db.seat.groupBy({
           by: ['eventId', 'status'],
@@ -33,7 +33,17 @@ export async function GET(request: NextRequest) {
           where: { eventId: { in: eventIds } },
           orderBy: { date: 'asc' },
         }),
+        // Review stats for completed events
+        db.review.groupBy({
+          by: ['eventId'],
+          where: { eventId: { in: eventIds } },
+          _avg: { rating: true },
+          _count: { id: true },
+        }),
       ])
+
+      // Build a lookup map for review stats
+      const reviewMap = new Map(reviewStats.map(r => [r.eventId, { average: r._avg.rating, total: r._count.id }]))
 
       return events.map((event) => {
         const eventPriceCats = allPriceCategories.filter((pc) => pc.eventId === event.id)
@@ -42,6 +52,8 @@ export async function GET(request: NextRequest) {
         const totalSeats = eventSeats.reduce((sum, s) => sum + s._count.status, 0)
         const availableSeats = eventSeats.find((s) => s.status === 'AVAILABLE')?._count.status ?? 0
         const soldSeats = eventSeats.find((s) => s.status === 'SOLD')?._count.status ?? 0
+
+        const rvStats = reviewMap.get(event.id)
 
         return {
           id: event.id,
@@ -60,6 +72,9 @@ export async function GET(request: NextRequest) {
           priceCategories: eventPriceCats,
           showDates: eventShowDates,
           seatSummary: { total: totalSeats, available: availableSeats, sold: soldSeats },
+          reviewStats: rvStats
+            ? { average: Math.round(rvStats.average! * 10) / 10, total: rvStats.total }
+            : { average: 0, total: 0 },
         }
       })
     })

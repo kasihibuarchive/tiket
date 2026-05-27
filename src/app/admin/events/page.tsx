@@ -47,6 +47,7 @@ interface EventData {
   teaserVideoUrl?: string | null
   adminFee?: number
   seatType?: string | null
+  reviewStats?: { total: number; average: number }
 }
 
 interface SeatMapOption {
@@ -580,6 +581,12 @@ export default function AdminEventsPage() {
                           <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-700">
                             <CheckCircle2 className="w-3 h-3 mr-1" />
                             Selesai
+                          </Badge>
+                        )}
+                        {event.isCompleted && event.reviewStats && event.reviewStats.total > 0 && (
+                          <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+                            <Star className="w-3 h-3 mr-1" />
+                            {event.reviewStats.average} ({event.reviewStats.total})
                           </Badge>
                         )}
                       </div>

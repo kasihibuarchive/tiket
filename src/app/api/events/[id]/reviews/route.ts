@@ -64,7 +64,13 @@ export async function POST(
   try {
     const { id } = await params
     const body = await request.json()
-    const { authorName, rating, comment } = body
+    const { authorName, rating, comment, _hp } = body
+
+    // Honeypot check — if _hp is filled, it's a bot submission
+    if (_hp) {
+      // Silently accept but don't save (bots think it succeeded)
+      return NextResponse.json({ review: { id: 'honeypot' } }, { status: 201 })
+    }
 
     // Validation
     if (!authorName || typeof authorName !== 'string' || !authorName.trim()) {

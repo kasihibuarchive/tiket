@@ -147,7 +147,8 @@ export default function EventDetailPage() {
   // Review state
   const [reviews, setReviews] = useState<ReviewData[]>([])
   const [reviewStats, setReviewStats] = useState<{ average: number; total: number; distribution: Record<number, number> } | null>(null)
-  const [reviewForm, setReviewForm] = useState({ authorName: '', rating: 5, comment: '' })
+  const [reviewForm, setReviewForm] = useState({ authorName: '', rating: 5, comment: '', _hp: '' }) // _hp = honeypot
+  const [reviewSort, setReviewSort] = useState<'newest' | 'highest' | 'lowest'>('newest')
   const [isSubmittingReview, setIsSubmittingReview] = useState(false)
   const [reviewSubmitted, setReviewSubmitted] = useState(false)
   const [reviewError, setReviewError] = useState<string | null>(null)
@@ -311,9 +312,28 @@ export default function EventDetailPage() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
+  // ─── Sorted reviews ──────────────────────────────────────────────
+  const sortedReviews = useMemo(() => {
+    const sorted = [...reviews]
+    switch (reviewSort) {
+      case 'highest':
+        sorted.sort((a, b) => b.rating - a.rating)
+        break
+      case 'lowest':
+        sorted.sort((a, b) => a.rating - b.rating)
+        break
+      case 'newest':
+      default:
+        sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    }
+    return sorted
+  }, [reviews, reviewSort])
+
   // ─── Review submission handler ──────────────────────────────────────
   async function handleSubmitReview(e: React.FormEvent) {
     e.preventDefault()
+    // Honeypot check — if filled, it's a bot
+    if (reviewForm._hp) return
     if (!reviewForm.authorName.trim() || !reviewForm.comment.trim()) return
 
     setIsSubmittingReview(true)
@@ -326,7 +346,7 @@ export default function EventDetailPage() {
       })
       if (res.ok) {
         setReviewSubmitted(true)
-        setReviewForm({ authorName: '', rating: 5, comment: '' })
+        setReviewForm({ authorName: '', rating: 5, comment: '', _hp: '' })
       } else {
         const data = await res.json()
         setReviewError(data.error || 'Gagal mengirim review')
@@ -752,6 +772,17 @@ export default function EventDetailPage() {
                   </div>
                 ) : (
                   <form onSubmit={handleSubmitReview} className="space-y-4">
+                    {/* Honeypot — hidden from humans, bots will fill this */}
+                    <input
+                      type="text"
+                      name="website"
+                      value={reviewForm._hp}
+                      onChange={(e) => setReviewForm({ ...reviewForm, _hp: e.target.value })}
+                      tabIndex={-1}
+                      autoComplete="off"
+                      aria-hidden="true"
+                      className="absolute opacity-0 h-0 w-0 overflow-hidden pointer-events-none"
+                    />
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
                         <label className="text-sm font-medium text-charcoal mb-1 block">Nama *</label>
@@ -806,8 +837,35 @@ export default function EventDetailPage() {
 
               {/* Reviews List */}
               {reviews.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                  {reviews.map((review) => (
+                <>
+                  {/* Sort controls */}
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-sm text-muted-foreground">{reviews.length} review</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-muted-foreground mr-1">Urutkan:</span>
+                      {([
+                        { key: 'newest', label: 'Terbaru' },
+                        { key: 'highest', label: 'Rating Tertinggi' },
+                        { key: 'lowest', label: 'Rating Terendah' },
+                      ] as const).map(({ key, label }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setReviewSort(key)}
+                          className={cn(
+                            'px-2.5 py-1 rounded-full text-xs font-medium transition-all',
+                            reviewSort === key
+                              ? 'bg-charcoal text-gold'
+                              : 'bg-charcoal/5 text-charcoal/60 hover:bg-charcoal/10'
+                          )}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                    {sortedReviews.map((review) => (
                     <div
                       key={review.id}
                       className="bg-white border border-charcoal/10 rounded-xl p-5 hover:shadow-md transition-shadow"
@@ -830,6 +888,7 @@ export default function EventDetailPage() {
                     </div>
                   ))}
                 </div>
+                </>
               ) : (
                 <div className="text-center py-8 bg-white rounded-xl border border-charcoal/10">
                   <MessageSquareQuote className="w-10 h-10 text-charcoal/20 mx-auto mb-3" />

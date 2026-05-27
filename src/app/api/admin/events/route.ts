@@ -21,7 +21,7 @@ export async function GET() {
       const eventIds = events.map((e) => e.id)
 
       // Run all queries in parallel for performance
-      const [allPriceCategories, allSeats, allShowDates, seatMaps] = await Promise.all([
+      const [allPriceCategories, allSeats, allShowDates, seatMaps, reviewCounts] = await Promise.all([
         db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
         db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } }),
         db.eventShowDate.findMany({
@@ -34,9 +34,17 @@ export async function GET() {
             ? db.seatMap.findMany({ where: { id: { in: seatMapIds } }, select: { id: true, name: true, seatType: true } })
             : Promise.resolve([])
         })(),
+        // Review counts per event
+        db.review.groupBy({
+          by: ['eventId'],
+          where: { eventId: { in: eventIds } },
+          _count: { id: true },
+          _avg: { rating: true },
+        }),
       ])
 
       const seatMapMap = new Map(seatMaps.map((sm) => [sm.id, sm]))
+      const reviewCountMap = new Map(reviewCounts.map(r => [r.eventId, { total: r._count.id, average: r._avg.rating }]))
 
       return events.map((event) => {
         const eventSeats = allSeats.filter((s) => s.eventId === event.id)
@@ -46,6 +54,7 @@ export async function GET() {
         const availableSeats = eventSeats.filter((s) => s.status === 'AVAILABLE').length
         const soldSeats = eventSeats.filter((s) => s.status === 'SOLD').length
         const linkedSeatMap = event.seatMapId ? seatMapMap.get(event.seatMapId) : null
+        const rvStats = reviewCountMap.get(event.id)
 
         return {
           ...event,
@@ -57,6 +66,9 @@ export async function GET() {
             sold: soldSeats,
           },
           seatMapInfo: linkedSeatMap ? { name: linkedSeatMap.name, seatType: linkedSeatMap.seatType } : null,
+          reviewStats: rvStats
+            ? { total: rvStats.total, average: Math.round(rvStats.average! * 10) / 10 }
+            : { total: 0, average: 0 },
         }
       })
     })

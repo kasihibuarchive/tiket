@@ -19,6 +19,7 @@ interface EventCardProps {
   seatSummary: { total: number; available: number; sold: number }
   isPublished?: boolean
   isCompleted?: boolean
+  reviewStats?: { average: number; total: number }
 }
 
 export function EventCard({
@@ -33,6 +34,7 @@ export function EventCard({
   seatSummary,
   isPublished = true,
   isCompleted = false,
+  reviewStats,
 }: EventCardProps) {
   const dateStr = formatEventDate(showDate)
   const timeStr = formatEventTime(showDate)
@@ -147,11 +149,22 @@ export function EventCard({
             </div>
           )}
 
+          {/* Review stats for completed events */}
+          {isCompleted && reviewStats && reviewStats.total > 0 && (
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-0.5">
+                <Star className="w-4 h-4 text-gold fill-gold" />
+                <span className="text-sm font-semibold text-charcoal">{reviewStats.average}</span>
+              </div>
+              <span className="text-xs text-muted-foreground">({reviewStats.total} review)</span>
+            </div>
+          )}
+
           {/* CTA */}
           {isCompleted ? (
             <Button className="w-full bg-charcoal hover:bg-charcoal/90 text-gold text-sm font-medium">
               <Star className="w-4 h-4 mr-2" />
-              Beri Review
+              Lihat & Beri Review
             </Button>
           ) : !isPublished ? (
             <p className="text-xs text-muted-foreground italic">Belum dipublikasi</p>
