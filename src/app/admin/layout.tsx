@@ -221,7 +221,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="p-4 border-b border-white/10">
           <div className="flex items-center justify-between">
             <Link href="/admin/dashboard" className="flex items-center gap-2">
-              <Image src="/teateran-logo.png" alt="Teateran" width={24} height={24} className="rounded" />
+              <Image src="/teateran-logo-white.png" alt="Teateran" width={24} height={24} className="rounded" />
               <span className="font-serif text-sm font-semibold">
                 {panelLabel} <span className="text-gold">PANEL</span>
               </span>

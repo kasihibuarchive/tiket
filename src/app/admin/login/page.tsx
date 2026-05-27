@@ -97,7 +97,7 @@ export default function AdminLoginPage() {
         {/* Logo */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-charcoal mb-4 overflow-hidden">
-            <Image src="/teateran-logo.png" alt="Teateran" width={48} height={48} className="rounded" />
+            <Image src="/teateran-logo-white.png" alt="Teateran" width={48} height={48} className="rounded" />
           </div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">
             Teateran

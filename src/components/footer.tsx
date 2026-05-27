@@ -9,7 +9,7 @@ export function Footer() {
           {/* Brand */}
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <Image src="/teateran-logo.png" alt="Teateran" width={24} height={24} className="rounded" />
+              <Image src="/teateran-logo-white.png" alt="Teateran" width={24} height={24} className="rounded" />
               <span className="font-serif text-lg font-semibold text-white">
                 TEATERAN
               </span>

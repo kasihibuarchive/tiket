@@ -29,7 +29,7 @@ export default function TentangPage() {
             <div className="bg-white rounded-xl p-6 border border-border/50">
               <div className="flex items-center gap-3 mb-4">
                 <div className="w-12 h-12 rounded-xl bg-charcoal flex items-center justify-center flex-shrink-0">
-                  <Image src="/teateran-logo.png" alt="Teateran" width={28} height={28} className="rounded" />
+                  <Image src="/teateran-logo-white.png" alt="Teateran" width={28} height={28} className="rounded" />
                 </div>
                 <div>
                   <h2 className="font-serif text-lg font-semibold text-charcoal">Teateran</h2>
