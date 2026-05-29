@@ -4,8 +4,19 @@ import Image from 'next/image'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Tentang Kami - Teateran',
-  description: 'Pelajari tentang Teateran, platform tiket resmi untuk pertunjukan teater terbaik di Indonesia.',
+  title: 'Tentang Kami',
+  description: 'Pelajari tentang Teateran, platform tiket resmi untuk pertunjukan teater terbaik di Indonesia. Didirikan oleh YC Media untuk memajukan industri seni pertunjukan.',
+  alternates: {
+    canonical: 'https://www.teateran.site/tentang',
+  },
+  openGraph: {
+    title: 'Tentang Kami - Teateran',
+    description: 'Pelajari tentang Teateran, platform tiket resmi untuk pertunjukan teater terbaik di Indonesia.',
+    url: 'https://www.teateran.site/tentang',
+    siteName: 'Teateran',
+    locale: 'id_ID',
+    type: 'website',
+  },
 }
 
 export default function TentangPage() {

@@ -3,8 +3,19 @@ import { Footer } from '@/components/footer'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Kebijakan Privasi - Teateran',
+  title: 'Kebijakan Privasi',
   description: 'Kebijakan privasi resmi platform Teateran. Pelajari bagaimana kami mengelola dan melindungi data pribadi Anda.',
+  alternates: {
+    canonical: 'https://www.teateran.site/kebijakan-privasi',
+  },
+  openGraph: {
+    title: 'Kebijakan Privasi - Teateran',
+    description: 'Kebijakan privasi resmi platform Teateran. Pelajari bagaimana kami mengelola dan melindungi data pribadi Anda.',
+    url: 'https://www.teateran.site/kebijakan-privasi',
+    siteName: 'Teateran',
+    locale: 'id_ID',
+    type: 'website',
+  },
 }
 
 export default function KebijakanPrivasiPage() {

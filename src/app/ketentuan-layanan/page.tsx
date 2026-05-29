@@ -3,8 +3,19 @@ import { Footer } from '@/components/footer'
 import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
-  title: 'Ketentuan Layanan - Teateran',
+  title: 'Ketentuan Layanan',
   description: 'Ketentuan layanan resmi platform Teateran. Syarat dan ketentuan penggunaan platform tiket teater.',
+  alternates: {
+    canonical: 'https://www.teateran.site/ketentuan-layanan',
+  },
+  openGraph: {
+    title: 'Ketentuan Layanan - Teateran',
+    description: 'Ketentuan layanan resmi platform Teateran. Syarat dan ketentuan penggunaan platform tiket teater.',
+    url: 'https://www.teateran.site/ketentuan-layanan',
+    siteName: 'Teateran',
+    locale: 'id_ID',
+    type: 'website',
+  },
 }
 
 export default function KetentuanLayananPage() {
