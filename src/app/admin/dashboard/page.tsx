@@ -121,22 +121,56 @@ export default function AdminDashboard() {
 
   const isNet = viewMode === 'net'
 
-  const statCards = [
+  // Toggle logic: Kotor = show both Kotor + Bersih. Bersih = hide Kotor & Admin.
+  const statCards = isNet ? [
     {
-      label: isNet ? 'Pendapatan Bersih' : 'Pendapatan Kotor',
-      value: fmt(isNet ? data.totalNetRevenue : data.totalGrossRevenue),
-      icon: isNet ? TrendingUp : CircleDollarSign,
-      color: isNet ? 'text-emerald-600' : 'text-gold',
-      bg: isNet ? 'bg-emerald-50' : 'bg-gold/10',
-      sub: isNet ? 'Setelah biaya admin' : `${data.totalTransactions} transaksi`,
+      label: 'Pendapatan Bersih',
+      value: fmt(data.totalNetRevenue),
+      icon: TrendingUp,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+      sub: 'Setelah biaya admin dipotong',
     },
     {
-      label: isNet ? 'Tiket (Bersih)' : 'Tiket (Kotor)',
-      value: fmt(isNet ? data.totalTicketRevenue : data.totalTicketRevenue),
+      label: 'Tiket',
+      value: fmt(data.totalTicketRevenue),
       icon: Ticket,
       color: 'text-charcoal',
       bg: 'bg-charcoal/5',
       sub: `${data.totalTickets} tiket terjual`,
+    },
+    {
+      label: 'Merchandise',
+      value: fmt(data.totalMerchRevenue),
+      icon: ShoppingBag,
+      color: 'text-purple-600',
+      bg: 'bg-purple-50',
+      sub: 'Pendapatan merch',
+    },
+    {
+      label: 'Diskon',
+      value: fmt(data.totalDiscountGiven || 0),
+      icon: CircleDollarSign,
+      color: 'text-blue-500',
+      bg: 'bg-blue-50',
+      sub: 'Dari promo code',
+    },
+  ] : [
+    {
+      label: 'Pendapatan Kotor',
+      value: fmt(data.totalGrossRevenue),
+      icon: CircleDollarSign,
+      color: 'text-gold',
+      bg: 'bg-gold/10',
+      sub: `${data.totalTransactions} transaksi`,
+    },
+    {
+      label: 'Pendapatan Bersih',
+      value: fmt(data.totalNetRevenue),
+      icon: TrendingUp,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-50',
+      sub: 'Kotor − Biaya Admin',
     },
     {
       label: 'Biaya Admin',
@@ -144,7 +178,7 @@ export default function AdminDashboard() {
       icon: Receipt,
       color: 'text-orange-500',
       bg: 'bg-orange-50',
-      sub: isNet ? 'Dipotong dari kotor' : 'Potongan ke bersih',
+      sub: 'Potongan ke bersih',
     },
     {
       label: 'Merchandise',
@@ -198,19 +232,18 @@ export default function AdminDashboard() {
       </div>
 
       {/* ── View Mode Indicator ── */}
-      {isNet && (
+      {isNet ? (
         <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/50 rounded-lg px-4 py-2">
           <TrendingUp className="w-4 h-4 text-emerald-600" />
           <p className="text-xs text-emerald-700">
-            <span className="font-semibold">Mode Bersih</span> — Pendapatan setelah dipotong biaya admin gateway pembayaran. Angka ini yang masuk ke rekeningmu.
+            <span className="font-semibold">Mode Bersih</span> — Hanya menampilkan pendapatan yang masuk rekening. Biaya admin &amp; angka kotor disembunyikan karena sudah tidak relevan.
           </p>
         </div>
-      )}
-      {!isNet && (
+      ) : (
         <div className="flex items-center gap-2 bg-gold/5 border border-gold/20 rounded-lg px-4 py-2">
           <CircleDollarSign className="w-4 h-4 text-gold" />
           <p className="text-xs text-charcoal/70">
-            <span className="font-semibold text-charcoal">Mode Kotor</span> — Total uang masuk sebelum dipotong biaya admin. Angka ini yang terlihat oleh pembeli.
+            <span className="font-semibold text-charcoal">Mode Kotor</span> — Total uang masuk. Kolom Bersih ditampilkan untuk melihat perbandingan.
           </p>
         </div>
       )}
@@ -297,8 +330,9 @@ export default function AdminDashboard() {
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Event</th>
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Pembeli</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Tiket</th>
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">{isNet ? 'Bersih' : 'Total'}</th>
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Total</th>}
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">{isNet ? 'Bersih' : 'Bersih'}</th>
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>}
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Metode</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Check-In</th>
                     <th className="text-right py-2 px-2 text-muted-foreground font-medium">Tgl Bayar</th>
@@ -311,10 +345,11 @@ export default function AdminDashboard() {
                       <td className="py-2 px-2 text-charcoal max-w-[120px] truncate">{tx.eventTitle}</td>
                       <td className="py-2 px-2 text-charcoal">{tx.customerName}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{tx.seatCount}</td>
-                      <td className={`py-2 px-2 text-right font-semibold ${isNet ? 'text-emerald-600' : 'text-charcoal'}`}>
-                        {fmt(isNet ? tx.netAmount : tx.totalAmount)}
+                      {!isNet && <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(tx.totalAmount)}</td>}
+                      <td className={`py-2 px-2 text-right font-semibold ${isNet ? 'text-emerald-600' : 'text-emerald-600'}`}>
+                        {fmt(tx.netAmount)}
                       </td>
-                      <td className="py-2 px-2 text-right text-orange-500">{fmt(tx.adminFeeApplied)}</td>
+                      {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(tx.adminFeeApplied)}</td>}
                       <td className="py-2 px-2">
                         <Badge variant="secondary" className="text-[9px]">
                           {PAYMENT_LABELS[tx.paymentMethod || ''] || tx.paymentMethod || '-'}

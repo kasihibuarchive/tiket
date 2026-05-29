@@ -1,8 +1,9 @@
 'use client'
 
+import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Ticket, CreditCard, ChevronDown, ChevronUp, TrendingUp, CircleDollarSign } from 'lucide-react'
+import { Ticket, CreditCard, ChevronDown, ChevronUp, TrendingUp, CircleDollarSign, ExternalLink } from 'lucide-react'
 import {
   ChartContainer,
   ChartTooltip,
@@ -144,18 +145,20 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent, viewMode }
               </div>
             </CardContent>
           </Card>
-          <Card className="border-border/50">
-            <CardContent className="p-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-orange-50">
-                <Ticket className="w-4 h-4 text-orange-500" />
-              </div>
-              <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
-                <p className="text-sm font-bold text-charcoal">{fmt(data.totalAdminFee)}</p>
-                <p className="text-[9px] text-orange-400">{isNet ? '↓ Dikurangi' : 'Potongan bersih'}</p>
-              </div>
-            </CardContent>
-          </Card>
+          {!isNet && (
+            <Card className="border-border/50">
+              <CardContent className="p-4 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-orange-50">
+                  <Ticket className="w-4 h-4 text-orange-500" />
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
+                  <p className="text-sm font-bold text-charcoal">{fmt(data.totalAdminFee)}</p>
+                  <p className="text-[9px] text-orange-400">Potongan bersih</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Ticket Category Pie Chart */}
@@ -453,41 +456,42 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent, viewMode }
                 const displayRevenue = isNet ? ev.netRevenue : ev.grossRevenue
                 return (
                   <div key={ev.eventId} className={`border rounded-lg overflow-hidden transition-colors ${isNet ? 'border-emerald-200/50' : 'border-border/50'}`}>
-                    <button
-                      onClick={() => onToggleEvent(ev.eventId)}
-                      className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors text-left"
-                    >
-                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors">
+                      <Link href={`/admin/events/${ev.eventId}/finance`} className="flex items-center gap-3 min-w-0 flex-1 group">
                         <div className={`w-2 h-2 rounded-full flex-shrink-0 ${ev.isPublished ? 'bg-emerald-500' : 'bg-gray-300'}`} />
                         <div className="min-w-0">
-                          <p className="text-sm font-semibold text-charcoal truncate">{ev.eventTitle}</p>
+                          <p className="text-sm font-semibold text-charcoal truncate group-hover:text-gold transition-colors">{ev.eventTitle}</p>
                           <p className="text-[10px] text-muted-foreground">
                             {ev.showDate ? new Date(ev.showDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : 'No date'}
                             {' · '}{ev.ticketCount} tiket · {ev.transactionCount} transaksi
+                            {' · '}<span className="text-gold">Lihat Laporan →</span>
                           </p>
                         </div>
-                      </div>
+                      </Link>
                       <div className="flex items-center gap-4 flex-shrink-0">
-                        <div className="text-right">
-                          <p className="text-[10px] text-muted-foreground">Kotor</p>
-                          <p className={`text-sm font-bold ${!isNet ? 'text-charcoal' : 'text-charcoal/50'}`}>{fmt(ev.grossRevenue)}</p>
-                        </div>
+                        {!isNet && (
+                          <div className="text-right">
+                            <p className="text-[10px] text-muted-foreground">Kotor</p>
+                            <p className="text-sm font-bold text-charcoal">{fmt(ev.grossRevenue)}</p>
+                          </div>
+                        )}
                         <div className="text-right">
                           <p className="text-[10px] text-emerald-600">Bersih</p>
-                          <p className={`text-sm font-bold ${isNet ? 'text-emerald-600' : 'text-emerald-600/50'}`}>{fmt(ev.netRevenue)}</p>
+                          <p className="text-sm font-bold text-emerald-600">{fmt(ev.netRevenue)}</p>
                         </div>
-                        {isExpanded ? (
-                          <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                        ) : (
-                          <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                        )}
+                        <button onClick={() => onToggleEvent(ev.eventId)} className="p-1 hover:bg-muted rounded">
+                          {isExpanded ? (
+                            <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                          )}
+                        </button>
                       </div>
-                    </button>
+                    </div>
 
                     {isExpanded && (
                       <div className={`px-4 pb-4 pt-1 border-t ${isNet ? 'border-emerald-200/30 bg-emerald-50/30' : 'border-border/30 bg-muted/10'}`}>
-                        {/* Detailed breakdown */}
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
                           <div className="space-y-0.5">
                             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket</p>
                             <p className="text-sm font-semibold text-charcoal">{fmt(ev.ticketRevenue)}</p>
@@ -497,16 +501,13 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent, viewMode }
                             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Merchandise</p>
                             <p className="text-sm font-semibold text-charcoal">{fmt(ev.merchRevenue)}</p>
                           </div>
-                          <div className="space-y-0.5">
-                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
-                            <p className="text-sm font-semibold text-orange-500">{fmt(ev.adminFeeRevenue)}</p>
-                            <p className="text-[10px] text-orange-400">Potongan dari bersih</p>
-                          </div>
-                          <div className="space-y-0.5">
-                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Diskon</p>
-                            <p className="text-sm font-semibold text-blue-500">{fmt(ev.discountGiven)}</p>
-                            <p className="text-[10px] text-blue-400">Dari promo code</p>
-                          </div>
+                          {!isNet && (
+                            <div className="space-y-0.5">
+                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
+                              <p className="text-sm font-semibold text-orange-500">{fmt(ev.adminFeeRevenue)}</p>
+                              <p className="text-[10px] text-orange-400">Potongan dari bersih</p>
+                            </div>
+                          )}
                           <div className="space-y-0.5">
                             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Check-In</p>
                             <p className="text-sm font-semibold text-emerald-600">{ev.checkedIn || 0}</p>
@@ -514,37 +515,63 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent, viewMode }
                           </div>
                         </div>
 
-                        {/* Gross vs Net comparison */}
-                        <div className="mt-3 pt-3 border-t border-border/30 grid grid-cols-2 gap-3">
-                          <div className={`rounded-lg p-3 border ${isNet ? 'bg-white border-border/30' : 'bg-white border-border/30 ring-1 ring-gold/20'}`}>
-                            <div className="flex items-center gap-2 mb-1">
-                              <CircleDollarSign className="w-3 h-3 text-gold" />
-                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Pendapatan Kotor</p>
+                        {/* Gross vs Net — only show both in Kotor mode */}
+                        {!isNet && (
+                          <div className="mt-3 pt-3 border-t border-border/30 grid grid-cols-2 gap-3">
+                            <div className="bg-white rounded-lg p-3 border border-border/30 ring-1 ring-gold/20">
+                              <div className="flex items-center gap-2 mb-1">
+                                <CircleDollarSign className="w-3 h-3 text-gold" />
+                                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Pendapatan Kotor</p>
+                              </div>
+                              <p className="text-base font-bold text-charcoal">{fmt(ev.grossRevenue)}</p>
+                              <p className="text-[10px] text-muted-foreground">Total uang masuk</p>
                             </div>
-                            <p className="text-base font-bold text-charcoal">{fmt(ev.grossRevenue)}</p>
-                            <p className="text-[10px] text-muted-foreground">Total uang masuk</p>
-                          </div>
-                          <div className={`rounded-lg p-3 border ${isNet ? 'bg-emerald-50 border-emerald-200/30 ring-1 ring-emerald-300/30' : 'bg-emerald-50 border-emerald-200/30'}`}>
-                            <div className="flex items-center gap-2 mb-1">
-                              <TrendingUp className="w-3 h-3 text-emerald-600" />
-                              <p className="text-[10px] uppercase tracking-wider text-emerald-600">Pendapatan Bersih</p>
+                            <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200/30">
+                              <div className="flex items-center gap-2 mb-1">
+                                <TrendingUp className="w-3 h-3 text-emerald-600" />
+                                <p className="text-[10px] uppercase tracking-wider text-emerald-600">Pendapatan Bersih</p>
+                              </div>
+                              <p className="text-base font-bold text-emerald-600">{fmt(ev.netRevenue)}</p>
+                              <p className="text-[10px] text-emerald-500">Kotor − Admin ({fmt(ev.adminFeeRevenue)})</p>
                             </div>
-                            <p className="text-base font-bold text-emerald-600">{fmt(ev.netRevenue)}</p>
-                            <p className="text-[10px] text-emerald-500">Kotor − Biaya Admin ({fmt(ev.adminFeeRevenue)})</p>
                           </div>
-                        </div>
+                        )}
 
-                        {/* Admin fee percentage */}
-                        <div className="mt-3 flex items-center gap-3 text-xs">
-                          <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-emerald-500 rounded-full transition-all"
-                              style={{ width: `${ev.grossRevenue > 0 ? ((ev.netRevenue / ev.grossRevenue) * 100) : 100}%` }}
-                            />
+                        {/* Bersih mode — only show net with percentage */}
+                        {isNet && (
+                          <div className="mt-3 pt-3 border-t border-emerald-200/30">
+                            <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200/30">
+                              <div className="flex items-center gap-2 mb-1">
+                                <TrendingUp className="w-3 h-3 text-emerald-600" />
+                                <p className="text-[10px] uppercase tracking-wider text-emerald-600">Pendapatan Bersih</p>
+                              </div>
+                              <p className="text-base font-bold text-emerald-600">{fmt(ev.netRevenue)}</p>
+                              <p className="text-[10px] text-emerald-500">Yang masuk ke rekening</p>
+                            </div>
                           </div>
-                          <span className="text-muted-foreground flex-shrink-0">
-                            {ev.grossRevenue > 0 ? Math.round((ev.netRevenue / ev.grossRevenue) * 100) : 100}% masuk rekening
-                          </span>
+                        )}
+
+                        {/* Admin fee percentage — only in Kotor mode */}
+                        {!isNet && (
+                          <div className="mt-3 flex items-center gap-3 text-xs">
+                            <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-emerald-500 rounded-full transition-all"
+                                style={{ width: `${ev.grossRevenue > 0 ? ((ev.netRevenue / ev.grossRevenue) * 100) : 100}%` }}
+                              />
+                            </div>
+                            <span className="text-muted-foreground flex-shrink-0">
+                              {ev.grossRevenue > 0 ? Math.round((ev.netRevenue / ev.grossRevenue) * 100) : 100}% masuk rekening
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Link to full report */}
+                        <div className="mt-3 pt-3 border-t border-border/20">
+                          <Link href={`/admin/events/${ev.eventId}/finance`} className="inline-flex items-center gap-1.5 text-xs font-semibold text-gold hover:text-gold-light transition-colors">
+                            <ExternalLink className="w-3 h-3" />
+                            Buka Laporan Lengkap
+                          </Link>
                         </div>
                       </div>
                     )}
