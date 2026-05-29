@@ -94,6 +94,7 @@ model Event {
 
   // Relations
   reviews         Review[]
+  shortLinks      ShortLink[]
 }
 
 // =====================
@@ -388,4 +389,24 @@ model Review {
   @@index([eventId])
   @@index([rating])
   @@index([createdAt])
+}
+
+// =====================
+// SHORT LINK MODEL (Custom short URLs for events)
+// =====================
+model ShortLink {
+  id          String   @id @default(cuid())
+  slug        String   @unique // Custom slug, e.g. "tajoc" → teateran.site/tajoc
+  eventId     String   // Target event ID
+  createdBy   String?  // Admin name who created this link
+  clickCount  Int      @default(0) // Track how many times the link was clicked
+  isActive    Boolean  @default(true) // Can be deactivated without deleting
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([slug])
+  @@index([eventId])
 }

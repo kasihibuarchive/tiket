@@ -13,6 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
 import {
   Loader2, Save, ArrowLeft, Users, Star, Plus, Trash2, Edit, X, Check, MessageSquareQuote,
+  Link2, Copy, ExternalLink, MousePointerClick,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -239,6 +240,199 @@ function StarRating({
         </button>
       ))}
     </div>
+  )
+}
+
+// ─── Short Links Card ──────────────────────────────────────────────
+
+interface ShortLinkData {
+  id: string
+  slug: string
+  clickCount: number
+  isActive: boolean
+  createdAt: string
+  event: { id: string; title: string }
+}
+
+function ShortLinksCard({ eventId }: { eventId: string }) {
+  const [shortLinks, setShortLinks] = useState<ShortLinkData[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [newSlug, setNewSlug] = useState('')
+  const [isCreating, setIsCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [copiedSlug, setCopiedSlug] = useState<string | null>(null)
+
+  useEffect(() => {
+    fetchShortLinks()
+  }, [eventId])
+
+  async function fetchShortLinks() {
+    try {
+      const res = await fetch(`/api/admin/short-links?eventId=${eventId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setShortLinks(data.shortLinks || [])
+      }
+    } catch (err) {
+      console.error('Fetch short links error:', err)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function handleCreate() {
+    if (!newSlug.trim()) return
+    setIsCreating(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/admin/short-links', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slug: newSlug.trim(), eventId }),
+      })
+      if (res.ok) {
+        setNewSlug('')
+        fetchShortLinks()
+      } else {
+        const data = await res.json()
+        setError(data.error || 'Gagal membuat short link')
+      }
+    } catch {
+      setError('Terjadi kesalahan')
+    } finally {
+      setIsCreating(false)
+    }
+  }
+
+  async function handleDelete(id: string, slug: string) {
+    if (!confirm(`Hapus short link "${slug}"?`)) return
+    try {
+      const res = await fetch(`/api/admin/short-links/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        setShortLinks(shortLinks.filter((sl) => sl.id !== id))
+      }
+    } catch (err) {
+      console.error('Delete short link error:', err)
+    }
+  }
+
+  function handleCopy(slug: string) {
+    const url = `${window.location.origin}/${slug}`
+    navigator.clipboard.writeText(url)
+    setCopiedSlug(slug)
+    setTimeout(() => setCopiedSlug(null), 2000)
+  }
+
+  return (
+    <Card className="border-border/50">
+      <CardHeader className="pb-3">
+        <div className="flex items-center gap-2">
+          <Link2 className="w-5 h-5 text-gold" />
+          <CardTitle className="font-serif text-lg text-charcoal">Short Links</CardTitle>
+          <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+            {shortLinks.length} link
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Create new short link */}
+        <div className="border border-dashed border-border/60 rounded-lg p-4">
+          <p className="text-xs font-medium text-muted-foreground mb-3">Buat Short Link Baru</p>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-muted/50 border border-border/60 rounded-md px-3 h-9 text-sm text-muted-foreground shrink-0">
+              teateran.site/
+            </div>
+            <Input
+              value={newSlug}
+              onChange={(e) => {
+                setNewSlug(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 30))
+                setError(null)
+              }}
+              placeholder="tajoc"
+              className="h-9"
+              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+            />
+            <Button
+              onClick={handleCreate}
+              disabled={isCreating || !newSlug.trim()}
+              size="sm"
+              className="bg-gold hover:bg-gold/90 text-charcoal shrink-0"
+            >
+              {isCreating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />}
+              Buat
+            </Button>
+          </div>
+          {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+          <p className="text-xs text-muted-foreground/60 mt-2">
+            Hanya huruf, angka, strip (-), underscore (_). 2-30 karakter. Sekali pakai per event.
+          </p>
+        </div>
+
+        {/* List of existing short links */}
+        {isLoading ? (
+          <div className="flex justify-center py-4">
+            <Loader2 className="w-5 h-5 text-gold animate-spin" />
+          </div>
+        ) : shortLinks.length === 0 ? (
+          <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+            <Link2 className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Belum ada short link</p>
+            <p className="text-xs text-muted-foreground/60">Buat short link di atas untuk mempermudah berbagi</p>
+          </div>
+        ) : (
+          <div className="space-y-2 max-h-64 overflow-y-auto">
+            {shortLinks.map((sl) => (
+              <div
+                key={sl.id}
+                className="rounded-lg border border-border/60 p-3 bg-white flex items-center gap-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-charcoal">/{sl.slug}</span>
+                    <Badge variant="secondary" className="text-[10px] bg-gold/10 text-gold-dark px-1.5 py-0">
+                      <MousePointerClick className="w-2.5 h-2.5 mr-0.5" />
+                      {sl.clickCount}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground/60 mt-0.5">
+                    teateran.site/{sl.slug}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-muted-foreground hover:text-charcoal"
+                    onClick={() => handleCopy(sl.slug)}
+                    title="Copy link"
+                  >
+                    {copiedSlug === sl.slug ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  </Button>
+                  <a
+                    href={`/${sl.slug}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-charcoal hover:bg-accent"
+                    title="Buka link"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50"
+                    onClick={() => handleDelete(sl.id, sl.slug)}
+                    title="Hapus"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
 
@@ -979,6 +1173,9 @@ export default function AdminEventEditPage() {
 
       {/* ─── Guest Reviews Card (from Review model) ──────────────────── */}
       <GuestReviewsCard eventId={eventId} isCompleted={isCompleted} />
+
+      {/* ─── Short Links Card ─────────────────────────────────────── */}
+      <ShortLinksCard eventId={eventId} />
 
       {/* ─── Bottom Actions ──────────────────────────────────────── */}
       <div className="flex items-center justify-between pt-2 pb-8">
