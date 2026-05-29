@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Calendar, Plus, Ticket, ArrowRight,
   Wallet, ShoppingBag, Receipt, CircleDollarSign,
-  Clock, CreditCard,
+  Clock, CreditCard, TrendingDown, TrendingUp,
 } from 'lucide-react'
 
 // Load chart components dynamically with ssr: false to avoid recharts
@@ -26,6 +26,7 @@ interface RecentTransaction {
   customerEmail: string
   totalAmount: number
   adminFeeApplied: number
+  netAmount: number
   seatCount: number
   paymentMethod: string | null
   paidAt: string | null
@@ -46,17 +47,20 @@ interface DashboardData {
   totalTicketRevenue: number
   totalMerchRevenue: number
   totalAdminFee: number
+  totalDiscountGiven: number
   totalGrossRevenue: number
   totalNetRevenue: number
   checkInStats: { checkedIn: number; notCheckedIn: number; total: number }
-  categoryBreakdown: Array<{ id: string; name: string; color: string; count: number; revenue: number }>
+  categoryBreakdown: Array<{ id: string; name: string; color: string; count: number; revenue: number; netRevenue: number }>
   seatFunnel: { total: number; available: number; sold: number; invitation: number; locked: number; unavailable: number }
-  cumulativeTimeline: Array<{ date: string; revenue: number; tickets: number; transactions: number; cumulativeRevenue: number }>
+  cumulativeTimeline: Array<{ date: string; revenue: number; netRevenue: number; tickets: number; transactions: number; cumulativeRevenue: number; cumulativeNetRevenue: number }>
   eventBreakdown: any[]
   recentTransactions: RecentTransaction[]
-  revenueTimeline: { date: string; revenue: number; tickets: number }[]
-  paymentMethodStats: { method: string; count: number; revenue: number }[]
+  revenueTimeline: { date: string; revenue: number; netRevenue: number; tickets: number }[]
+  paymentMethodStats: { method: string; count: number; revenue: number; netRevenue: number }[]
 }
+
+type ViewMode = 'gross' | 'net'
 
 const fmt = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
 
@@ -79,6 +83,7 @@ export default function AdminDashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>('gross')
 
   useEffect(() => {
     async function fetchStats() {
@@ -114,28 +119,101 @@ export default function AdminDashboard() {
     )
   }
 
+  const isNet = viewMode === 'net'
+
   const statCards = [
-    { label: 'Pendapatan Kotor', value: fmt(data.totalGrossRevenue), icon: CircleDollarSign, color: 'text-gold', bg: 'bg-gold/10', sub: `${data.totalTransactions} transaksi` },
-    { label: 'Pendapatan Bersih', value: fmt(data.totalNetRevenue), icon: Wallet, color: 'text-emerald-600', bg: 'bg-emerald-50', sub: 'Setelah biaya admin' },
-    { label: 'Biaya Admin', value: fmt(data.totalAdminFee), icon: Receipt, color: 'text-orange-500', bg: 'bg-orange-50', sub: `${data.totalTickets} tiket terjual` },
-    { label: 'Merchandise', value: fmt(data.totalMerchRevenue), icon: ShoppingBag, color: 'text-purple-600', bg: 'bg-purple-50', sub: 'Pendapatan merch' },
+    {
+      label: isNet ? 'Pendapatan Bersih' : 'Pendapatan Kotor',
+      value: fmt(isNet ? data.totalNetRevenue : data.totalGrossRevenue),
+      icon: isNet ? TrendingUp : CircleDollarSign,
+      color: isNet ? 'text-emerald-600' : 'text-gold',
+      bg: isNet ? 'bg-emerald-50' : 'bg-gold/10',
+      sub: isNet ? 'Setelah biaya admin' : `${data.totalTransactions} transaksi`,
+    },
+    {
+      label: isNet ? 'Tiket (Bersih)' : 'Tiket (Kotor)',
+      value: fmt(isNet ? data.totalTicketRevenue : data.totalTicketRevenue),
+      icon: Ticket,
+      color: 'text-charcoal',
+      bg: 'bg-charcoal/5',
+      sub: `${data.totalTickets} tiket terjual`,
+    },
+    {
+      label: 'Biaya Admin',
+      value: fmt(data.totalAdminFee),
+      icon: Receipt,
+      color: 'text-orange-500',
+      bg: 'bg-orange-50',
+      sub: isNet ? 'Dipotong dari kotor' : 'Potongan ke bersih',
+    },
+    {
+      label: 'Merchandise',
+      value: fmt(data.totalMerchRevenue),
+      icon: ShoppingBag,
+      color: 'text-purple-600',
+      bg: 'bg-purple-50',
+      sub: 'Pendapatan merch',
+    },
   ]
 
   return (
     <div className="space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="font-serif text-2xl font-bold text-charcoal">Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-1">Ringkasan keuangan & performa event Teateran</p>
         </div>
-        <Link href="/admin/events">
-          <Button className="bg-charcoal hover:bg-charcoal/90 text-gold">
-            <Plus className="w-4 h-4 mr-2" />
-            Buat Event
-          </Button>
-        </Link>
+        <div className="flex items-center gap-3">
+          {/* ── Kotor / Bersih Toggle ── */}
+          <div className="flex items-center bg-muted rounded-full p-1 border border-border/50">
+            <button
+              onClick={() => setViewMode('gross')}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                viewMode === 'gross'
+                  ? 'bg-charcoal text-gold shadow-sm'
+                  : 'text-muted-foreground hover:text-charcoal'
+              }`}
+            >
+              Kotor
+            </button>
+            <button
+              onClick={() => setViewMode('net')}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                viewMode === 'net'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-muted-foreground hover:text-charcoal'
+              }`}
+            >
+              Bersih
+            </button>
+          </div>
+          <Link href="/admin/events">
+            <Button className="bg-charcoal hover:bg-charcoal/90 text-gold">
+              <Plus className="w-4 h-4 mr-2" />
+              Buat Event
+            </Button>
+          </Link>
+        </div>
       </div>
+
+      {/* ── View Mode Indicator ── */}
+      {isNet && (
+        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/50 rounded-lg px-4 py-2">
+          <TrendingUp className="w-4 h-4 text-emerald-600" />
+          <p className="text-xs text-emerald-700">
+            <span className="font-semibold">Mode Bersih</span> — Pendapatan setelah dipotong biaya admin gateway pembayaran. Angka ini yang masuk ke rekeningmu.
+          </p>
+        </div>
+      )}
+      {!isNet && (
+        <div className="flex items-center gap-2 bg-gold/5 border border-gold/20 rounded-lg px-4 py-2">
+          <CircleDollarSign className="w-4 h-4 text-gold" />
+          <p className="text-xs text-charcoal/70">
+            <span className="font-semibold text-charcoal">Mode Kotor</span> — Total uang masuk sebelum dipotong biaya admin. Angka ini yang terlihat oleh pembeli.
+          </p>
+        </div>
+      )}
 
       {/* ── Summary Stat Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -186,11 +264,12 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* ── All Charts (loaded dynamically to avoid recharts circular dep) ── */}
+      {/* ── All Charts ── */}
       <DashboardCharts
         data={data}
         expandedEvent={expandedEvent}
         onToggleEvent={(eventId) => setExpandedEvent(expandedEvent === eventId ? null : eventId)}
+        viewMode={viewMode}
       />
 
       {/* ── Recent Transactions ── */}
@@ -218,7 +297,7 @@ export default function AdminDashboard() {
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Event</th>
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Pembeli</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Tiket</th>
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Total</th>
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">{isNet ? 'Bersih' : 'Total'}</th>
                     <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Metode</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Check-In</th>
@@ -232,7 +311,9 @@ export default function AdminDashboard() {
                       <td className="py-2 px-2 text-charcoal max-w-[120px] truncate">{tx.eventTitle}</td>
                       <td className="py-2 px-2 text-charcoal">{tx.customerName}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{tx.seatCount}</td>
-                      <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(tx.totalAmount)}</td>
+                      <td className={`py-2 px-2 text-right font-semibold ${isNet ? 'text-emerald-600' : 'text-charcoal'}`}>
+                        {fmt(isNet ? tx.netAmount : tx.totalAmount)}
+                      </td>
                       <td className="py-2 px-2 text-right text-orange-500">{fmt(tx.adminFeeApplied)}</td>
                       <td className="py-2 px-2">
                         <Badge variant="secondary" className="text-[9px]">

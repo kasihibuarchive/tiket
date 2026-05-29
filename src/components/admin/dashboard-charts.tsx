@@ -2,7 +2,7 @@
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Ticket, CreditCard, ChevronDown, ChevronUp } from 'lucide-react'
+import { Ticket, CreditCard, ChevronDown, ChevronUp, TrendingUp, CircleDollarSign } from 'lucide-react'
 import {
   ChartContainer,
   ChartTooltip,
@@ -44,17 +44,20 @@ interface DashboardData {
   totalTicketRevenue: number
   totalMerchRevenue: number
   totalAdminFee: number
+  totalDiscountGiven: number
   totalGrossRevenue: number
   totalNetRevenue: number
   checkInStats: { checkedIn: number; notCheckedIn: number; total: number }
-  categoryBreakdown: Array<{ id: string; name: string; color: string; count: number; revenue: number }>
+  categoryBreakdown: Array<{ id: string; name: string; color: string; count: number; revenue: number; netRevenue: number }>
   seatFunnel: { total: number; available: number; sold: number; invitation: number; locked: number; unavailable: number }
-  cumulativeTimeline: Array<{ date: string; revenue: number; tickets: number; transactions: number; cumulativeRevenue: number }>
+  cumulativeTimeline: Array<{ date: string; revenue: number; netRevenue: number; tickets: number; transactions: number; cumulativeRevenue: number; cumulativeNetRevenue: number }>
   eventBreakdown: EventBreakdown[]
   recentTransactions: any[]
-  revenueTimeline: { date: string; revenue: number; tickets: number }[]
-  paymentMethodStats: { method: string; count: number; revenue: number }[]
+  revenueTimeline: { date: string; revenue: number; netRevenue: number; tickets: number }[]
+  paymentMethodStats: { method: string; count: number; revenue: number; netRevenue: number }[]
 }
+
+type ViewMode = 'gross' | 'net'
 
 const fmt = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
 
@@ -74,12 +77,14 @@ const PAYMENT_LABELS: Record<string, string> = {
 }
 
 const revenueChartConfig: ChartConfig = {
-  revenue: { label: 'Pendapatan', color: '#C8A951' },
+  revenue: { label: 'Pendapatan Kotor', color: '#C8A951' },
+  netRevenue: { label: 'Pendapatan Bersih', color: '#22c55e' },
   tickets: { label: 'Tiket', color: '#1a1a2e' },
 }
 
 const cumulativeChartConfig: ChartConfig = {
-  cumulativeRevenue: { label: 'Pendapatan Kumulatif', color: '#C8A951' },
+  cumulativeRevenue: { label: 'Kumulatif Kotor', color: '#C8A951' },
+  cumulativeNetRevenue: { label: 'Kumulatif Bersih', color: '#22c55e' },
 }
 
 const categoryPieChartConfig: ChartConfig = {
@@ -90,9 +95,11 @@ interface DashboardChartsProps {
   data: DashboardData
   expandedEvent: string | null
   onToggleEvent: (eventId: string) => void
+  viewMode: ViewMode
 }
 
-export function DashboardCharts({ data, expandedEvent, onToggleEvent }: DashboardChartsProps) {
+export function DashboardCharts({ data, expandedEvent, onToggleEvent, viewMode }: DashboardChartsProps) {
+  const isNet = viewMode === 'net'
   const ci = data.checkInStats || { checkedIn: 0, notCheckedIn: 0, total: 0 }
   const sf = data.seatFunnel || { total: 0, available: 0, sold: 0, invitation: 0, locked: 0, unavailable: 0 }
   const checkInPct = ci.total > 0 ? Math.round((ci.checkedIn / ci.total) * 100) : 0
@@ -103,6 +110,12 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
     { label: 'Check-In', value: ci.checkedIn, color: '#22c55e' },
   ]
 
+  // Pick the right revenue field based on viewMode
+  const primaryRevenue = isNet ? data.totalNetRevenue : data.totalGrossRevenue
+  const primaryLabel = isNet ? 'Bersih' : 'Kotor'
+  const primaryColor = isNet ? 'text-emerald-600' : 'text-charcoal'
+  const primaryBg = isNet ? 'bg-emerald-50' : 'bg-charcoal/5'
+
   return (
     <>
       {/* ── Revenue Breakdown & Category Pie Chart ── */}
@@ -111,11 +124,11 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <Card className="border-border/50">
             <CardContent className="p-4 flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-charcoal/5">
-                <Ticket className="w-4 h-4 text-charcoal" />
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${primaryBg}`}>
+                <Ticket className={`w-4 h-4 ${isNet ? 'text-emerald-600' : 'text-charcoal'}`} />
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket ({primaryLabel})</p>
                 <p className="text-sm font-bold text-charcoal">{fmt(data.totalTicketRevenue)}</p>
               </div>
             </CardContent>
@@ -139,6 +152,7 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
               <div>
                 <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
                 <p className="text-sm font-bold text-charcoal">{fmt(data.totalAdminFee)}</p>
+                <p className="text-[9px] text-orange-400">{isNet ? '↓ Dikurangi' : 'Potongan bersih'}</p>
               </div>
             </CardContent>
           </Card>
@@ -176,18 +190,21 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                   </PieChart>
                 </ChartContainer>
                 <div className="flex-1 space-y-2 min-w-0">
-                  {(data.categoryBreakdown || []).map((cat) => (
-                    <div key={cat.id} className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
-                        <span className="text-xs font-medium text-charcoal truncate">{cat.name}</span>
+                  {(data.categoryBreakdown || []).map((cat) => {
+                    const catRevenue = isNet ? cat.netRevenue : cat.revenue
+                    return (
+                      <div key={cat.id} className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="w-3 h-3 rounded-sm flex-shrink-0" style={{ backgroundColor: cat.color }} />
+                          <span className="text-xs font-medium text-charcoal truncate">{cat.name}</span>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-xs font-semibold text-charcoal">{cat.count}</span>
+                          <span className="text-[10px] text-muted-foreground ml-1">({fmt(catRevenue)})</span>
+                        </div>
                       </div>
-                      <div className="text-right flex-shrink-0">
-                        <span className="text-xs font-semibold text-charcoal">{cat.count}</span>
-                        <span className="text-[10px] text-muted-foreground ml-1">({fmt(cat.revenue)})</span>
-                      </div>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             ) : (
@@ -275,7 +292,10 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
         {/* Revenue Timeline */}
         <Card className="border-border/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-charcoal">Pendapatan 30 Hari Terakhir</CardTitle>
+            <CardTitle className="text-sm font-semibold text-charcoal flex items-center gap-2">
+              Pendapatan 30 Hari Terakhir
+              <Badge variant="secondary" className="text-[9px]">{primaryLabel}</Badge>
+            </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             {data.revenueTimeline.length > 0 ? (
@@ -292,7 +312,11 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                     tickFormatter={(v: number) => v >= 1000000 ? `${(v / 1000000).toFixed(1)}jt` : v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)}
                   />
                   <ChartTooltip content={<ChartTooltipContent />} />
-                  <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[4, 4, 0, 0]} />
+                  <Bar
+                    dataKey={isNet ? 'netRevenue' : 'revenue'}
+                    fill={isNet ? 'var(--color-netRevenue)' : 'var(--color-revenue)'}
+                    radius={[4, 4, 0, 0]}
+                  />
                 </BarChart>
               </ChartContainer>
             ) : (
@@ -306,7 +330,10 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
         {/* Cumulative Revenue Area Chart */}
         <Card className="border-border/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-charcoal">Pendapatan Kumulatif</CardTitle>
+            <CardTitle className="text-sm font-semibold text-charcoal flex items-center gap-2">
+              Pendapatan Kumulatif
+              <Badge variant="secondary" className="text-[9px]">{primaryLabel}</Badge>
+            </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             {(data.cumulativeTimeline || []).length > 0 ? (
@@ -316,6 +343,10 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                     <linearGradient id="goldGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#C8A951" stopOpacity={0.4} />
                       <stop offset="95%" stopColor="#C8A951" stopOpacity={0.05} />
+                    </linearGradient>
+                    <linearGradient id="emeraldGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#22c55e" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="#22c55e" stopOpacity={0.05} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" vertical={false} />
@@ -331,10 +362,10 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Area
                     type="monotone"
-                    dataKey="cumulativeRevenue"
-                    stroke="#C8A951"
+                    dataKey={isNet ? 'cumulativeNetRevenue' : 'cumulativeRevenue'}
+                    stroke={isNet ? '#22c55e' : '#C8A951'}
                     strokeWidth={2}
-                    fill="url(#goldGradient)"
+                    fill={isNet ? 'url(#emeraldGradient)' : 'url(#goldGradient)'}
                   />
                 </AreaChart>
               </ChartContainer>
@@ -349,13 +380,18 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
         {/* Payment Method Breakdown */}
         <Card className="border-border/50">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-semibold text-charcoal">Metode Pembayaran</CardTitle>
+            <CardTitle className="text-sm font-semibold text-charcoal flex items-center gap-2">
+              Metode Pembayaran
+              <Badge variant="secondary" className="text-[9px]">{primaryLabel}</Badge>
+            </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
             {data.paymentMethodStats.length > 0 ? (
               <div className="space-y-3 max-h-[220px] overflow-y-auto">
                 {data.paymentMethodStats.map((pm) => {
-                  const pct = data.totalGrossRevenue > 0 ? (pm.revenue / data.totalGrossRevenue) * 100 : 0
+                  const pmRevenue = isNet ? pm.netRevenue : pm.revenue
+                  const compareRevenue = isNet ? data.totalNetRevenue : data.totalGrossRevenue
+                  const pct = compareRevenue > 0 ? (pmRevenue / compareRevenue) * 100 : 0
                   return (
                     <div key={pm.method} className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
@@ -364,10 +400,13 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                           <span className="font-medium text-charcoal">{PAYMENT_LABELS[pm.method] || pm.method}</span>
                           <span className="text-muted-foreground">({pm.count}x)</span>
                         </div>
-                        <span className="font-semibold text-charcoal">{fmt(pm.revenue)}</span>
+                        <span className={`font-semibold ${isNet ? 'text-emerald-600' : 'text-charcoal'}`}>{fmt(pmRevenue)}</span>
                       </div>
                       <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                        <div className="h-full bg-gold rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        <div
+                          className={`h-full rounded-full transition-all ${isNet ? 'bg-emerald-500' : 'bg-gold'}`}
+                          style={{ width: `${pct}%` }}
+                        />
                       </div>
                     </div>
                   )
@@ -390,9 +429,16 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
               <Ticket className="w-4 h-4 text-gold" />
               Rincian Keuangan Per Event
             </CardTitle>
-            <Badge variant="secondary" className="text-[10px]">
-              {data.eventBreakdown.length} event
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-[10px]">
+                {data.eventBreakdown.length} event
+              </Badge>
+              <Badge
+                className={`text-[10px] ${isNet ? 'bg-emerald-100 text-emerald-700' : 'bg-gold/10 text-gold'}`}
+              >
+                {isNet ? 'Mode Bersih' : 'Mode Kotor'}
+              </Badge>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="pt-0">
@@ -404,8 +450,9 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
             <div className="space-y-2">
               {data.eventBreakdown.map((ev) => {
                 const isExpanded = expandedEvent === ev.eventId
+                const displayRevenue = isNet ? ev.netRevenue : ev.grossRevenue
                 return (
-                  <div key={ev.eventId} className="border border-border/50 rounded-lg overflow-hidden">
+                  <div key={ev.eventId} className={`border rounded-lg overflow-hidden transition-colors ${isNet ? 'border-emerald-200/50' : 'border-border/50'}`}>
                     <button
                       onClick={() => onToggleEvent(ev.eventId)}
                       className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/30 transition-colors text-left"
@@ -422,12 +469,12 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                       </div>
                       <div className="flex items-center gap-4 flex-shrink-0">
                         <div className="text-right">
-                          <p className="text-xs text-muted-foreground">Kotor</p>
-                          <p className="text-sm font-bold text-charcoal">{fmt(ev.grossRevenue)}</p>
+                          <p className="text-[10px] text-muted-foreground">Kotor</p>
+                          <p className={`text-sm font-bold ${!isNet ? 'text-charcoal' : 'text-charcoal/50'}`}>{fmt(ev.grossRevenue)}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-xs text-emerald-600">Bersih</p>
-                          <p className="text-sm font-bold text-emerald-600">{fmt(ev.netRevenue)}</p>
+                          <p className="text-[10px] text-emerald-600">Bersih</p>
+                          <p className={`text-sm font-bold ${isNet ? 'text-emerald-600' : 'text-emerald-600/50'}`}>{fmt(ev.netRevenue)}</p>
                         </div>
                         {isExpanded ? (
                           <ChevronUp className="w-4 h-4 text-muted-foreground" />
@@ -438,7 +485,8 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                     </button>
 
                     {isExpanded && (
-                      <div className="px-4 pb-4 pt-1 border-t border-border/30 bg-muted/10">
+                      <div className={`px-4 pb-4 pt-1 border-t ${isNet ? 'border-emerald-200/30 bg-emerald-50/30' : 'border-border/30 bg-muted/10'}`}>
+                        {/* Detailed breakdown */}
                         <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mt-3">
                           <div className="space-y-0.5">
                             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket</p>
@@ -452,11 +500,12 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                           <div className="space-y-0.5">
                             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
                             <p className="text-sm font-semibold text-orange-500">{fmt(ev.adminFeeRevenue)}</p>
-                            <p className="text-[10px] text-muted-foreground">Potongan dari bersih</p>
+                            <p className="text-[10px] text-orange-400">Potongan dari bersih</p>
                           </div>
                           <div className="space-y-0.5">
-                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Transaksi</p>
-                            <p className="text-sm font-semibold text-charcoal">{ev.transactionCount}</p>
+                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Diskon</p>
+                            <p className="text-sm font-semibold text-blue-500">{fmt(ev.discountGiven)}</p>
+                            <p className="text-[10px] text-blue-400">Dari promo code</p>
                           </div>
                           <div className="space-y-0.5">
                             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Check-In</p>
@@ -464,17 +513,38 @@ export function DashboardCharts({ data, expandedEvent, onToggleEvent }: Dashboar
                             <p className="text-[10px] text-muted-foreground">dari {ev.ticketCount} tiket</p>
                           </div>
                         </div>
+
+                        {/* Gross vs Net comparison */}
                         <div className="mt-3 pt-3 border-t border-border/30 grid grid-cols-2 gap-3">
-                          <div className="bg-white rounded-lg p-3 border border-border/30">
-                            <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Pendapatan Kotor</p>
+                          <div className={`rounded-lg p-3 border ${isNet ? 'bg-white border-border/30' : 'bg-white border-border/30 ring-1 ring-gold/20'}`}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <CircleDollarSign className="w-3 h-3 text-gold" />
+                              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Pendapatan Kotor</p>
+                            </div>
                             <p className="text-base font-bold text-charcoal">{fmt(ev.grossRevenue)}</p>
                             <p className="text-[10px] text-muted-foreground">Total uang masuk</p>
                           </div>
-                          <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200/30">
-                            <p className="text-[10px] uppercase tracking-wider text-emerald-600 mb-1">Pendapatan Bersih</p>
+                          <div className={`rounded-lg p-3 border ${isNet ? 'bg-emerald-50 border-emerald-200/30 ring-1 ring-emerald-300/30' : 'bg-emerald-50 border-emerald-200/30'}`}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <TrendingUp className="w-3 h-3 text-emerald-600" />
+                              <p className="text-[10px] uppercase tracking-wider text-emerald-600">Pendapatan Bersih</p>
+                            </div>
                             <p className="text-base font-bold text-emerald-600">{fmt(ev.netRevenue)}</p>
-                            <p className="text-[10px] text-emerald-500">Kotor − Biaya Admin</p>
+                            <p className="text-[10px] text-emerald-500">Kotor − Biaya Admin ({fmt(ev.adminFeeRevenue)})</p>
                           </div>
+                        </div>
+
+                        {/* Admin fee percentage */}
+                        <div className="mt-3 flex items-center gap-3 text-xs">
+                          <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 rounded-full transition-all"
+                              style={{ width: `${ev.grossRevenue > 0 ? ((ev.netRevenue / ev.grossRevenue) * 100) : 100}%` }}
+                            />
+                          </div>
+                          <span className="text-muted-foreground flex-shrink-0">
+                            {ev.grossRevenue > 0 ? Math.round((ev.netRevenue / ev.grossRevenue) * 100) : 100}% masuk rekening
+                          </span>
                         </div>
                       </div>
                     )}

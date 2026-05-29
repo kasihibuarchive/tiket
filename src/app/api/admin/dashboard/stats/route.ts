@@ -38,9 +38,18 @@ export async function GET() {
         showDate: true,
         location: true,
         adminFee: true,
+        priceCategories: { select: { price: true } },
       },
       orderBy: { showDate: 'desc' },
     })
+
+    // ── Promo codes for discount calculation ──
+    const promoCodeIds = [...new Set(paidTransactions.map(tx => tx.promoCodeId).filter(Boolean))]
+    const promoCodes = promoCodeIds.length > 0 ? await db.promoCode.findMany({
+      where: { id: { in: promoCodeIds as string[] } },
+      select: { id: true, code: true, discountType: true, discountValue: true },
+    }) : []
+    const promoMap = new Map(promoCodes.map(p => [p.id, p]))
 
     // ── Per-event financial breakdown ──
     const eventStats: Record<string, {
@@ -111,6 +120,22 @@ export async function GET() {
       }
       stat.merchRevenue += merchTotal
 
+      // Discount given — estimate from promo code
+      if (tx.promoCodeId) {
+        const promo = promoMap.get(tx.promoCodeId)
+        if (promo) {
+          if (promo.discountType === 'PERCENT') {
+            // Estimate discount: percentage of ticket revenue
+            const ticketSubtotal = tx.totalAmount - adminFee - merchTotal
+            const discount = Math.round(ticketSubtotal * (promo.discountValue / 100) / (1 - promo.discountValue / 100))
+            stat.discountGiven += Math.max(discount, 0)
+          } else {
+            // Fixed discount
+            stat.discountGiven += promo.discountValue
+          }
+        }
+      }
+
       // Ticket revenue = totalAmount - adminFee - merchTotal
       const ticketRevenue = tx.totalAmount - adminFee - merchTotal
       stat.ticketRevenue += Math.max(ticketRevenue, 0)
@@ -124,6 +149,7 @@ export async function GET() {
     const totalAdminFee = paidTransactions.reduce((sum, tx) => sum + (tx.adminFeeApplied || 0), 0)
     const totalTicketRevenue = Object.values(eventStats).reduce((sum, s) => sum + s.ticketRevenue, 0)
     const totalMerchRevenue = Object.values(eventStats).reduce((sum, s) => sum + s.merchRevenue, 0)
+    const totalDiscountGiven = Object.values(eventStats).reduce((sum, s) => sum + s.discountGiven, 0)
     const totalNetRevenue = totalGrossRevenue - totalAdminFee
     const totalTickets = Object.values(eventStats).reduce((sum, s) => sum + s.ticketCount, 0)
     const totalCheckedIn = paidTransactions.filter(tx => tx.checkInTime).length
@@ -136,16 +162,15 @@ export async function GET() {
     }
 
     // ── Ticket Category Breakdown ──
-    // Get all seats with price category info
     const seatsWithCategory = await db.seat.findMany({
       where: { status: 'SOLD' },
       select: {
         priceCategoryId: true,
-        priceCategory: { select: { name: true, colorCode: true } },
+        priceCategory: { select: { name: true, colorCode: true, price: true } },
       },
     })
 
-    const categoryMap = new Map<string, { name: string; color: string; count: number }>()
+    const categoryMap = new Map<string, { name: string; color: string; count: number; pricePerSeat: number }>()
     for (const seat of seatsWithCategory) {
       const catId = seat.priceCategoryId || 'unknown'
       if (!categoryMap.has(catId)) {
@@ -153,25 +178,26 @@ export async function GET() {
           name: seat.priceCategory?.name || 'Lainnya',
           color: seat.priceCategory?.colorCode || '#8B8680',
           count: 0,
+          pricePerSeat: seat.priceCategory?.price || 0,
         })
       }
       categoryMap.get(catId)!.count++
     }
 
-    // Calculate revenue per category by distributing total ticket revenue proportionally
-    const totalSoldSeats = seatsWithCategory.length
+    // Calculate revenue per category using actual seat price
     const categoryBreakdown = Array.from(categoryMap.entries()).map(([id, cat]) => {
-      const proportion = totalSoldSeats > 0 ? cat.count / totalSoldSeats : 0
+      const grossRevenue = cat.count * cat.pricePerSeat
       return {
         id,
         name: cat.name,
         color: cat.color,
         count: cat.count,
-        revenue: Math.round(totalTicketRevenue * proportion),
+        revenue: Math.round(grossRevenue),
+        netRevenue: Math.round(grossRevenue - (grossRevenue * totalAdminFee / totalGrossRevenue)),
       }
     }).sort((a, b) => b.count - a.count)
 
-    // ── Seat Status Summary (for conversion funnel) ──
+    // ── Seat Status Summary ──
     const seatStatusCounts = await db.seat.groupBy({
       by: ['status'],
       _count: true,
@@ -207,6 +233,7 @@ export async function GET() {
           customerEmail: tx.customerEmail,
           totalAmount: tx.totalAmount,
           adminFeeApplied: tx.adminFeeApplied,
+          netAmount: tx.totalAmount - (tx.adminFeeApplied || 0),
           seatCount: seatCodesArr.length,
           paymentMethod: tx.paymentMethod,
           paidAt: tx.paidAt?.toISOString(),
@@ -223,14 +250,15 @@ export async function GET() {
       (tx) => tx.paidAt && tx.paidAt >= thirtyDaysAgo
     )
 
-    const revenueByDay: Record<string, { date: string; revenue: number; tickets: number; transactions: number }> = {}
+    const revenueByDay: Record<string, { date: string; revenue: number; netRevenue: number; tickets: number; transactions: number }> = {}
     for (const tx of recentPaid) {
       if (!tx.paidAt) continue
       const dayKey = tx.paidAt.toISOString().slice(0, 10)
       if (!revenueByDay[dayKey]) {
-        revenueByDay[dayKey] = { date: dayKey, revenue: 0, tickets: 0, transactions: 0 }
+        revenueByDay[dayKey] = { date: dayKey, revenue: 0, netRevenue: 0, tickets: 0, transactions: 0 }
       }
       revenueByDay[dayKey].revenue += tx.totalAmount
+      revenueByDay[dayKey].netRevenue += tx.totalAmount - (tx.adminFeeApplied || 0)
       let seatCodesArr: string[] = []
       try { seatCodesArr = JSON.parse(tx.seatCodes) } catch { seatCodesArr = tx.seatCodes.split(',') }
       revenueByDay[dayKey].tickets += seatCodesArr.length
@@ -240,20 +268,23 @@ export async function GET() {
 
     // Cumulative revenue for area chart
     let cumulativeRevenue = 0
+    let cumulativeNetRevenue = 0
     const cumulativeTimeline = revenueTimeline.map(d => {
       cumulativeRevenue += d.revenue
-      return { ...d, cumulativeRevenue }
+      cumulativeNetRevenue += d.netRevenue
+      return { ...d, cumulativeRevenue, cumulativeNetRevenue }
     })
 
     // ── Payment method breakdown ──
-    const paymentMethodStats: Record<string, { method: string; count: number; revenue: number }> = {}
+    const paymentMethodStats: Record<string, { method: string; count: number; revenue: number; netRevenue: number }> = {}
     for (const tx of paidTransactions) {
       const method = tx.paymentMethod || 'UNKNOWN'
       if (!paymentMethodStats[method]) {
-        paymentMethodStats[method] = { method, count: 0, revenue: 0 }
+        paymentMethodStats[method] = { method, count: 0, revenue: 0, netRevenue: 0 }
       }
       paymentMethodStats[method].count++
       paymentMethodStats[method].revenue += tx.totalAmount
+      paymentMethodStats[method].netRevenue += tx.totalAmount - (tx.adminFeeApplied || 0)
     }
 
     return NextResponse.json({
@@ -269,6 +300,7 @@ export async function GET() {
       totalTicketRevenue,
       totalMerchRevenue,
       totalAdminFee,
+      totalDiscountGiven,
       totalGrossRevenue,
       totalNetRevenue,
 
