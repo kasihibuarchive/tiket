@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { logActivity } from '@/lib/activity-log'
+import { shortLinkLimiter, getClientIp } from '@/lib/rate-limit'
 
 // GET /api/admin/short-links?eventId=xxx — List short links for an event
 export async function GET(request: NextRequest) {
@@ -31,6 +32,16 @@ export async function GET(request: NextRequest) {
 // POST /api/admin/short-links — Create a new short link
 export async function POST(request: NextRequest) {
   try {
+    // Rate limit: max 10 short links per 5 minutes
+    const ip = getClientIp(request)
+    const rateResult = shortLinkLimiter.check(`shortlink:${ip}`)
+    if (!rateResult.allowed) {
+      return NextResponse.json(
+        { error: 'Terlalu banyak request. Coba lagi nanti.' },
+        { status: 429 }
+      )
+    }
+
     const body = await request.json()
     const { slug, eventId, createdBy } = body
 

@@ -2,11 +2,22 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { randomUUID } from 'crypto'
 import { getTripayConfig, createTransactionSignature, createTripayTransaction, LEGACY_METHOD_MAP } from '@/lib/tripay'
+import { checkoutLimiter, getClientIp } from '@/lib/rate-limit'
 
 const CHECKOUT_PREFIX = 'CK:'
 
 export async function POST(request: NextRequest) {
   try {
+    // Rate limit by IP: max 5 checkouts per minute
+    const ip = getClientIp(request)
+    const rateResult = checkoutLimiter.check(`checkout:${ip}`)
+    if (!rateResult.allowed) {
+      return NextResponse.json(
+        { error: 'Terlalu banyak request. Tunggu beberapa saat dan coba lagi.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil((rateResult.resetAt - Date.now()) / 1000)) } }
+      )
+    }
+
     const body = await request.json()
     const {
       eventId, showDateId, customerName, customerEmail, customerWa, seatCodes, sessionId,

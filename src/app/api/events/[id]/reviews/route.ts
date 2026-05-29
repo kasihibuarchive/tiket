@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, withDbRetry } from '@/lib/db'
+import { reviewLimiter, getClientIp } from '@/lib/rate-limit'
 
 // GET /api/events/[id]/reviews — List all reviews for an event
 export async function GET(
@@ -62,6 +63,16 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    // Rate limit by IP: max 3 reviews per 10 minutes
+    const ip = getClientIp(request)
+    const rateResult = reviewLimiter.check(`review:${ip}`)
+    if (!rateResult.allowed) {
+      return NextResponse.json(
+        { error: 'Terlalu banyak review. Coba lagi nanti.' },
+        { status: 429, headers: { 'Retry-After': String(Math.ceil((rateResult.resetAt - Date.now()) / 1000)) } }
+      )
+    }
+
     const { id } = await params
     const body = await request.json()
     const { authorName, rating, comment, _hp } = body
