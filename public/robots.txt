@@ -12,3 +12,9 @@ Allow: /
 
 User-agent: *
 Allow: /
+
+Sitemap: https://www.teateran.site/sitemap.xml
+
+# Disallow admin and API routes
+Disallow: /admin
+Disallow: /api

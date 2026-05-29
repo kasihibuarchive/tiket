@@ -7,6 +7,7 @@ import { Footer } from '@/components/footer'
 import { SeatMap } from '@/components/seat-map'
 import { CheckoutForm } from '@/components/checkout-form'
 import { QueueGate } from '@/components/queue-gate'
+import { OptimizedImage } from '@/components/optimized-image'
 import { Badge } from '@/components/ui/badge'
 import { formatEventDate, formatEventTime } from '@/lib/date'
 import { cn } from '@/lib/utils'
@@ -438,7 +439,11 @@ export default function EventDetailPage() {
               <div className="lg:w-1/3 shrink-0">
                 <div className="aspect-[3/4] rounded-xl overflow-hidden shadow-2xl bg-charcoal/50 relative">
                   {event.posterUrl ? (
-                    <img src={event.posterUrl} alt={event.title} className="w-full h-full object-cover" />
+                    <OptimizedImage
+                      src={event.posterUrl}
+                      alt={event.title}
+                      className="w-full h-full"
+                    />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-charcoal to-charcoal/60">
                       <span className="font-serif text-gold text-5xl">{event.title.charAt(0)}</span>
