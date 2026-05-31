@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
     const {
       code, eventId, discountType, discountValue, maxUses,
       validFrom, validUntil, isActive, target, isPerItem, minTickets, minMerchItems,
-      bundlingQty, bundlingDiscount, targetPriceCategoryIds, termsAndConditions
+      bundleSize, bundleDiscount, applicableCategoryIds, termsAndConditions
     } = body
 
     if (!code || !discountType || discountValue === undefined || !maxUses || !validFrom || !validUntil) {
@@ -52,9 +52,9 @@ export async function POST(request: NextRequest) {
         minTickets: minTickets || 0,
         minMerchItems: minMerchItems || 0,
         isActive: isActive !== undefined ? isActive : true,
-        bundlingQty: bundlingQty || 0,
-        bundlingDiscount: bundlingDiscount || 0,
-        targetPriceCategoryIds: targetPriceCategoryIds || null,
+        bundleSize: bundleSize || 0,
+        bundleDiscount: bundleDiscount || 0,
+        applicableCategoryIds: applicableCategoryIds || null,
         termsAndConditions: termsAndConditions || null,
       },
     })

@@ -18,7 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '@/components/ui/select'
 import {
-  Plus, Edit, Trash2, Tag, Loader2, Ticket, FileText
+  Plus, Edit, Trash2, Tag, Loader2, Ticket, FileText, Layers
 } from 'lucide-react'
 
 interface EventOption {
@@ -26,7 +26,7 @@ interface EventOption {
   title: string
 }
 
-interface PriceCategoryOption {
+interface CategoryOption {
   id: string
   name: string
   price: number
@@ -37,7 +37,7 @@ interface PromoCodeItem {
   id: string
   eventId: string | null
   code: string
-  discountType: 'PERCENT' | 'FIXED' | 'BUNDLING_TICKET'
+  discountType: 'PERCENT' | 'FIXED'
   discountValue: number
   maxUses: number
   currentUses: number
@@ -48,9 +48,9 @@ interface PromoCodeItem {
   minTickets: number
   minMerchItems: number
   isActive: boolean
-  bundlingQty: number
-  bundlingDiscount: number
-  targetPriceCategoryIds: string | null
+  bundleSize: number
+  bundleDiscount: number
+  applicableCategoryIds: string | null
   termsAndConditions: string | null
   createdAt: string
   updatedAt: string
@@ -59,7 +59,7 @@ interface PromoCodeItem {
 interface PromoCodeFormData {
   code: string
   eventId: string
-  discountType: 'PERCENT' | 'FIXED' | 'BUNDLING_TICKET'
+  discountType: 'PERCENT' | 'FIXED'
   discountValue: number
   maxUses: number
   validFrom: string
@@ -69,10 +69,10 @@ interface PromoCodeFormData {
   minTickets: number
   minMerchItems: number
   isActive: boolean
-  bundlingQty: number
-  bundlingDiscount: number
-  targetPriceCategoryIds: string[]  // NEW: array of category IDs
-  termsAndConditions: string         // NEW: S&K text
+  bundleSize: number
+  bundleDiscount: number
+  applicableCategoryIds: string[]
+  termsAndConditions: string
 }
 
 const TARGET_OPTIONS = [
@@ -95,19 +95,19 @@ const emptyForm: PromoCodeFormData = {
   minTickets: 0,
   minMerchItems: 0,
   isActive: true,
-  bundlingQty: 0,
-  bundlingDiscount: 0,
-  targetPriceCategoryIds: [],
+  bundleSize: 0,
+  bundleDiscount: 0,
+  applicableCategoryIds: [],
   termsAndConditions: '',
 }
 
-function formatDiscount(item: PromoCodeItem): string {
-  if (item.discountType === 'BUNDLING_TICKET') {
-    return `Rp ${item.bundlingDiscount.toLocaleString('id-ID')}/${item.bundlingQty} tiket`
+function formatDiscount(type: 'PERCENT' | 'FIXED', value: number, isPerItem: boolean, bundleSize: number, bundleDiscount: number): string {
+  if (bundleSize > 0 && bundleDiscount > 0) {
+    return `Rp ${bundleDiscount.toLocaleString('id-ID')}/${bundleSize} tiket`
   }
-  const suffix = item.discountType === 'PERCENT' ? '%' : ''
-  const prefix = item.discountType === 'FIXED' ? 'Rp ' : ''
-  return `${prefix}${item.discountValue.toLocaleString('id-ID')}${suffix}${item.isPerItem ? '/item' : ''}`
+  const suffix = type === 'PERCENT' ? '%' : ''
+  const prefix = type === 'FIXED' ? 'Rp ' : ''
+  return `${prefix}${value.toLocaleString('id-ID')}${suffix}${isPerItem ? '/item' : ''}`
 }
 
 function toJakartaDatetimeLocal(dateStr: string): string {
@@ -139,50 +139,11 @@ function getTargetBadge(target: string): { label: string; cls: string } {
   }
 }
 
-// NEW: Generate S&K text procedurally based on promo config
-function generateTermsAndConditions(formData: PromoCodeFormData): string {
-  const lines: string[] = []
-  
-  lines.push('Syarat dan Ketentuan Promo:')
-  lines.push('')
-  
-  if (formData.discountType === 'BUNDLING_TICKET') {
-    lines.push(`1. Diskon sebesar Rp ${formData.bundlingDiscount.toLocaleString('id-ID')} berlaku untuk setiap pembelian ${formData.bundlingQty} tiket.`)
-    lines.push(`2. Contoh: Beli ${formData.bundlingQty * 2} tiket = diskon Rp ${(formData.bundlingDiscount * 2).toLocaleString('id-ID')}, beli ${formData.bundlingQty * 3} tiket = diskon Rp ${(formData.bundlingDiscount * 3).toLocaleString('id-ID')}.`)
-  } else if (formData.discountType === 'PERCENT') {
-    lines.push(`1. Diskon sebesar ${formData.discountValue}%${formData.isPerItem ? ' per item' : ''}.`)
-  } else if (formData.discountType === 'FIXED') {
-    lines.push(`1. Diskon sebesar Rp ${formData.discountValue.toLocaleString('id-ID')}${formData.isPerItem ? ' per item' : ''}.`)
-  }
-
-  if (formData.targetPriceCategoryIds.length > 0) {
-    lines.push(`${lines.length}. Promo hanya berlaku untuk kategori tiket tertentu.`)
-  }
-
-  if (formData.minTickets > 0) {
-    lines.push(`${lines.length}. Minimal pembelian ${formData.minTickets} tiket untuk menggunakan promo ini.`)
-  }
-
-  if (formData.minMerchItems > 0) {
-    lines.push(`${lines.length}. Minimal pembelian ${formData.minMerchItems} merchandise untuk menggunakan promo ini.`)
-  }
-
-  if (formData.target === 'BUNDLING') {
-    lines.push(`${lines.length}. Promo hanya berlaku jika membeli tiket beserta merchandise.`)
-  }
-
-  lines.push(`${lines.length}. Promo tidak dapat digabung dengan promo lain.`)
-  lines.push(`${lines.length}. Promo berlaku selama persediaan masih ada.`)
-  lines.push(`${lines.length}. Keputusan penyelenggara bersifat mutlak dan tidak dapat diganggu gugat.`)
-
-  return lines.join('\n')
-}
-
 export default function PromoCodesAdminPage() {
   const [promoCodes, setPromoCodes] = useState<PromoCodeItem[]>([])
   const [events, setEvents] = useState<EventOption[]>([])
   const [eventMap, setEventMap] = useState<Record<string, string>>({})
-  const [priceCategories, setPriceCategories] = useState<PriceCategoryOption[]>([])
+  const [categories, setCategories] = useState<CategoryOption[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -194,12 +155,12 @@ export default function PromoCodesAdminPage() {
     fetchPromoCodes()
   }, [])
 
-  // Fetch price categories when event changes
+  // Fetch categories when event changes in the form
   useEffect(() => {
     if (formData.eventId && formData.eventId !== 'all') {
-      fetchPriceCategories(formData.eventId)
+      fetchCategories(formData.eventId)
     } else {
-      setPriceCategories([])
+      setCategories([])
     }
   }, [formData.eventId])
 
@@ -219,17 +180,14 @@ export default function PromoCodesAdminPage() {
     } catch (err) { console.error('Failed to fetch events:', err) }
   }
 
-  async function fetchPriceCategories(eventId: string) {
+  async function fetchCategories(eventId: string) {
     try {
-      const res = await fetch(`/api/events/${eventId}`)
+      const res = await fetch(`/api/price-categories?eventId=${eventId}`)
       if (res.ok) {
         const data = await res.json()
-        const cats: PriceCategoryOption[] = (data.priceCategories || []).map((c: any) => ({
-          id: c.id, name: c.name, price: c.price, eventId,
-        }))
-        setPriceCategories(cats)
+        setCategories(data.categories || data.priceCategories || [])
       }
-    } catch (err) { console.error('Failed to fetch price categories:', err) }
+    } catch (err) { console.error('Failed to fetch categories:', err) }
   }
 
   async function fetchPromoCodes() {
@@ -254,14 +212,13 @@ export default function PromoCodesAdminPage() {
 
   function openEditDialog(item: PromoCodeItem) {
     setEditingId(item.id)
-    // Parse targetPriceCategoryIds from JSON
-    let targetCats: string[] = []
-    if (item.targetPriceCategoryIds) {
-      try { targetCats = JSON.parse(item.targetPriceCategoryIds) } catch { targetCats = [] }
-    }
-    // Fetch price categories for this event
-    if (item.eventId) {
-      fetchPriceCategories(item.eventId)
+    // Parse applicableCategoryIds from JSON string
+    let parsedCategoryIds: string[] = []
+    if (item.applicableCategoryIds) {
+      try {
+        const parsed = JSON.parse(item.applicableCategoryIds)
+        if (Array.isArray(parsed)) parsedCategoryIds = parsed
+      } catch {}
     }
     setFormData({
       code: item.code,
@@ -276,11 +233,13 @@ export default function PromoCodesAdminPage() {
       minTickets: item.minTickets || 0,
       minMerchItems: item.minMerchItems || 0,
       isActive: item.isActive,
-      bundlingQty: item.bundlingQty || 0,
-      bundlingDiscount: item.bundlingDiscount || 0,
-      targetPriceCategoryIds: targetCats,
+      bundleSize: item.bundleSize || 0,
+      bundleDiscount: item.bundleDiscount || 0,
+      applicableCategoryIds: parsedCategoryIds,
       termsAndConditions: item.termsAndConditions || '',
     })
+    // Fetch categories for this promo's event if it has one
+    if (item.eventId) fetchCategories(item.eventId)
     setIsDialogOpen(true)
   }
 
@@ -298,11 +257,9 @@ export default function PromoCodesAdminPage() {
         maxUses: Number(formData.maxUses),
         minTickets: Number(formData.minTickets),
         minMerchItems: Number(formData.minMerchItems),
-        bundlingQty: Number(formData.bundlingQty),
-        bundlingDiscount: Number(formData.bundlingDiscount),
-        targetPriceCategoryIds: formData.targetPriceCategoryIds.length > 0 
-          ? JSON.stringify(formData.targetPriceCategoryIds) 
-          : null,
+        bundleSize: Number(formData.bundleSize),
+        bundleDiscount: Number(formData.bundleDiscount),
+        applicableCategoryIds: formData.applicableCategoryIds.length > 0 ? JSON.stringify(formData.applicableCategoryIds) : null,
         termsAndConditions: formData.termsAndConditions.trim() || null,
       }
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -337,14 +294,41 @@ export default function PromoCodesAdminPage() {
     } catch (err) { console.error('Toggle error:', err) }
   }
 
-  // Toggle a price category in the selection
-  function togglePriceCategory(catId: string) {
-    setFormData(prev => ({
-      ...prev,
-      targetPriceCategoryIds: prev.targetPriceCategoryIds.includes(catId)
-        ? prev.targetPriceCategoryIds.filter(id => id !== catId)
-        : [...prev.targetPriceCategoryIds, catId]
-    }))
+  // Helper: generate default S&K text based on promo config
+  function generateDefaultSK() {
+    const parts: string[] = []
+    parts.push(`1. Kode promo "${formData.code || '...'}" berlaku sesuai periode yang ditentukan.`)
+
+    if (formData.bundleSize > 0 && formData.bundleDiscount > 0) {
+      parts.push(`2. Diskon sebesar Rp ${formData.bundleDiscount.toLocaleString('id-ID')} berlaku untuk setiap pembelian ${formData.bundleSize} tiket (bundling).`)
+      parts.push(`3. Jumlah tiket yang tidak mencapai kelipatan ${formData.bundleSize} tidak mendapatkan diskon bundling.`)
+    }
+
+    if (formData.applicableCategoryIds.length > 0) {
+      const catNames = categories
+        .filter((c) => formData.applicableCategoryIds.includes(c.id))
+        .map((c) => c.name)
+      if (catNames.length > 0) {
+        parts.push(`${parts.length + 1}. Promo ini hanya berlaku untuk kategori tiket: ${catNames.join(', ')}.`)
+      }
+    }
+
+    if (formData.minTickets > 0) {
+      parts.push(`${parts.length + 1}. Minimal pembelian ${formData.minTickets} tiket untuk menggunakan promo ini.`)
+    }
+
+    if (formData.minMerchItems > 0) {
+      parts.push(`${parts.length + 1}. Minimal pembelian ${formData.minMerchItems} merchandise untuk menggunakan promo ini.`)
+    }
+
+    if (formData.target === 'BUNDLING') {
+      parts.push(`${parts.length + 1}. Promo hanya berlaku jika membeli tiket dan merchandise sekaligus.`)
+    }
+
+    parts.push(`${parts.length + 1}. Promo tidak dapat digabung dengan promo lain.`)
+    parts.push(`${parts.length + 1}. Promo dapat diubah atau dihentikan tanpa pemberitahuan terlebih dahulu.`)
+
+    return parts.join('\n')
   }
 
   return (
@@ -389,27 +373,24 @@ export default function PromoCodesAdminPage() {
                   {promoCodes.map((item) => {
                     const tb = getTargetBadge(item.target)
                     const reqs: string[] = []
+                    if (item.bundleSize > 0 && item.bundleDiscount > 0) reqs.push(`Bundle ${item.bundleSize} tiket`)
                     if (item.minTickets > 0) reqs.push(`Min ${item.minTickets} tiket`)
                     if (item.minMerchItems > 0) reqs.push(`Min ${item.minMerchItems} merch`)
                     if (item.target === 'BUNDLING') reqs.push('Tiket + Merch')
                     if (item.target === 'MERCH') reqs.push('Wajib merch')
-                    if (item.discountType === 'BUNDLING_TICKET') reqs.push(`Per ${item.bundlingQty} tiket`)
+                    if (item.termsAndConditions) reqs.push('Ada S&K')
                     return (
                       <TableRow key={item.id}>
                         <TableCell>
-                          <div className="flex flex-col gap-1">
-                            <Badge variant="outline" className="font-mono text-xs tracking-wider border-charcoal/30 text-charcoal">{item.code}</Badge>
-                            {item.termsAndConditions && <span className="text-[9px] text-blue-500 flex items-center gap-0.5"><FileText className="w-2.5 h-2.5" />S&K</span>}
-                          </div>
+                          <Badge variant="outline" className="font-mono text-xs tracking-wider border-charcoal/30 text-charcoal">{item.code}</Badge>
                         </TableCell>
                         <TableCell>
-                          <span className="font-medium text-sm text-charcoal">{formatDiscount(item)}</span>
+                          <span className="font-medium text-sm text-charcoal">{formatDiscount(item.discountType, item.discountValue, item.isPerItem, item.bundleSize, item.bundleDiscount)}</span>
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-1">
                             <Badge className={`text-xs border ${tb.cls}`}>{tb.label}</Badge>
                             {item.isPerItem && <span className="text-[10px] text-purple-600 font-medium">Per Item</span>}
-                            {item.targetPriceCategoryIds && <span className="text-[10px] text-amber-600 font-medium">Kategori tertentu</span>}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -477,7 +458,7 @@ export default function PromoCodesAdminPage() {
             {/* Event */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Event (opsional)</Label>
-              <Select value={formData.eventId || 'all'} onValueChange={(val) => setFormData({ ...formData, eventId: val, targetPriceCategoryIds: [] })}>
+              <Select value={formData.eventId || 'all'} onValueChange={(val) => setFormData({ ...formData, eventId: val, applicableCategoryIds: [] })}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Semua Event" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Event</SelectItem>
@@ -500,100 +481,99 @@ export default function PromoCodesAdminPage() {
               </div>
             </div>
 
+            {/* Per Item Toggle */}
+            <div className="flex items-center justify-between rounded-lg border p-3">
+              <div>
+                <Label className="text-sm font-medium">Diskon Per Item</Label>
+                <p className="text-xs text-muted-foreground">Contoh: Presale — diskon per tiket, jadi beli 3 = 3x diskon</p>
+              </div>
+              <Switch checked={formData.isPerItem} onCheckedChange={(checked) => setFormData({ ...formData, isPerItem: checked })} className="data-[state=checked]:bg-purple-500" />
+            </div>
+
             {/* Discount Type & Value */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Tipe Diskon *</Label>
-                <Select value={formData.discountType} onValueChange={(val) => setFormData({ ...formData, discountType: val as 'PERCENT' | 'FIXED' | 'BUNDLING_TICKET' })}>
+                <Select value={formData.discountType} onValueChange={(val) => setFormData({ ...formData, discountType: val as 'PERCENT' | 'FIXED' })}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="PERCENT">Persentase (%)</SelectItem>
                     <SelectItem value="FIXED">Nominal Tetap (Rp)</SelectItem>
-                    <SelectItem value="BUNDLING_TICKET">Bundling Tiket</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              {formData.discountType !== 'BUNDLING_TICKET' ? (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Nilai Diskon *</Label>
+                <Input type="number" min={0} value={formData.discountValue} onChange={(e) => setFormData({ ...formData, discountValue: Number(e.target.value) })} placeholder={formData.discountType === 'PERCENT' ? '50' : '25000'} />
+              </div>
+            </div>
+
+            {/* ── Bundling Discount ── */}
+            <div className="rounded-lg border-2 border-dashed border-gold/30 p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-4 h-4 text-gold" />
+                <Label className="text-sm font-semibold text-charcoal">Diskon Bundling</Label>
+              </div>
+              <p className="text-xs text-muted-foreground">Diskon per kelipatan X tiket. Misal: setiap 2 tiket, diskon Rp 10.000. Isi 0 untuk nonaktifkan.</p>
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">Nilai Diskon *</Label>
-                  <Input type="number" min={0} value={formData.discountValue} onChange={(e) => setFormData({ ...formData, discountValue: Number(e.target.value) })} placeholder={formData.discountType === 'PERCENT' ? '50' : '25000'} />
+                  <Label className="text-xs font-medium">Jumlah Tiket per Bundle</Label>
+                  <Input type="number" min={0} value={formData.bundleSize} onChange={(e) => setFormData({ ...formData, bundleSize: Number(e.target.value) })} placeholder="0" />
                 </div>
-              ) : (
                 <div className="space-y-2">
-                  <Label className="text-sm font-medium">&nbsp;</Label>
-                  <p className="text-xs text-muted-foreground mt-1">Atur jumlah & diskon bundling di bawah</p>
+                  <Label className="text-xs font-medium">Diskon per Bundle (Rp)</Label>
+                  <Input type="number" min={0} value={formData.bundleDiscount} onChange={(e) => setFormData({ ...formData, bundleDiscount: Number(e.target.value) })} placeholder="0" />
+                </div>
+              </div>
+              {formData.bundleSize > 0 && formData.bundleDiscount > 0 && (
+                <div className="bg-gold/5 rounded-md p-2">
+                  <p className="text-xs text-charcoal">
+                    <span className="font-semibold">Preview:</span> Setiap {formData.bundleSize} tiket → diskon Rp {formData.bundleDiscount.toLocaleString('id-ID')}.
+                    Contoh: beli {formData.bundleSize * 2} tiket → diskon Rp {(formData.bundleDiscount * 2).toLocaleString('id-ID')} ({2} bundle).
+                  </p>
                 </div>
               )}
             </div>
 
-            {/* NEW: Bundling Ticket fields (Feature 1) */}
-            {formData.discountType === 'BUNDLING_TICKET' && (
-              <div className="space-y-3 p-3 rounded-lg border-2 border-gold/20 bg-gold/5">
-                <Label className="text-sm font-semibold text-charcoal flex items-center gap-1.5">
+            {/* ── Category Restriction ── */}
+            {formData.eventId && formData.eventId !== 'all' && categories.length > 0 && (
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="flex items-center gap-2">
                   <Ticket className="w-4 h-4 text-gold" />
-                  Diskon Bundling Tiket
-                </Label>
-                <p className="text-xs text-muted-foreground">Diskon berlaku per setiap X tiket. Contoh: Setiap 2 tiket, diskon Rp 10.000.</p>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium">Jumlah Tiket per Bundel</Label>
-                    <Input type="number" min={2} value={formData.bundlingQty} onChange={(e) => setFormData({ ...formData, bundlingQty: Number(e.target.value) })} placeholder="2" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-medium">Diskon per Bundel (Rp)</Label>
-                    <Input type="number" min={0} value={formData.bundlingDiscount} onChange={(e) => setFormData({ ...formData, bundlingDiscount: Number(e.target.value) })} placeholder="10000" />
-                  </div>
+                  <Label className="text-sm font-semibold text-charcoal">Kategori Tiket yang Berlaku</Label>
                 </div>
-              </div>
-            )}
-
-            {/* Per Item Toggle */}
-            {formData.discountType !== 'BUNDLING_TICKET' && (
-              <div className="flex items-center justify-between rounded-lg border p-3">
-                <div>
-                  <Label className="text-sm font-medium">Diskon Per Item</Label>
-                  <p className="text-xs text-muted-foreground">Contoh: Presale — diskon per tiket, jadi beli 3 = 3x diskon</p>
-                </div>
-                <Switch checked={formData.isPerItem} onCheckedChange={(checked) => setFormData({ ...formData, isPerItem: checked })} className="data-[state=checked]:bg-purple-500" />
-              </div>
-            )}
-
-            {/* NEW: Category targeting (Feature 2) */}
-            {priceCategories.length > 0 && (
-              <div className="space-y-3 p-3 rounded-lg border-2 border-amber-200 bg-amber-50/50">
-                <Label className="text-sm font-semibold text-charcoal flex items-center gap-1.5">
-                  <Tag className="w-4 h-4 text-amber-600" />
-                  Kategori Tiket yang Berlaku
-                </Label>
-                <p className="text-xs text-muted-foreground">Pilih kategori tiket tertentu. Jika tidak dipilih, promo berlaku untuk semua kategori.</p>
+                <p className="text-xs text-muted-foreground">Pilih kategori tiket yang bisa menggunakan promo ini. Kosongkan = semua kategori.</p>
                 <div className="flex flex-wrap gap-2">
-                  {priceCategories.map((cat) => {
-                    const isSelected = formData.targetPriceCategoryIds.includes(cat.id)
+                  {categories.map((cat) => {
+                    const isSelected = formData.applicableCategoryIds.includes(cat.id)
                     return (
                       <button
                         key={cat.id}
                         type="button"
-                        onClick={() => togglePriceCategory(cat.id)}
-                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 text-xs font-medium transition-all ${
+                        onClick={() => {
+                          setFormData({
+                            ...formData,
+                            applicableCategoryIds: isSelected
+                              ? formData.applicableCategoryIds.filter((id) => id !== cat.id)
+                              : [...formData.applicableCategoryIds, cat.id],
+                          })
+                        }}
+                        className={`px-3 py-1.5 rounded-full text-xs font-medium border-2 transition-all ${
                           isSelected
                             ? 'border-gold bg-gold/10 text-gold'
-                            : 'border-gray-200 text-gray-600 hover:border-gold/30'
+                            : 'border-border text-muted-foreground hover:border-gold/30'
                         }`}
                       >
-                        <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: isSelected ? '#C8A951' : '#e5e7eb' }} />
                         {cat.name} (Rp {cat.price.toLocaleString('id-ID')})
                       </button>
                     )
                   })}
                 </div>
-                {formData.targetPriceCategoryIds.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, targetPriceCategoryIds: [] })}
-                    className="text-[10px] text-red-500 hover:text-red-700 underline"
-                  >
-                    Hapus semua pilihan
-                  </button>
+                {formData.applicableCategoryIds.length > 0 && (
+                  <p className="text-xs text-charcoal bg-gold/5 rounded-md p-2">
+                    <span className="font-semibold">Dipilih:</span>{' '}
+                    {categories.filter((c) => formData.applicableCategoryIds.includes(c.id)).map((c) => c.name).join(', ')}
+                  </p>
                 )}
               </div>
             )}
@@ -629,31 +609,28 @@ export default function PromoCodesAdminPage() {
             </div>
             <p className="text-xs text-muted-foreground -mt-2">⚠️ Waktu menggunakan zona WIB (Jakarta)</p>
 
-            {/* NEW: Terms & Conditions (Feature 3) */}
-            <div className="space-y-3 p-3 rounded-lg border-2 border-blue-100 bg-blue-50/30">
+            {/* ── Terms & Conditions (S&K) ── */}
+            <div className="rounded-lg border p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-sm font-semibold text-charcoal flex items-center gap-1.5">
-                  <FileText className="w-4 h-4 text-blue-600" />
-                  Syarat &amp; Ketentuan
-                </Label>
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-gold" />
+                  <Label className="text-sm font-semibold text-charcoal">Syarat & Ketentuan (S&K)</Label>
+                </div>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    const generated = generateTermsAndConditions(formData)
-                    setFormData({ ...formData, termsAndConditions: generated })
-                  }}
+                  onClick={() => setFormData({ ...formData, termsAndConditions: generateDefaultSK() })}
                   className="text-xs h-7"
                 >
                   Auto-generate
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">Teks S&K yang akan ditampilkan di halaman checkout saat promo diterapkan. Klik "Auto-generate" untuk membuat otomatis, lalu edit sesuai kebutuhan.</p>
+              <p className="text-xs text-muted-foreground">Teks S&K yang muncul saat promo diterapkan di checkout. Klik "Auto-generate" untuk membuat otomatis berdasarkan konfigurasi di atas.</p>
               <Textarea
                 value={formData.termsAndConditions}
                 onChange={(e) => setFormData({ ...formData, termsAndConditions: e.target.value })}
-                placeholder="Syarat dan ketentuan promo..."
+                placeholder="Contoh:&#10;1. Promo berlaku untuk periode tertentu.&#10;2. Tidak dapat digabung dengan promo lain.&#10;3. Hanya berlaku untuk kategori VIP."
                 rows={6}
                 className="text-sm"
               />

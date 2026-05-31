@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       const cat = priceCats.find((p) => p.id === s.priceCategoryId)
       if (!cat) return NextResponse.json({ error: 'Harga kursi belum diatur' }, { status: 400 })
       seatTotal += cat.price
-      items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket' })
+      items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket', priceCategoryId: s.priceCategoryId })
     }
 
     // Admin fee — flat per ticket
@@ -130,25 +130,27 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Promo ini hanya berlaku untuk merchandise' }, { status: 400 })
           }
 
-          // NEW: Validate category targeting (Feature 2)
-          if (promoCodeData.targetPriceCategoryIds) {
+          // --- NEW: Category restriction validation ---
+          if (promoCodeData.applicableCategoryIds) {
             try {
-              const targetCatIds: string[] = JSON.parse(promoCodeData.targetPriceCategoryIds)
-              if (targetCatIds.length > 0) {
-                const seatCatIds = seatPrices.map(s => s.priceCategoryId).filter(Boolean) as string[]
-                const hasMatchingCategory = seatCatIds.some(id => targetCatIds.includes(id))
-                if (!hasMatchingCategory) {
-                  const categories = await db.priceCategory.findMany({ where: { id: { in: targetCatIds } }, select: { name: true } })
-                  const catNames = categories.map(c => c.name).join(', ')
+              const allowedIds: string[] = JSON.parse(promoCodeData.applicableCategoryIds)
+              if (Array.isArray(allowedIds) && allowedIds.length > 0) {
+                const buyerCategoryIds = seatPrices
+                  .map((s) => s.priceCategoryId)
+                  .filter(Boolean) as string[]
+                const matchingCategories = buyerCategoryIds.filter((id) => allowedIds.includes(id))
+                if (matchingCategories.length === 0) {
+                  const categories = await db.priceCategory.findMany({
+                    where: { id: { in: allowedIds } },
+                    select: { name: true },
+                  })
+                  const catNames = categories.map((c) => c.name).join(', ')
                   return NextResponse.json({ error: `Promo ini hanya berlaku untuk kategori: ${catNames}` }, { status: 400 })
                 }
               }
-            } catch { /* skip invalid JSON */ }
-          }
-
-          // NEW: Validate bundling ticket requirements (Feature 1)
-          if (promoCodeData.discountType === 'BUNDLING_TICKET' && promoCodeData.bundlingQty > 0 && seatCodes.length < promoCodeData.bundlingQty) {
-            return NextResponse.json({ error: `Promo ini berlaku untuk pembelian minimal ${promoCodeData.bundlingQty} tiket` }, { status: 400 })
+            } catch {
+              // If JSON parse fails, ignore category restriction
+            }
           }
         } else {
           // Promo date invalid — clear promo so it doesn't get applied
@@ -205,59 +207,29 @@ export async function POST(request: NextRequest) {
     const merchTotalCalc = merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.price * m.quantity, 0) : 0
 
     // ── Calculate discount AFTER merchandise is resolved ──
-    // This handles ALL promo targets (TICKET, ALL, MERCH, BUNDLING, BUNDLING_TICKET) in one place
     if (promoCodeData) {
       const isPerItem = promoCodeData.isPerItem === true
       const ticketSubtotal = seatTotal + adminFeeTotal
 
-      // NEW: BUNDLING_TICKET discount type (Feature 1)
-      // e.g., every 2 tickets → Rp 10.000 off. 5 tickets → floor(5/2) * 10000 = 20000
-      if (promoCodeData.discountType === 'BUNDLING_TICKET') {
-        const qty = promoCodeData.bundlingQty || 0
-        const disc = promoCodeData.bundlingDiscount || 0
-        if (qty > 0 && disc > 0) {
-          // Count tickets in targeted categories only (Feature 2)
-          let eligibleTicketCount = seatCodes.length
-          if (promoCodeData.targetPriceCategoryIds) {
-            try {
-              const targetCatIds: string[] = JSON.parse(promoCodeData.targetPriceCategoryIds)
-              if (targetCatIds.length > 0) {
-                eligibleTicketCount = seatPrices.filter(s => targetCatIds.includes(s.priceCategoryId || '')).length
-              }
-            } catch { /* use all tickets */ }
-          }
-          const bundles = Math.floor(eligibleTicketCount / qty)
-          discountAmount = bundles * disc
+      // --- NEW: Bundling discount calculation ---
+      // If bundleSize > 0 and bundleDiscount > 0, use bundling logic
+      if (promoCodeData.bundleSize > 0 && promoCodeData.bundleDiscount > 0) {
+        const bundleCount = Math.floor(seatCodes.length / promoCodeData.bundleSize)
+        if (bundleCount > 0) {
+          discountAmount = bundleCount * promoCodeData.bundleDiscount
         }
       } else if (promoTarget === 'TICKET') {
-        // NEW: Category-aware discount for TICKET target (Feature 2)
-        let eligibleTicketSubtotal = ticketSubtotal
-        let eligibleTicketCount = seatCodes.length
-        if (promoCodeData.targetPriceCategoryIds) {
-          try {
-            const targetCatIds: string[] = JSON.parse(promoCodeData.targetPriceCategoryIds)
-            if (targetCatIds.length > 0) {
-              const eligibleSeats = seatPrices.filter(s => targetCatIds.includes(s.priceCategoryId || ''))
-              eligibleTicketCount = eligibleSeats.length
-              eligibleTicketSubtotal = eligibleSeats.reduce((sum, s) => {
-                const cat = priceCats.find(p => p.id === s.priceCategoryId)
-                return sum + (cat?.price || 0)
-              }, 0) + (adminFeePerTicket * eligibleTicketCount)
-            }
-          } catch { /* use all */ }
-        }
-
-        if (isPerItem && eligibleTicketCount > 0) {
+        if (isPerItem) {
           const perItemDiscount =
             promoCodeData.discountType === 'PERCENT'
-              ? Math.round((eligibleTicketSubtotal / eligibleTicketCount) * promoCodeData.discountValue / 100)
-              : Math.min(promoCodeData.discountValue, eligibleTicketSubtotal / eligibleTicketCount)
-          discountAmount = perItemDiscount * eligibleTicketCount
+              ? Math.round((ticketSubtotal / seatCodes.length) * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, ticketSubtotal / seatCodes.length)
+          discountAmount = perItemDiscount * seatCodes.length
         } else {
           discountAmount =
             promoCodeData.discountType === 'PERCENT'
-              ? Math.round(eligibleTicketSubtotal * promoCodeData.discountValue / 100)
-              : Math.min(promoCodeData.discountValue, eligibleTicketSubtotal)
+              ? Math.round(ticketSubtotal * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, ticketSubtotal)
         }
       } else if (promoTarget === 'MERCH' && merchTotalCalc > 0) {
         const totalMerchQty = merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0
@@ -276,25 +248,8 @@ export async function POST(request: NextRequest) {
       } else if (promoTarget === 'ALL' || promoTarget === 'BUNDLING') {
         // ALL: discount on everything (tickets + admin fee + merch)
         // BUNDLING: same as ALL but requires both tickets + merch (validated above)
-        // NEW: For ALL target, also respect category targeting
-        let targetSubtotal = ticketSubtotal + merchTotalCalc
-        let totalItems = seatCodes.length + (merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0)
-
-        if (promoCodeData.targetPriceCategoryIds && promoTarget === 'ALL') {
-          try {
-            const targetCatIds: string[] = JSON.parse(promoCodeData.targetPriceCategoryIds)
-            if (targetCatIds.length > 0) {
-              const eligibleSeats = seatPrices.filter(s => targetCatIds.includes(s.priceCategoryId || ''))
-              const eligibleTicketCount = eligibleSeats.length
-              const eligibleSeatSubtotal = eligibleSeats.reduce((sum, s) => {
-                const cat = priceCats.find(p => p.id === s.priceCategoryId)
-                return sum + (cat?.price || 0)
-              }, 0) + (adminFeePerTicket * eligibleTicketCount)
-              targetSubtotal = eligibleSeatSubtotal + merchTotalCalc
-              totalItems = eligibleTicketCount + (merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0)
-            }
-          } catch { /* use all */ }
-        }
+        const targetSubtotal = ticketSubtotal + merchTotalCalc
+        const totalItems = seatCodes.length + (merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0)
 
         if (isPerItem && totalItems > 0) {
           const perItemDiscount =
