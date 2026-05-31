@@ -268,7 +268,7 @@ export default function PromoCodesAdminPage() {
         fetchPromoCodes()
       } else {
         let msg = 'Gagal menyimpan kode promo'
-        try { const data = await res.json(); msg = data.error || msg } catch {}
+        try { const data = await res.json(); msg = data.error || msg; if (data.detail) msg += '\n\nDetail: ' + data.detail } catch {}
         alert(msg)
       }
     } catch (err) { console.error('Save error:', err); alert('Terjadi kesalahan jaringan') }
