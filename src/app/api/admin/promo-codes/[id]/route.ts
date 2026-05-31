@@ -29,7 +29,7 @@ export async function PUT(
     const {
       code, eventId, discountType, discountValue, maxUses, currentUses,
       validFrom, validUntil, isActive, target, isPerItem, minTickets, minMerchItems,
-      bundleSize, bundleDiscount, applicableCategoryIds, termsAndConditions
+      bundleSize, bundleDiscount, applicableZoneNames, termsAndConditions
     } = body
 
     const existing = await db.promoCode.findUnique({ where: { id } })
@@ -55,7 +55,7 @@ export async function PUT(
         minMerchItems: minMerchItems !== undefined ? minMerchItems : existing.minMerchItems,
         bundleSize: bundleSize !== undefined ? bundleSize : existing.bundleSize,
         bundleDiscount: bundleDiscount !== undefined ? bundleDiscount : existing.bundleDiscount,
-        applicableCategoryIds: applicableCategoryIds !== undefined ? applicableCategoryIds : existing.applicableCategoryIds,
+        applicableZoneNames: applicableZoneNames !== undefined ? applicableZoneNames : existing.applicableZoneNames,
         termsAndConditions: termsAndConditions !== undefined ? termsAndConditions : existing.termsAndConditions,
       },
     })

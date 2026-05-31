@@ -50,7 +50,7 @@ interface PromoCodeItem {
   isActive: boolean
   bundleSize: number
   bundleDiscount: number
-  applicableCategoryIds: string | null
+  applicableZoneNames: string | null
   termsAndConditions: string | null
   createdAt: string
   updatedAt: string
@@ -71,7 +71,7 @@ interface PromoCodeFormData {
   isActive: boolean
   bundleSize: number
   bundleDiscount: number
-  applicableCategoryIds: string[]
+  applicableZoneNames: string[]
   termsAndConditions: string
 }
 
@@ -97,7 +97,7 @@ const emptyForm: PromoCodeFormData = {
   isActive: true,
   bundleSize: 0,
   bundleDiscount: 0,
-  applicableCategoryIds: [],
+  applicableZoneNames: [],
   termsAndConditions: '',
 }
 
@@ -212,12 +212,12 @@ export default function PromoCodesAdminPage() {
 
   function openEditDialog(item: PromoCodeItem) {
     setEditingId(item.id)
-    // Parse applicableCategoryIds from JSON string
-    let parsedCategoryIds: string[] = []
-    if (item.applicableCategoryIds) {
+    // Parse applicableZoneNames from JSON string
+    let parsedZoneNames: string[] = []
+    if (item.applicableZoneNames) {
       try {
-        const parsed = JSON.parse(item.applicableCategoryIds)
-        if (Array.isArray(parsed)) parsedCategoryIds = parsed
+        const parsed = JSON.parse(item.applicableZoneNames)
+        if (Array.isArray(parsed)) parsedZoneNames = parsed
       } catch {}
     }
     setFormData({
@@ -235,7 +235,7 @@ export default function PromoCodesAdminPage() {
       isActive: item.isActive,
       bundleSize: item.bundleSize || 0,
       bundleDiscount: item.bundleDiscount || 0,
-      applicableCategoryIds: parsedCategoryIds,
+      applicableZoneNames: parsedZoneNames,
       termsAndConditions: item.termsAndConditions || '',
     })
     // Fetch categories for this promo's event if it has one
@@ -259,7 +259,7 @@ export default function PromoCodesAdminPage() {
         minMerchItems: Number(formData.minMerchItems),
         bundleSize: Number(formData.bundleSize),
         bundleDiscount: Number(formData.bundleDiscount),
-        applicableCategoryIds: formData.applicableCategoryIds.length > 0 ? JSON.stringify(formData.applicableCategoryIds) : null,
+        applicableZoneNames: formData.applicableZoneNames.length > 0 ? JSON.stringify(formData.applicableZoneNames) : null,
         termsAndConditions: formData.termsAndConditions.trim() || null,
       }
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -304,13 +304,8 @@ export default function PromoCodesAdminPage() {
       parts.push(`3. Jumlah tiket yang tidak mencapai kelipatan ${formData.bundleSize} tidak mendapatkan diskon bundling.`)
     }
 
-    if (formData.applicableCategoryIds.length > 0) {
-      const catNames = categories
-        .filter((c) => formData.applicableCategoryIds.includes(c.id))
-        .map((c) => c.name)
-      if (catNames.length > 0) {
-        parts.push(`${parts.length + 1}. Promo ini hanya berlaku untuk kategori tiket: ${catNames.join(', ')}.`)
-      }
+    if (formData.applicableZoneNames.length > 0) {
+      parts.push(`${parts.length + 1}. Promo ini hanya berlaku untuk zona: ${formData.applicableZoneNames.join(', ')}.`)
     }
 
     if (formData.minTickets > 0) {
@@ -378,6 +373,9 @@ export default function PromoCodesAdminPage() {
                     if (item.minMerchItems > 0) reqs.push(`Min ${item.minMerchItems} merch`)
                     if (item.target === 'BUNDLING') reqs.push('Tiket + Merch')
                     if (item.target === 'MERCH') reqs.push('Wajib merch')
+                    if (item.applicableZoneNames) {
+                      try { const z = JSON.parse(item.applicableZoneNames); if (Array.isArray(z) && z.length > 0) reqs.push(`Zona: ${z.join(', ')}`) } catch {}
+                    }
                     if (item.termsAndConditions) reqs.push('Ada S&K')
                     return (
                       <TableRow key={item.id}>
@@ -458,7 +456,7 @@ export default function PromoCodesAdminPage() {
             {/* Event */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Event (opsional)</Label>
-              <Select value={formData.eventId || 'all'} onValueChange={(val) => setFormData({ ...formData, eventId: val, applicableCategoryIds: [] })}>
+              <Select value={formData.eventId || 'all'} onValueChange={(val) => setFormData({ ...formData, eventId: val, applicableZoneNames: [] })}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Semua Event" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Event</SelectItem>
@@ -535,17 +533,17 @@ export default function PromoCodesAdminPage() {
               )}
             </div>
 
-            {/* ── Category Restriction ── */}
+            {/* ── Zone Restriction ── */}
             {formData.eventId && formData.eventId !== 'all' && categories.length > 0 && (
               <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center gap-2">
                   <Ticket className="w-4 h-4 text-gold" />
-                  <Label className="text-sm font-semibold text-charcoal">Kategori Tiket yang Berlaku</Label>
+                  <Label className="text-sm font-semibold text-charcoal">Zona / Kategori yang Berlaku</Label>
                 </div>
-                <p className="text-xs text-muted-foreground">Pilih kategori tiket yang bisa menggunakan promo ini. Kosongkan = semua kategori.</p>
+                <p className="text-xs text-muted-foreground">Pilih zona/kategori tiket yang bisa menggunakan promo ini. Kosongkan = semua zona.</p>
                 <div className="flex flex-wrap gap-2">
                   {categories.map((cat) => {
-                    const isSelected = formData.applicableCategoryIds.includes(cat.id)
+                    const isSelected = formData.applicableZoneNames.includes(cat.name)
                     return (
                       <button
                         key={cat.id}
@@ -553,9 +551,9 @@ export default function PromoCodesAdminPage() {
                         onClick={() => {
                           setFormData({
                             ...formData,
-                            applicableCategoryIds: isSelected
-                              ? formData.applicableCategoryIds.filter((id) => id !== cat.id)
-                              : [...formData.applicableCategoryIds, cat.id],
+                            applicableZoneNames: isSelected
+                              ? formData.applicableZoneNames.filter((name) => name !== cat.name)
+                              : [...formData.applicableZoneNames, cat.name],
                           })
                         }}
                         className={`px-3 py-1.5 rounded-full text-xs font-medium border-2 transition-all ${
@@ -569,10 +567,10 @@ export default function PromoCodesAdminPage() {
                     )
                   })}
                 </div>
-                {formData.applicableCategoryIds.length > 0 && (
+                {formData.applicableZoneNames.length > 0 && (
                   <p className="text-xs text-charcoal bg-gold/5 rounded-md p-2">
                     <span className="font-semibold">Dipilih:</span>{' '}
-                    {categories.filter((c) => formData.applicableCategoryIds.includes(c.id)).map((c) => c.name).join(', ')}
+                    {formData.applicableZoneNames.join(', ')}
                   </p>
                 )}
               </div>

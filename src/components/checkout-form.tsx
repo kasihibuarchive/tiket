@@ -118,8 +118,10 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
   const sessionId = getSessionId()
   const seatCodes = selectedSeats.map((s) => s.seatCode)
 
-  // Collect unique category IDs from selected seats for promo validation
-  const categoryIds = [...new Set(selectedSeats.map((s) => s.priceCategory?.id).filter(Boolean))] as string[]
+  // Collect unique zone/category names from selected seats for promo zone validation
+  // Numbered Seating: use priceCategory.name (e.g., "VIP", "Presale 1")
+  // General Admission: use zoneName from seat code prefix or category name
+  const zoneNames = [...new Set(selectedSeats.map((s) => s.priceCategory?.name).filter(Boolean))] as string[]
 
   // Payment method state — now uses specific Tripay channel codes
   const [paymentMethod, setPaymentMethod] = useState<string>('QRIS')
@@ -248,7 +250,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
           eventId,
           seatCount: seatCodes.length,
           hasMerchandise: merchandise.some((m) => m.quantity > 0),
-          categoryIds, // Send category IDs for promo category restriction check
+          zoneNames, // Send zone/category names for promo zone restriction check
         }),
       })
       const data = await res.json()

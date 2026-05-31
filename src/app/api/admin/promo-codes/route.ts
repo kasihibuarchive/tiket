@@ -30,7 +30,7 @@ export async function POST(request: NextRequest) {
     const {
       code, eventId, discountType, discountValue, maxUses,
       validFrom, validUntil, isActive, target, isPerItem, minTickets, minMerchItems,
-      bundleSize, bundleDiscount, applicableCategoryIds, termsAndConditions
+      bundleSize, bundleDiscount, applicableZoneNames, termsAndConditions
     } = body
 
     if (!code || !discountType || discountValue === undefined || !maxUses || !validFrom || !validUntil) {
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
       isActive: isActive !== undefined ? isActive : true,
       bundleSize: Number(bundleSize) || 0,
       bundleDiscount: Number(bundleDiscount) || 0,
-      applicableCategoryIds: applicableCategoryIds || null,
+      applicableZoneNames: applicableZoneNames || null,
       termsAndConditions: termsAndConditions || null,
     }
 

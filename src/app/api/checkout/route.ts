@@ -130,22 +130,28 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Promo ini hanya berlaku untuk merchandise' }, { status: 400 })
           }
 
-          // --- NEW: Category restriction validation ---
-          if (promoCodeData.applicableCategoryIds) {
+          // --- Zone restriction validation ---
+          // applicableZoneNames: JSON array of zone/category names
+          // Matches: priceCategory.name (Numbered Seating) or zoneName (General Admission)
+          if (promoCodeData.applicableZoneNames) {
             try {
-              const allowedIds: string[] = JSON.parse(promoCodeData.applicableCategoryIds)
-              if (Array.isArray(allowedIds) && allowedIds.length > 0) {
-                const buyerCategoryIds = seatPrices
-                  .map((s) => s.priceCategoryId)
+              const allowedZones: string[] = JSON.parse(promoCodeData.applicableZoneNames)
+              if (Array.isArray(allowedZones) && allowedZones.length > 0) {
+                // Get zone names from the seats being purchased
+                const buyerZoneNames = seats
+                  .map((s) => s.zoneName)
                   .filter(Boolean) as string[]
-                const matchingCategories = buyerCategoryIds.filter((id) => allowedIds.includes(id))
-                if (matchingCategories.length === 0) {
-                  const categories = await db.priceCategory.findMany({
-                    where: { id: { in: allowedIds } },
-                    select: { name: true },
+                // Also get priceCategory names for numbered seating
+                const buyerCategoryNames = seatPrices
+                  .map((s) => {
+                    const cat = priceCats.find((p) => p.id === s.priceCategoryId)
+                    return cat?.name
                   })
-                  const catNames = categories.map((c) => c.name).join(', ')
-                  return NextResponse.json({ error: `Promo ini hanya berlaku untuk kategori: ${catNames}` }, { status: 400 })
+                  .filter(Boolean) as string[]
+                const allBuyerZones = [...new Set([...buyerZoneNames, ...buyerCategoryNames])]
+                const matchingZones = allBuyerZones.filter((name) => allowedZones.includes(name))
+                if (matchingZones.length === 0) {
+                  return NextResponse.json({ error: `Promo ini hanya berlaku untuk zona: ${allowedZones.join(', ')}` }, { status: 400 })
                 }
               }
             } catch {

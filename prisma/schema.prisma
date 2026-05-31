@@ -279,8 +279,8 @@ model PromoCode {
   bundleSize     Int     @default(0)     // Number of tickets per bundle (0 = no bundling). E.g., 2 means "every 2 tickets"
   bundleDiscount Int     @default(0)     // Discount amount (IDR) applied per bundle. E.g., 10000 means Rp 10.000 off per bundle
 
-  // --- NEW: Category Restriction ---
-  applicableCategoryIds String? // JSON array of PriceCategory IDs. Null = all categories. E.g., '["cat1","cat2"]'
+  // --- NEW: Zone/Category Restriction ---
+  applicableZoneNames String? // JSON array of zone/category names. Null = all zones. E.g., '["VIP","Festival Kiri"]' — matches priceCategory.name (numbered) or zoneName (GA)
 
   // --- NEW: Terms & Conditions per Promo ---
   termsAndConditions String? // Editable T&C text for this promo. Displayed as clickable S&K popup at checkout. Null = no T&C

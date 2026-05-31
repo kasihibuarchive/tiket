@@ -18,7 +18,7 @@ function toJakarta(date: Date): Date {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { code, eventId, seatCount, hasMerchandise, categoryIds } = body
+    const { code, eventId, seatCount, hasMerchandise, zoneNames } = body
 
     if (!code || !eventId) {
       return NextResponse.json(
@@ -88,28 +88,24 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // --- NEW: Validate category restriction ---
-    if (promoCode.applicableCategoryIds) {
+    // --- Zone restriction validation ---
+    // applicableZoneNames stores JSON array of zone/category names
+    // Matches: priceCategory.name (Numbered Seating) OR zoneName (General Admission)
+    if (promoCode.applicableZoneNames) {
       try {
-        const allowedIds: string[] = JSON.parse(promoCode.applicableCategoryIds)
-        if (Array.isArray(allowedIds) && allowedIds.length > 0) {
-          const buyerCategoryIds: string[] = categoryIds || []
-          const matchingCategories = buyerCategoryIds.filter((id: string) => allowedIds.includes(id))
-          if (matchingCategories.length === 0) {
-            // Get category names for a friendlier error message
-            const categories = await db.priceCategory.findMany({
-              where: { id: { in: allowedIds } },
-              select: { name: true },
-            })
-            const catNames = categories.map((c) => c.name).join(', ')
+        const allowedZones: string[] = JSON.parse(promoCode.applicableZoneNames)
+        if (Array.isArray(allowedZones) && allowedZones.length > 0) {
+          const buyerZones: string[] = zoneNames || []
+          const matchingZones = buyerZones.filter((name: string) => allowedZones.includes(name))
+          if (matchingZones.length === 0) {
             return NextResponse.json({
               valid: false,
-              error: `Promo ini hanya berlaku untuk kategori: ${catNames}`,
+              error: `Promo ini hanya berlaku untuk zona: ${allowedZones.join(', ')}`,
             })
           }
         }
       } catch {
-        // If JSON parse fails, ignore category restriction
+        // If JSON parse fails, ignore zone restriction
       }
     }
 
@@ -121,7 +117,6 @@ export async function POST(request: NextRequest) {
       code: promoCode.code,
       target: promoCode.target,
       isPerItem: promoCode.isPerItem,
-      // --- NEW: bundling & S&K fields ---
       bundleSize: promoCode.bundleSize || 0,
       bundleDiscount: promoCode.bundleDiscount || 0,
       termsAndConditions: promoCode.termsAndConditions || null,
