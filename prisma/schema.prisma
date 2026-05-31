@@ -275,19 +275,6 @@ model PromoCode {
   minMerchItems Int          @default(0)       // Minimum merch items required to qualify
   isActive      Boolean      @default(true)
 
-  // NEW: Bundling ticket discount (Feature 1)
-  bundlingQty      Int       @default(0)       // e.g., 2 = "per setiap 2 tiket". 0 = not a bundling promo
-  bundlingDiscount Int       @default(0)       // e.g., 10000 = discount Rp 10.000 per bundle
-
-  // NEW: Category targeting (Feature 2)
-  targetPriceCategoryIds String?  // JSON array of PriceCategory IDs, null = all categories
-
-  // NEW: Terms & Conditions per promo (Feature 3)
-  termsAndConditions String?     // Editable S&K text, null = no S&K
-
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-
   // --- NEW: Bundling Discount ---
   bundleSize     Int     @default(0)     // Number of tickets per bundle (0 = no bundling). E.g., 2 means "every 2 tickets"
   bundleDiscount Int     @default(0)     // Discount amount (IDR) applied per bundle. E.g., 10000 means Rp 10.000 off per bundle
@@ -297,6 +284,9 @@ model PromoCode {
 
   // --- NEW: Terms & Conditions per Promo ---
   termsAndConditions String? // Editable T&C text for this promo. Displayed as clickable S&K popup at checkout. Null = no T&C
+
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
 
   // Relations
   event        Event?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
