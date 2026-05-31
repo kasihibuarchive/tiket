@@ -249,6 +249,7 @@ model Merchandise {
 enum DiscountType {
   PERCENT
   FIXED
+  BUNDLING_TICKET  // Discount per bundle of X tickets (e.g., every 2 tickets = Rp 10.000 off)
 }
 
 enum PromoTarget {
@@ -263,7 +264,7 @@ model PromoCode {
   eventId       String?      // Null = applicable to all events
   code          String       @unique // e.g., "TEATER50", "EARLYBIRD"
   discountType  DiscountType
-  discountValue Int          // Percentage (e.g., 50) or fixed amount (e.g., 25000)
+  discountValue Int          // Percentage (e.g., 50) or fixed amount (e.g., 25000). For BUNDLING_TICKET: not used (use bundlingDiscount instead)
   maxUses       Int          // Maximum number of uses
   currentUses   Int          @default(0)
   validFrom     DateTime
@@ -273,6 +274,17 @@ model PromoCode {
   minTickets    Int          @default(0)       // Minimum tickets required to qualify
   minMerchItems Int          @default(0)       // Minimum merch items required to qualify
   isActive      Boolean      @default(true)
+
+  // NEW: Bundling ticket discount (Feature 1)
+  bundlingQty      Int       @default(0)       // e.g., 2 = "per setiap 2 tiket". 0 = not a bundling promo
+  bundlingDiscount Int       @default(0)       // e.g., 10000 = discount Rp 10.000 per bundle
+
+  // NEW: Category targeting (Feature 2)
+  targetPriceCategoryIds String?  // JSON array of PriceCategory IDs, null = all categories
+
+  // NEW: Terms & Conditions per promo (Feature 3)
+  termsAndConditions String?     // Editable S&K text, null = no S&K
+
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 

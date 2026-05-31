@@ -28,7 +28,8 @@ export async function PUT(
     const body = await request.json()
     const {
       code, eventId, discountType, discountValue, maxUses, currentUses,
-      validFrom, validUntil, isActive, target, isPerItem, minTickets, minMerchItems
+      validFrom, validUntil, isActive, target, isPerItem, minTickets, minMerchItems,
+      bundlingQty, bundlingDiscount, targetPriceCategoryIds, termsAndConditions
     } = body
 
     const existing = await db.promoCode.findUnique({ where: { id } })
@@ -52,6 +53,10 @@ export async function PUT(
         isPerItem: isPerItem !== undefined ? isPerItem : existing.isPerItem,
         minTickets: minTickets !== undefined ? minTickets : existing.minTickets,
         minMerchItems: minMerchItems !== undefined ? minMerchItems : existing.minMerchItems,
+        bundlingQty: bundlingQty !== undefined ? bundlingQty : existing.bundlingQty,
+        bundlingDiscount: bundlingDiscount !== undefined ? bundlingDiscount : existing.bundlingDiscount,
+        targetPriceCategoryIds: targetPriceCategoryIds !== undefined ? targetPriceCategoryIds : existing.targetPriceCategoryIds,
+        termsAndConditions: termsAndConditions !== undefined ? termsAndConditions : existing.termsAndConditions,
       },
     })
 

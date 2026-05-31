@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose
 } from '@/components/ui/dialog'
@@ -17,7 +18,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue
 } from '@/components/ui/select'
 import {
-  Plus, Edit, Trash2, Tag, Loader2, Ticket
+  Plus, Edit, Trash2, Tag, Loader2, Ticket, FileText
 } from 'lucide-react'
 
 interface EventOption {
@@ -25,11 +26,18 @@ interface EventOption {
   title: string
 }
 
+interface PriceCategoryOption {
+  id: string
+  name: string
+  price: number
+  eventId: string
+}
+
 interface PromoCodeItem {
   id: string
   eventId: string | null
   code: string
-  discountType: 'PERCENT' | 'FIXED'
+  discountType: 'PERCENT' | 'FIXED' | 'BUNDLING_TICKET'
   discountValue: number
   maxUses: number
   currentUses: number
@@ -40,6 +48,10 @@ interface PromoCodeItem {
   minTickets: number
   minMerchItems: number
   isActive: boolean
+  bundlingQty: number
+  bundlingDiscount: number
+  targetPriceCategoryIds: string | null
+  termsAndConditions: string | null
   createdAt: string
   updatedAt: string
 }
@@ -47,7 +59,7 @@ interface PromoCodeItem {
 interface PromoCodeFormData {
   code: string
   eventId: string
-  discountType: 'PERCENT' | 'FIXED'
+  discountType: 'PERCENT' | 'FIXED' | 'BUNDLING_TICKET'
   discountValue: number
   maxUses: number
   validFrom: string
@@ -57,6 +69,10 @@ interface PromoCodeFormData {
   minTickets: number
   minMerchItems: number
   isActive: boolean
+  bundlingQty: number
+  bundlingDiscount: number
+  targetPriceCategoryIds: string[]  // NEW: array of category IDs
+  termsAndConditions: string         // NEW: S&K text
 }
 
 const TARGET_OPTIONS = [
@@ -79,12 +95,19 @@ const emptyForm: PromoCodeFormData = {
   minTickets: 0,
   minMerchItems: 0,
   isActive: true,
+  bundlingQty: 0,
+  bundlingDiscount: 0,
+  targetPriceCategoryIds: [],
+  termsAndConditions: '',
 }
 
-function formatDiscount(type: 'PERCENT' | 'FIXED', value: number, isPerItem: boolean): string {
-  const suffix = type === 'PERCENT' ? '%' : ''
-  const prefix = type === 'FIXED' ? 'Rp ' : ''
-  return `${prefix}${value.toLocaleString('id-ID')}${suffix}${isPerItem ? '/item' : ''}`
+function formatDiscount(item: PromoCodeItem): string {
+  if (item.discountType === 'BUNDLING_TICKET') {
+    return `Rp ${item.bundlingDiscount.toLocaleString('id-ID')}/${item.bundlingQty} tiket`
+  }
+  const suffix = item.discountType === 'PERCENT' ? '%' : ''
+  const prefix = item.discountType === 'FIXED' ? 'Rp ' : ''
+  return `${prefix}${item.discountValue.toLocaleString('id-ID')}${suffix}${item.isPerItem ? '/item' : ''}`
 }
 
 function toJakartaDatetimeLocal(dateStr: string): string {
@@ -116,10 +139,50 @@ function getTargetBadge(target: string): { label: string; cls: string } {
   }
 }
 
+// NEW: Generate S&K text procedurally based on promo config
+function generateTermsAndConditions(formData: PromoCodeFormData): string {
+  const lines: string[] = []
+  
+  lines.push('Syarat dan Ketentuan Promo:')
+  lines.push('')
+  
+  if (formData.discountType === 'BUNDLING_TICKET') {
+    lines.push(`1. Diskon sebesar Rp ${formData.bundlingDiscount.toLocaleString('id-ID')} berlaku untuk setiap pembelian ${formData.bundlingQty} tiket.`)
+    lines.push(`2. Contoh: Beli ${formData.bundlingQty * 2} tiket = diskon Rp ${(formData.bundlingDiscount * 2).toLocaleString('id-ID')}, beli ${formData.bundlingQty * 3} tiket = diskon Rp ${(formData.bundlingDiscount * 3).toLocaleString('id-ID')}.`)
+  } else if (formData.discountType === 'PERCENT') {
+    lines.push(`1. Diskon sebesar ${formData.discountValue}%${formData.isPerItem ? ' per item' : ''}.`)
+  } else if (formData.discountType === 'FIXED') {
+    lines.push(`1. Diskon sebesar Rp ${formData.discountValue.toLocaleString('id-ID')}${formData.isPerItem ? ' per item' : ''}.`)
+  }
+
+  if (formData.targetPriceCategoryIds.length > 0) {
+    lines.push(`${lines.length}. Promo hanya berlaku untuk kategori tiket tertentu.`)
+  }
+
+  if (formData.minTickets > 0) {
+    lines.push(`${lines.length}. Minimal pembelian ${formData.minTickets} tiket untuk menggunakan promo ini.`)
+  }
+
+  if (formData.minMerchItems > 0) {
+    lines.push(`${lines.length}. Minimal pembelian ${formData.minMerchItems} merchandise untuk menggunakan promo ini.`)
+  }
+
+  if (formData.target === 'BUNDLING') {
+    lines.push(`${lines.length}. Promo hanya berlaku jika membeli tiket beserta merchandise.`)
+  }
+
+  lines.push(`${lines.length}. Promo tidak dapat digabung dengan promo lain.`)
+  lines.push(`${lines.length}. Promo berlaku selama persediaan masih ada.`)
+  lines.push(`${lines.length}. Keputusan penyelenggara bersifat mutlak dan tidak dapat diganggu gugat.`)
+
+  return lines.join('\n')
+}
+
 export default function PromoCodesAdminPage() {
   const [promoCodes, setPromoCodes] = useState<PromoCodeItem[]>([])
   const [events, setEvents] = useState<EventOption[]>([])
   const [eventMap, setEventMap] = useState<Record<string, string>>({})
+  const [priceCategories, setPriceCategories] = useState<PriceCategoryOption[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -130,6 +193,15 @@ export default function PromoCodesAdminPage() {
     fetchEvents()
     fetchPromoCodes()
   }, [])
+
+  // Fetch price categories when event changes
+  useEffect(() => {
+    if (formData.eventId && formData.eventId !== 'all') {
+      fetchPriceCategories(formData.eventId)
+    } else {
+      setPriceCategories([])
+    }
+  }, [formData.eventId])
 
   async function fetchEvents() {
     try {
@@ -145,6 +217,19 @@ export default function PromoCodesAdminPage() {
         setEventMap(map)
       }
     } catch (err) { console.error('Failed to fetch events:', err) }
+  }
+
+  async function fetchPriceCategories(eventId: string) {
+    try {
+      const res = await fetch(`/api/events/${eventId}`)
+      if (res.ok) {
+        const data = await res.json()
+        const cats: PriceCategoryOption[] = (data.priceCategories || []).map((c: any) => ({
+          id: c.id, name: c.name, price: c.price, eventId,
+        }))
+        setPriceCategories(cats)
+      }
+    } catch (err) { console.error('Failed to fetch price categories:', err) }
   }
 
   async function fetchPromoCodes() {
@@ -169,6 +254,15 @@ export default function PromoCodesAdminPage() {
 
   function openEditDialog(item: PromoCodeItem) {
     setEditingId(item.id)
+    // Parse targetPriceCategoryIds from JSON
+    let targetCats: string[] = []
+    if (item.targetPriceCategoryIds) {
+      try { targetCats = JSON.parse(item.targetPriceCategoryIds) } catch { targetCats = [] }
+    }
+    // Fetch price categories for this event
+    if (item.eventId) {
+      fetchPriceCategories(item.eventId)
+    }
     setFormData({
       code: item.code,
       eventId: item.eventId || '',
@@ -182,6 +276,10 @@ export default function PromoCodesAdminPage() {
       minTickets: item.minTickets || 0,
       minMerchItems: item.minMerchItems || 0,
       isActive: item.isActive,
+      bundlingQty: item.bundlingQty || 0,
+      bundlingDiscount: item.bundlingDiscount || 0,
+      targetPriceCategoryIds: targetCats,
+      termsAndConditions: item.termsAndConditions || '',
     })
     setIsDialogOpen(true)
   }
@@ -200,6 +298,12 @@ export default function PromoCodesAdminPage() {
         maxUses: Number(formData.maxUses),
         minTickets: Number(formData.minTickets),
         minMerchItems: Number(formData.minMerchItems),
+        bundlingQty: Number(formData.bundlingQty),
+        bundlingDiscount: Number(formData.bundlingDiscount),
+        targetPriceCategoryIds: formData.targetPriceCategoryIds.length > 0 
+          ? JSON.stringify(formData.targetPriceCategoryIds) 
+          : null,
+        termsAndConditions: formData.termsAndConditions.trim() || null,
       }
       const res = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
       if (res.ok) {
@@ -231,6 +335,16 @@ export default function PromoCodesAdminPage() {
       })
       fetchPromoCodes()
     } catch (err) { console.error('Toggle error:', err) }
+  }
+
+  // Toggle a price category in the selection
+  function togglePriceCategory(catId: string) {
+    setFormData(prev => ({
+      ...prev,
+      targetPriceCategoryIds: prev.targetPriceCategoryIds.includes(catId)
+        ? prev.targetPriceCategoryIds.filter(id => id !== catId)
+        : [...prev.targetPriceCategoryIds, catId]
+    }))
   }
 
   return (
@@ -279,18 +393,23 @@ export default function PromoCodesAdminPage() {
                     if (item.minMerchItems > 0) reqs.push(`Min ${item.minMerchItems} merch`)
                     if (item.target === 'BUNDLING') reqs.push('Tiket + Merch')
                     if (item.target === 'MERCH') reqs.push('Wajib merch')
+                    if (item.discountType === 'BUNDLING_TICKET') reqs.push(`Per ${item.bundlingQty} tiket`)
                     return (
                       <TableRow key={item.id}>
                         <TableCell>
-                          <Badge variant="outline" className="font-mono text-xs tracking-wider border-charcoal/30 text-charcoal">{item.code}</Badge>
+                          <div className="flex flex-col gap-1">
+                            <Badge variant="outline" className="font-mono text-xs tracking-wider border-charcoal/30 text-charcoal">{item.code}</Badge>
+                            {item.termsAndConditions && <span className="text-[9px] text-blue-500 flex items-center gap-0.5"><FileText className="w-2.5 h-2.5" />S&K</span>}
+                          </div>
                         </TableCell>
                         <TableCell>
-                          <span className="font-medium text-sm text-charcoal">{formatDiscount(item.discountType, item.discountValue, item.isPerItem)}</span>
+                          <span className="font-medium text-sm text-charcoal">{formatDiscount(item)}</span>
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col gap-1">
                             <Badge className={`text-xs border ${tb.cls}`}>{tb.label}</Badge>
                             {item.isPerItem && <span className="text-[10px] text-purple-600 font-medium">Per Item</span>}
+                            {item.targetPriceCategoryIds && <span className="text-[10px] text-amber-600 font-medium">Kategori tertentu</span>}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -358,7 +477,7 @@ export default function PromoCodesAdminPage() {
             {/* Event */}
             <div className="space-y-2">
               <Label className="text-sm font-medium">Event (opsional)</Label>
-              <Select value={formData.eventId || 'all'} onValueChange={(val) => setFormData({ ...formData, eventId: val })}>
+              <Select value={formData.eventId || 'all'} onValueChange={(val) => setFormData({ ...formData, eventId: val, targetPriceCategoryIds: [] })}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Semua Event" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Semua Event</SelectItem>
@@ -381,32 +500,103 @@ export default function PromoCodesAdminPage() {
               </div>
             </div>
 
-            {/* Per Item Toggle */}
-            <div className="flex items-center justify-between rounded-lg border p-3">
-              <div>
-                <Label className="text-sm font-medium">Diskon Per Item</Label>
-                <p className="text-xs text-muted-foreground">Contoh: Presale — diskon per tiket, jadi beli 3 = 3x diskon</p>
-              </div>
-              <Switch checked={formData.isPerItem} onCheckedChange={(checked) => setFormData({ ...formData, isPerItem: checked })} className="data-[state=checked]:bg-purple-500" />
-            </div>
-
             {/* Discount Type & Value */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Tipe Diskon *</Label>
-                <Select value={formData.discountType} onValueChange={(val) => setFormData({ ...formData, discountType: val as 'PERCENT' | 'FIXED' })}>
+                <Select value={formData.discountType} onValueChange={(val) => setFormData({ ...formData, discountType: val as 'PERCENT' | 'FIXED' | 'BUNDLING_TICKET' })}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="PERCENT">Persentase (%)</SelectItem>
                     <SelectItem value="FIXED">Nominal Tetap (Rp)</SelectItem>
+                    <SelectItem value="BUNDLING_TICKET">Bundling Tiket</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-2">
-                <Label className="text-sm font-medium">Nilai Diskon *</Label>
-                <Input type="number" min={0} value={formData.discountValue} onChange={(e) => setFormData({ ...formData, discountValue: Number(e.target.value) })} placeholder={formData.discountType === 'PERCENT' ? '50' : '25000'} />
-              </div>
+              {formData.discountType !== 'BUNDLING_TICKET' ? (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">Nilai Diskon *</Label>
+                  <Input type="number" min={0} value={formData.discountValue} onChange={(e) => setFormData({ ...formData, discountValue: Number(e.target.value) })} placeholder={formData.discountType === 'PERCENT' ? '50' : '25000'} />
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <Label className="text-sm font-medium">&nbsp;</Label>
+                  <p className="text-xs text-muted-foreground mt-1">Atur jumlah & diskon bundling di bawah</p>
+                </div>
+              )}
             </div>
+
+            {/* NEW: Bundling Ticket fields (Feature 1) */}
+            {formData.discountType === 'BUNDLING_TICKET' && (
+              <div className="space-y-3 p-3 rounded-lg border-2 border-gold/20 bg-gold/5">
+                <Label className="text-sm font-semibold text-charcoal flex items-center gap-1.5">
+                  <Ticket className="w-4 h-4 text-gold" />
+                  Diskon Bundling Tiket
+                </Label>
+                <p className="text-xs text-muted-foreground">Diskon berlaku per setiap X tiket. Contoh: Setiap 2 tiket, diskon Rp 10.000.</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium">Jumlah Tiket per Bundel</Label>
+                    <Input type="number" min={2} value={formData.bundlingQty} onChange={(e) => setFormData({ ...formData, bundlingQty: Number(e.target.value) })} placeholder="2" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-medium">Diskon per Bundel (Rp)</Label>
+                    <Input type="number" min={0} value={formData.bundlingDiscount} onChange={(e) => setFormData({ ...formData, bundlingDiscount: Number(e.target.value) })} placeholder="10000" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Per Item Toggle */}
+            {formData.discountType !== 'BUNDLING_TICKET' && (
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <Label className="text-sm font-medium">Diskon Per Item</Label>
+                  <p className="text-xs text-muted-foreground">Contoh: Presale — diskon per tiket, jadi beli 3 = 3x diskon</p>
+                </div>
+                <Switch checked={formData.isPerItem} onCheckedChange={(checked) => setFormData({ ...formData, isPerItem: checked })} className="data-[state=checked]:bg-purple-500" />
+              </div>
+            )}
+
+            {/* NEW: Category targeting (Feature 2) */}
+            {priceCategories.length > 0 && (
+              <div className="space-y-3 p-3 rounded-lg border-2 border-amber-200 bg-amber-50/50">
+                <Label className="text-sm font-semibold text-charcoal flex items-center gap-1.5">
+                  <Tag className="w-4 h-4 text-amber-600" />
+                  Kategori Tiket yang Berlaku
+                </Label>
+                <p className="text-xs text-muted-foreground">Pilih kategori tiket tertentu. Jika tidak dipilih, promo berlaku untuk semua kategori.</p>
+                <div className="flex flex-wrap gap-2">
+                  {priceCategories.map((cat) => {
+                    const isSelected = formData.targetPriceCategoryIds.includes(cat.id)
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => togglePriceCategory(cat.id)}
+                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border-2 text-xs font-medium transition-all ${
+                          isSelected
+                            ? 'border-gold bg-gold/10 text-gold'
+                            : 'border-gray-200 text-gray-600 hover:border-gold/30'
+                        }`}
+                      >
+                        <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: isSelected ? '#C8A951' : '#e5e7eb' }} />
+                        {cat.name} (Rp {cat.price.toLocaleString('id-ID')})
+                      </button>
+                    )
+                  })}
+                </div>
+                {formData.targetPriceCategoryIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, targetPriceCategoryIds: [] })}
+                    className="text-[10px] text-red-500 hover:text-red-700 underline"
+                  >
+                    Hapus semua pilihan
+                  </button>
+                )}
+              </div>
+            )}
 
             {/* Min Requirements */}
             <div className="grid grid-cols-2 gap-4">
@@ -438,6 +628,36 @@ export default function PromoCodesAdminPage() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground -mt-2">⚠️ Waktu menggunakan zona WIB (Jakarta)</p>
+
+            {/* NEW: Terms & Conditions (Feature 3) */}
+            <div className="space-y-3 p-3 rounded-lg border-2 border-blue-100 bg-blue-50/30">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold text-charcoal flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  Syarat &amp; Ketentuan
+                </Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const generated = generateTermsAndConditions(formData)
+                    setFormData({ ...formData, termsAndConditions: generated })
+                  }}
+                  className="text-xs h-7"
+                >
+                  Auto-generate
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">Teks S&K yang akan ditampilkan di halaman checkout saat promo diterapkan. Klik "Auto-generate" untuk membuat otomatis, lalu edit sesuai kebutuhan.</p>
+              <Textarea
+                value={formData.termsAndConditions}
+                onChange={(e) => setFormData({ ...formData, termsAndConditions: e.target.value })}
+                placeholder="Syarat dan ketentuan promo..."
+                rows={6}
+                className="text-sm"
+              />
+            </div>
 
             {/* Active Toggle */}
             <div className="flex items-center justify-between rounded-lg border p-3">

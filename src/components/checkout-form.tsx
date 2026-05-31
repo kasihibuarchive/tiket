@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog'
-import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store, ChevronRight, CheckCircle2 } from 'lucide-react'
+import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store, ChevronRight, CheckCircle2, FileText, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { savePendingTrx } from '@/lib/pending-trx'
 import { getSessionId } from '@/lib/session-id'
@@ -40,10 +40,15 @@ interface MerchItem {
 interface AppliedPromo {
   id: string
   code: string
-  discountType: 'PERCENT' | 'FIXED'
+  discountType: 'PERCENT' | 'FIXED' | 'BUNDLING_TICKET'
   discountValue: number
   target: string
   isPerItem: boolean
+  // NEW
+  bundlingQty: number
+  bundlingDiscount: number
+  targetPriceCategoryIds: string | null
+  termsAndConditions: string | null
 }
 
 interface CheckoutFormProps {
@@ -109,6 +114,9 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
   const [promoLoading, setPromoLoading] = useState(false)
   const [promoError, setPromoError] = useState<string | null>(null)
 
+  // NEW: S&K dialog state (Feature 3)
+  const [snkDialogOpen, setSnkDialogOpen] = useState(false)
+
   const sessionId = getSessionId()
   const seatCodes = selectedSeats.map((s) => s.seatCode)
 
@@ -152,6 +160,18 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     fetchEvent()
   }, [eventId, adminFee])
 
+  // NEW: Compute eligible seats based on promo category targeting (Feature 2)
+  const eligibleSeats = useMemo(() => {
+    if (!appliedPromo?.targetPriceCategoryIds) return selectedSeats
+    try {
+      const targetCatIds: string[] = JSON.parse(appliedPromo.targetPriceCategoryIds)
+      if (targetCatIds.length === 0) return selectedSeats
+      return selectedSeats.filter(s => s.priceCategory && targetCatIds.includes(s.priceCategory.id))
+    } catch {
+      return selectedSeats
+    }
+  }, [appliedPromo, selectedSeats])
+
   // === ALL CALCULATIONS ===
   const seatTotal = totalPrice
   const resolvedAdminFee = adminFee > 0 ? adminFee : eventAdminFee
@@ -159,28 +179,47 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
   const merchSubtotal = merchandise.reduce((sum, m) => sum + m.price * m.quantity, 0)
   const totalBeforeDiscount = seatTotal + effectiveAdminFee + merchSubtotal
 
+  // NEW: Eligible ticket subtotal (only seats in targeted categories)
+  const eligibleTicketSubtotal = useMemo(() => {
+    const eligibleSeatTotal = eligibleSeats.reduce((sum, s) => sum + (s.priceCategory?.price || 0), 0)
+    const eligibleAdminFee = resolvedAdminFee * eligibleSeats.length
+    return eligibleSeatTotal + eligibleAdminFee
+  }, [eligibleSeats, resolvedAdminFee])
+
   // Calculate discount
   let discountAmount = 0
   let discountLabel = ''
 
   if (appliedPromo) {
-    const ticketSubtotal = seatTotal + effectiveAdminFee
     const { target = 'ALL', isPerItem = false, discountType, discountValue } = appliedPromo
 
-    if (target === 'TICKET') {
-      if (isPerItem && seatCodes.length > 0) {
+    // NEW: BUNDLING_TICKET discount type (Feature 1)
+    if (discountType === 'BUNDLING_TICKET') {
+      const qty = appliedPromo.bundlingQty || 0
+      const disc = appliedPromo.bundlingDiscount || 0
+      if (qty > 0 && disc > 0) {
+        const eligibleCount = eligibleSeats.length
+        const bundles = Math.floor(eligibleCount / qty)
+        discountAmount = bundles * disc
+        discountLabel = `Rp ${disc.toLocaleString('id-ID')}/${qty} tiket × ${bundles} bundel`
+      }
+    } else if (target === 'TICKET') {
+      // NEW: Category-aware discount (Feature 2)
+      const subTotal = eligibleSeats.length > 0 ? eligibleTicketSubtotal : (seatTotal + effectiveAdminFee)
+      const ticketCount = eligibleSeats.length > 0 ? eligibleSeats.length : seatCodes.length
+
+      if (isPerItem && ticketCount > 0) {
         const perItemDiscount =
           discountType === 'PERCENT'
-            ? Math.round((ticketSubtotal / seatCodes.length) * discountValue / 100)
-            : Math.min(discountValue, ticketSubtotal / seatCodes.length)
-        discountAmount = perItemDiscount * seatCodes.length
-        discountLabel = `Rp ${perItemDiscount.toLocaleString('id-ID')}/tiket × ${seatCodes.length} tiket`
+            ? Math.round((subTotal / ticketCount) * discountValue / 100)
+            : Math.min(discountValue, subTotal / ticketCount)
+        discountAmount = perItemDiscount * ticketCount
+        discountLabel = `Rp ${perItemDiscount.toLocaleString('id-ID')}/tiket × ${ticketCount} tiket`
       } else {
         discountAmount =
           discountType === 'PERCENT'
-            ? Math.round(ticketSubtotal * discountValue / 100)
-            : Math.min(discountValue, ticketSubtotal)
-        discountLabel = ''
+            ? Math.round(subTotal * discountValue / 100)
+            : Math.min(discountValue, subTotal)
       }
     } else if (target === 'MERCH' && merchSubtotal > 0) {
       const totalMerchQty = merchandise.filter(m => m.quantity > 0).reduce((s, m) => s + m.quantity, 0)
@@ -197,18 +236,25 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
             : Math.min(discountValue, merchSubtotal)
       }
     } else if (target === 'BUNDLING' || target === 'ALL') {
-      const totalItems = seatCodes.length + merchandise.filter(m => m.quantity > 0).reduce((s, m) => s + m.quantity, 0)
+      // For ALL target, also respect category targeting
+      let subTotal = (eligibleSeats.length > 0 && appliedPromo.targetPriceCategoryIds) 
+        ? eligibleTicketSubtotal + merchSubtotal 
+        : totalBeforeDiscount
+      let totalItems = (eligibleSeats.length > 0 && appliedPromo.targetPriceCategoryIds)
+        ? eligibleSeats.length + merchandise.filter(m => m.quantity > 0).reduce((s, m) => s + m.quantity, 0)
+        : seatCodes.length + merchandise.filter(m => m.quantity > 0).reduce((s, m) => s + m.quantity, 0)
+
       if (isPerItem && totalItems > 0) {
         const perItemDiscount =
           discountType === 'PERCENT'
-            ? Math.round((totalBeforeDiscount / totalItems) * discountValue / 100)
-            : Math.min(discountValue, totalBeforeDiscount / totalItems)
+            ? Math.round((subTotal / totalItems) * discountValue / 100)
+            : Math.min(discountValue, subTotal / totalItems)
         discountAmount = perItemDiscount * totalItems
       } else {
         discountAmount =
           discountType === 'PERCENT'
-            ? Math.round(totalBeforeDiscount * discountValue / 100)
-            : Math.min(discountValue, totalBeforeDiscount)
+            ? Math.round(subTotal * discountValue / 100)
+            : Math.min(discountValue, subTotal)
       }
     }
   }
@@ -226,6 +272,11 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     setPromoLoading(true)
     setPromoError(null)
     try {
+      // Send priceCategoryIds for category-aware validation
+      const priceCategoryIds = selectedSeats
+        .map(s => s.priceCategory?.id)
+        .filter((id): id is string => !!id)
+
       const res = await fetch('/api/promo/validate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -234,11 +285,23 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
           eventId,
           seatCount: seatCodes.length,
           hasMerchandise: merchandise.some((m) => m.quantity > 0),
+          priceCategoryIds,
         }),
       })
       const data = await res.json()
       if (data.valid) {
-        setAppliedPromo({ id: data.id, code: data.code, discountType: data.discountType, discountValue: data.discountValue, target: data.target || 'ALL', isPerItem: data.isPerItem || false })
+        setAppliedPromo({
+          id: data.id,
+          code: data.code,
+          discountType: data.discountType,
+          discountValue: data.discountValue,
+          target: data.target || 'ALL',
+          isPerItem: data.isPerItem || false,
+          bundlingQty: data.bundlingQty || 0,
+          bundlingDiscount: data.bundlingDiscount || 0,
+          targetPriceCategoryIds: data.targetPriceCategoryIds || null,
+          termsAndConditions: data.termsAndConditions || null,
+        })
         setPromoError(null)
       } else {
         setPromoError(data.error || 'Kode promo tidak valid')
@@ -353,6 +416,14 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     groupedChannels[ch.group].push(ch)
   }
 
+  // NEW: Generate promo badge text based on discount type
+  function getPromoBadgeText(promo: AppliedPromo): string {
+    if (promo.discountType === 'BUNDLING_TICKET') {
+      return `Rp ${promo.bundlingDiscount.toLocaleString('id-ID')}/${promo.bundlingQty} tiket`
+    }
+    return promo.discountType === 'PERCENT' ? `${promo.discountValue}%` : `Rp ${promo.discountValue.toLocaleString('id-ID')}`
+  }
+
   return (
     <div className="mt-8 animate-fade-in">
       <button onClick={onBack} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-charcoal transition-colors mb-4">
@@ -404,9 +475,20 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
               {discountAmount > 0 && (
                 <div className="space-y-0.5">
                   <div className="flex justify-between text-sm text-success font-medium">
-                    <span>
-                      <Tag className="w-3 h-3 inline mr-1" />
+                    <span className="flex items-center gap-1">
+                      <Tag className="w-3 h-3" />
                       Diskon ({appliedPromo?.code})
+                      {/* NEW: S&K button (Feature 3) */}
+                      {appliedPromo?.termsAndConditions && (
+                        <button
+                          type="button"
+                          onClick={() => setSnkDialogOpen(true)}
+                          className="inline-flex items-center gap-0.5 text-[10px] text-gold hover:text-gold/80 underline underline-offset-2 ml-1"
+                        >
+                          <FileText className="w-3 h-3" />
+                          S&K
+                        </button>
+                      )}
                     </span>
                     <span>- Rp {discountAmount.toLocaleString('id-ID')}</span>
                   </div>
@@ -523,17 +605,36 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                 Gunakan Kode Promo
               </Label>
               {appliedPromo ? (
-                <div className="flex items-center justify-between bg-gold/10 border border-gold/30 rounded-lg px-3 py-2">
-                  <div className="flex items-center gap-2">
-                    <Tag className="w-4 h-4 text-gold" />
-                    <span className="text-sm font-mono font-semibold text-gold">{appliedPromo.code}</span>
-                    <Badge variant="secondary" className="text-xs">
-                      {appliedPromo.discountType === 'PERCENT' ? `${appliedPromo.discountValue}%` : `Rp ${appliedPromo.discountValue.toLocaleString('id-ID')}`}
-                    </Badge>
+                <div className="bg-gold/10 border border-gold/30 rounded-lg px-3 py-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Tag className="w-4 h-4 text-gold" />
+                      <span className="text-sm font-mono font-semibold text-gold">{appliedPromo.code}</span>
+                      <Badge variant="secondary" className="text-xs">
+                        {getPromoBadgeText(appliedPromo)}
+                      </Badge>
+                      {/* NEW: S&K button when promo is applied (Feature 3) */}
+                      {appliedPromo.termsAndConditions && (
+                        <button
+                          type="button"
+                          onClick={() => setSnkDialogOpen(true)}
+                          className="inline-flex items-center gap-0.5 text-[10px] text-blue-600 hover:text-blue-800 underline underline-offset-2"
+                        >
+                          <Info className="w-3 h-3" />
+                          S&K berlaku
+                        </button>
+                      )}
+                    </div>
+                    <button type="button" onClick={handleRemovePromo} className="text-danger hover:text-danger/80">
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
-                  <button type="button" onClick={handleRemovePromo} className="text-danger hover:text-danger/80">
-                    <X className="w-4 h-4" />
-                  </button>
+                  {/* NEW: Show bundling info (Feature 1) */}
+                  {appliedPromo.discountType === 'BUNDLING_TICKET' && (
+                    <p className="text-[10px] text-gold/70 mt-1">
+                      Diskon Rp {appliedPromo.bundlingDiscount.toLocaleString('id-ID')} per {appliedPromo.bundlingQty} tiket
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="flex gap-2">
@@ -719,6 +820,37 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
                 </div>
               </div>
             ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* NEW: S&K (Syarat & Ketentuan) Promo Dialog (Feature 3) */}
+      <Dialog open={snkDialogOpen} onOpenChange={setSnkDialogOpen}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="font-serif text-lg flex items-center gap-2">
+              <FileText className="w-5 h-5 text-gold" />
+              Syarat &amp; Ketentuan Promo
+            </DialogTitle>
+            <DialogDescription>
+              Kode promo: <span className="font-mono font-bold text-gold">{appliedPromo?.code}</span>
+            </DialogDescription>
+          </DialogHeader>
+          {appliedPromo?.termsAndConditions ? (
+            <div className="space-y-3 mt-2">
+              <div className="bg-cream rounded-lg p-4 border border-gold/10">
+                <div className="prose prose-sm max-w-none text-charcoal/80 whitespace-pre-line text-sm leading-relaxed">
+                  {appliedPromo.termsAndConditions}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Tidak ada syarat & ketentuan khusus untuk promo ini.</p>
+          )}
+          <div className="flex justify-end mt-4">
+            <Button variant="outline" onClick={() => setSnkDialogOpen(false)} className="text-sm">
+              Tutup
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

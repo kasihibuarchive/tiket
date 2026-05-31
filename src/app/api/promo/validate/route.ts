@@ -18,7 +18,7 @@ function toJakarta(date: Date): Date {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { code, eventId, seatCount, hasMerchandise } = body
+    const { code, eventId, seatCount, hasMerchandise, priceCategoryIds } = body
 
     if (!code || !eventId) {
       return NextResponse.json(
@@ -88,6 +88,41 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    // NEW: Validate category targeting (Feature 2)
+    // If promo has targetPriceCategoryIds, check that the user's selected seats include at least one matching category
+    if (promoCode.targetPriceCategoryIds) {
+      try {
+        const targetCatIds: string[] = JSON.parse(promoCode.targetPriceCategoryIds)
+        if (targetCatIds.length > 0 && priceCategoryIds && Array.isArray(priceCategoryIds)) {
+          const hasMatchingCategory = priceCategoryIds.some((id: string) => targetCatIds.includes(id))
+          if (!hasMatchingCategory) {
+            // Fetch category names for better error message
+            const categories = await db.priceCategory.findMany({
+              where: { id: { in: targetCatIds } },
+              select: { name: true },
+            })
+            const catNames = categories.map(c => c.name).join(', ')
+            return NextResponse.json({
+              valid: false,
+              error: `Promo ini hanya berlaku untuk kategori: ${catNames}`,
+            })
+          }
+        }
+      } catch {
+        // Invalid JSON, skip category check
+      }
+    }
+
+    // NEW: Validate bundling ticket requirements (Feature 1)
+    if (promoCode.discountType === 'BUNDLING_TICKET') {
+      if (promoCode.bundlingQty > 0 && seats < promoCode.bundlingQty) {
+        return NextResponse.json({
+          valid: false,
+          error: `Promo ini berlaku untuk pembelian minimal ${promoCode.bundlingQty} tiket`,
+        })
+      }
+    }
+
     return NextResponse.json({
       valid: true,
       id: promoCode.id,
@@ -96,6 +131,13 @@ export async function POST(request: NextRequest) {
       code: promoCode.code,
       target: promoCode.target,
       isPerItem: promoCode.isPerItem,
+      // NEW: bundling fields
+      bundlingQty: promoCode.bundlingQty,
+      bundlingDiscount: promoCode.bundlingDiscount,
+      // NEW: category targeting
+      targetPriceCategoryIds: promoCode.targetPriceCategoryIds,
+      // NEW: S&K
+      termsAndConditions: promoCode.termsAndConditions,
     })
   } catch (error) {
     console.error('Error validating promo code:', error)
