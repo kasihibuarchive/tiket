@@ -993,6 +993,8 @@ export default function EventDetailPage() {
                       layoutImage={event.layoutImage}
                       gaZoneConfig={event.gaZoneConfig}
                       seatType={event.seatType}
+                      hideSeatAvailability={event.hideSeatAvailability}
+                      hideSoldCount={event.hideSoldCount}
                       onSelectionChange={handleSelectionChange}
                       onProceedToCheckout={handleProceedToCheckout}
                     />

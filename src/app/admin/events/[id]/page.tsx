@@ -814,7 +814,7 @@ export default function AdminEventEditPage() {
           <div className="flex items-center justify-between rounded-lg border p-4">
             <div className="space-y-0.5">
               <Label className="text-sm font-medium">Sembunyikan Ketersediaan Kursi</Label>
-              <p className="text-xs text-muted-foreground">Sembunyikan progress bar dan jumlah kursi tersedia (misal: “45/100”, “70% tersedia”)</p>
+              <p className="text-xs text-muted-foreground">Sembunyikan progress bar, jumlah kursi tersedia (misal: “45/100”, “70% tersedia”), kapasitas & tiket tersedia per zona (GA)</p>
             </div>
             <button
               type="button"

@@ -46,6 +46,8 @@ interface SeatMapProps {
   layoutImage?: string | null
   gaZoneConfig?: string | null
   seatType?: string | null
+  hideSeatAvailability?: boolean
+  hideSoldCount?: boolean
   onSelectionChange?: (selectedSeats: SeatData[], totalPrice: number) => void
   onProceedToCheckout?: (selectedSeats: SeatData[]) => void
 }
@@ -66,7 +68,7 @@ const SEAT_GAP = 3 // px gap between seats in a block
 // =====================
 // Seat Map Component
 // =====================
-export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, layoutImage, gaZoneConfig, seatType, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
+export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategories, layoutData, layoutImage, gaZoneConfig, seatType, hideSeatAvailability, hideSoldCount, onSelectionChange, onProceedToCheckout }: SeatMapProps) {
   const [seats, setSeats] = useState<SeatData[]>(initialSeats)
   const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
   const [isLocked, setIsLocked] = useState(false) // Whether seats are confirmed locked via API
@@ -1022,18 +1024,22 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
                     )}>
                       {zone.name}
                     </h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Kapasitas: {zone.capacity} orang
-                    </p>
+                    {!hideSeatAvailability && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Kapasitas: {zone.capacity} orang
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center justify-between mt-2">
-                  <p className={cn(
-                    'text-sm font-medium',
-                    available === 0 ? 'text-red-500' : 'text-green-600'
-                  )}>
-                    Tersedia: {available}
-                  </p>
+                  {!hideSeatAvailability && (
+                    <p className={cn(
+                      'text-sm font-medium',
+                      available === 0 ? 'text-red-500' : 'text-green-600'
+                    )}>
+                      Tersedia: {available}
+                    </p>
+                  )}
                   {price > 0 && (
                     <p className="text-xs text-muted-foreground">
                       Rp {price.toLocaleString('id-ID')}
@@ -1056,7 +1062,10 @@ export function SeatMap({ eventId, showDateId, seats: initialSeats, priceCategor
             <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex-1">
                 <p className="text-sm font-medium text-charcoal">
-                  {selectedGAZoneData.available} kursi tersedia di zona ini
+                  {hideSeatAvailability
+                    ? `Zona ${gaZones.find(z => z.id === selectedGAZoneId)?.name || ''} dipilih`
+                    : `${selectedGAZoneData.available} kursi tersedia di zona ini`
+                  }
                 </p>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {gaZones.find(z => z.id === selectedGAZoneId)?.name}
