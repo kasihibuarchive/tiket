@@ -21,6 +21,7 @@ interface EventCardProps {
   isPublished?: boolean
   isCompleted?: boolean
   reviewStats?: { average: number; total: number }
+  hideSeatAvailability?: boolean
 }
 
 export function EventCard({
@@ -36,6 +37,7 @@ export function EventCard({
   isPublished = true,
   isCompleted = false,
   reviewStats,
+  hideSeatAvailability = false,
 }: EventCardProps) {
   const dateStr = formatEventDate(showDate)
   const timeStr = formatEventTime(showDate)
@@ -84,7 +86,7 @@ export function EventCard({
                 Selesai
               </Badge>
             </div>
-          ) : seatSummary.total > 0 ? (
+          ) : !hideSeatAvailability && seatSummary.total > 0 ? (
             <div className="absolute top-3 right-3">
               <Badge
                 variant="secondary"

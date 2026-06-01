@@ -45,6 +45,8 @@ interface EventData {
   castData?: string | null
   reviewsData?: string | null
   reviewStats?: { average: number; total: number }
+  hideSeatAvailability?: boolean
+  hideSoldCount?: boolean
 }
 
 interface SeatData {
@@ -613,21 +615,25 @@ export default function EventDetailPage() {
                   </div>
                 )}
 
-                {/* Seat/Ticket availability — only for active events */}
-                {!isCompleted && (
+                {/* Seat/Ticket availability — only for active events, and at least one stat visible */}
+                {!isCompleted && !(event.hideSeatAvailability && event.hideSoldCount) && (
                   <div className="bg-white/5 rounded-lg p-4 mb-6">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm text-white/70">
                         {event.seatType === 'GENERAL_ADMISSION' ? 'Ketersediaan Tiket' : 'Ketersediaan Kursi'}
                       </span>
-                      <span className="text-sm font-semibold text-gold">
-                        {seatSummary.available} / {seatSummary.total}
-                      </span>
+                      {!event.hideSeatAvailability && (
+                        <span className="text-sm font-semibold text-gold">
+                          {seatSummary.available} / {seatSummary.total}
+                        </span>
+                      )}
                     </div>
-                    <Progress value={availablePercent} className="h-2 bg-white/10" />
+                    {!event.hideSeatAvailability && (
+                      <Progress value={availablePercent} className="h-2 bg-white/10" />
+                    )}
                     <div className="flex justify-between mt-2 text-xs text-white/40">
-                      <span>{availablePercent}% tersedia</span>
-                      <span>{seatSummary.sold} terjual</span>
+                      {!event.hideSeatAvailability && <span>{availablePercent}% tersedia</span>}
+                      {!event.hideSoldCount && <span>{seatSummary.sold} terjual</span>}
                     </div>
                   </div>
                 )}

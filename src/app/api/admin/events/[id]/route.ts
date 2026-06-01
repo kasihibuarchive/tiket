@@ -77,6 +77,8 @@ export async function PUT(
       seatType,
       castData,
       reviewsData,
+      hideSeatAvailability,
+      hideSoldCount,
     } = body
 
     const event = await db.event.findUnique({ where: { id } })
@@ -119,6 +121,8 @@ export async function PUT(
         seatType: seatType !== undefined ? seatType : event.seatType,
         castData: castData !== undefined ? castData : event.castData,
         reviewsData: reviewsData !== undefined ? reviewsData : event.reviewsData,
+        hideSeatAvailability: hideSeatAvailability !== undefined ? hideSeatAvailability : event.hideSeatAvailability,
+        hideSoldCount: hideSoldCount !== undefined ? hideSoldCount : event.hideSoldCount,
       },
     })
 

@@ -92,6 +92,10 @@ model Event {
   reviewsData     String?   // JSON: [{authorName, rating: 1-5, comment, createdAt}] — Legacy admin reviews (kept for backward compat)
   isCompleted     Boolean   @default(false) // Event performance has ended — guests can review but can't buy tickets
 
+  // Visibility settings — control what public sees
+  hideSeatAvailability Boolean @default(false) // Hide seat availability bar (progress bar + "X/Y tersedia")
+  hideSoldCount        Boolean @default(false) // Hide sold count ("X terjual")
+
   // Relations
   reviews         Review[]
   shortLinks      ShortLink[]

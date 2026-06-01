@@ -186,6 +186,8 @@ interface EventData {
   seatType: string | null
   castData: string | null
   reviewsData: string | null
+  hideSeatAvailability?: boolean
+  hideSoldCount?: boolean
   priceCategories: PriceCategoryData[]
   showDates: ShowDateData[]
 }
@@ -458,6 +460,8 @@ export default function AdminEventEditPage() {
   const [adminFee, setAdminFee] = useState(0)
   const [isPublished, setIsPublished] = useState(false)
   const [isCompleted, setIsCompleted] = useState(false)
+  const [hideSeatAvailability, setHideSeatAvailability] = useState(false)
+  const [hideSoldCount, setHideSoldCount] = useState(false)
 
   // Cast & Crew
   const [cast, setCast] = useState<CastMember[]>([])
@@ -496,6 +500,8 @@ export default function AdminEventEditPage() {
         setAdminFee(ev.adminFee || 0)
         setIsPublished(ev.isPublished)
         setIsCompleted(ev.isCompleted || false)
+        setHideSeatAvailability(ev.hideSeatAvailability || false)
+        setHideSoldCount(ev.hideSoldCount || false)
 
         // Parse cast & reviews
         setCast(safeParseArray<CastMember>(ev.castData, []))
@@ -527,6 +533,8 @@ export default function AdminEventEditPage() {
           adminFee,
           isPublished,
           isCompleted,
+          hideSeatAvailability,
+          hideSoldCount,
           castData: JSON.stringify(cast),
           reviewsData: JSON.stringify(reviews),
         }),
@@ -792,6 +800,58 @@ export default function AdminEventEditPage() {
                 </p>
               )}
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Visibility Settings Card ────────────────────────────── */}
+      <Card className="border-border/50">
+        <CardHeader className="pb-3">
+          <CardTitle className="font-serif text-lg text-charcoal">Pengaturan Visibilitas</CardTitle>
+          <p className="text-xs text-muted-foreground">Atur informasi apa saja yang terlihat oleh pembeli di halaman event.</p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Sembunyikan Ketersediaan Kursi</Label>
+              <p className="text-xs text-muted-foreground">Sembunyikan progress bar dan jumlah kursi tersedia (misal: “45/100”, “70% tersedia”)</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHideSeatAvailability(!hideSeatAvailability)}
+              className={cn(
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4',
+                hideSeatAvailability ? 'bg-amber-500' : 'bg-muted'
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                  hideSeatAvailability ? 'translate-x-6' : 'translate-x-1'
+                )}
+              />
+            </button>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-4">
+            <div className="space-y-0.5">
+              <Label className="text-sm font-medium">Sembunyikan Jumlah Terjual</Label>
+              <p className="text-xs text-muted-foreground">Sembunyikan teks jumlah tiket terjual (misal: “55 terjual”)</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setHideSoldCount(!hideSoldCount)}
+              className={cn(
+                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4',
+                hideSoldCount ? 'bg-amber-500' : 'bg-muted'
+              )}
+            >
+              <span
+                className={cn(
+                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+                  hideSoldCount ? 'translate-x-6' : 'translate-x-1'
+                )}
+              />
+            </button>
           </div>
         </CardContent>
       </Card>

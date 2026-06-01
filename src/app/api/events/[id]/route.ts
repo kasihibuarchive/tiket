@@ -34,6 +34,8 @@ export async function GET(
           adminFee: true,
           castData: true,
           reviewsData: true,
+          hideSeatAvailability: true,
+          hideSoldCount: true,
           createdAt: true,
           updatedAt: true,
         },

@@ -67,6 +67,8 @@ export async function GET(request: NextRequest) {
           isPublished: event.isPublished,
           isCompleted: event.isCompleted,
           seatType: event.seatType,
+          hideSeatAvailability: event.hideSeatAvailability,
+          hideSoldCount: event.hideSoldCount,
           createdAt: event.createdAt,
           updatedAt: event.updatedAt,
           priceCategories: eventPriceCats,
