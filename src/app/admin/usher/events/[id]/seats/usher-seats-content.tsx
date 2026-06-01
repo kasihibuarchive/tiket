@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import {
   Check, X, Map as MapIcon, Ticket, User, Users, ArrowLeft,
   ChevronDown, ChevronRight, Loader2, Crown, GraduationCap,
-  Minimize2, Maximize2, Hash, Mail, Phone, CreditCard, Clock, Send, Download,
+  Minimize2, Maximize2, Hash, Mail, Phone, CreditCard, Clock, Send, Download, Tag,
 } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
@@ -56,6 +56,8 @@ interface SeatOwnerInfo {
   emailStatus: string | null
   emailError: string | null
   lastEmailSentAt: string | null
+  promoCode: string | null
+  promoDetails: { discountType: string; discountValue: number; target: string; bundleSize: number; bundleDiscount: number } | null
 }
 
 interface GaZoneDef {
@@ -847,6 +849,11 @@ export default function UsherSeatMapPage() {
                                               Undangan
                                             </Badge>
                                           )}
+                                          {owner?.promoCode && (
+                                            <Badge className="ml-1.5 bg-amber-50 text-amber-700 border-amber-200 text-[10px] px-1.5 py-0">
+                                              {owner.promoCode}
+                                            </Badge>
+                                          )}
                                         </p>
                                       </div>
                                     </div>
@@ -882,6 +889,21 @@ export default function UsherSeatMapPage() {
                                         day: 'numeric', month: 'short', year: 'numeric',
                                         hour: '2-digit', minute: '2-digit',
                                       })}
+                                    </p>
+                                  )}
+                                  {owner?.promoCode && (
+                                    <p className="text-[10px] text-amber-600 mt-0.5 ml-9 flex items-center gap-1">
+                                      <Tag className="w-2.5 h-2.5" /> {owner.promoCode}
+                                      {owner.promoDetails && (
+                                        <span className="text-amber-500">
+                                          {owner.promoDetails.discountType === 'BUNDLING_TICKET'
+                                            ? `(bundling ${owner.promoDetails.bundleSize} tiket)`
+                                            : owner.promoDetails.discountType === 'PERCENT'
+                                              ? `(${owner.promoDetails.discountValue}%)`
+                                              : `(Rp ${owner.promoDetails.discountValue.toLocaleString('id-ID')})`
+                                          }
+                                        </span>
+                                      )}
                                     </p>
                                   )}
                                 </button>
@@ -1559,6 +1581,32 @@ export default function UsherSeatMapPage() {
                     </p>
                   </div>
                 )}
+
+                {/* Promo Info */}
+                <div className="space-y-1">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                    <Tag className="w-3 h-3" /> Promo
+                  </p>
+                  {selectedSeat.promoCode ? (
+                    <div className="space-y-0.5">
+                      <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-xs">
+                        {selectedSeat.promoCode}
+                      </Badge>
+                      {selectedSeat.promoDetails && (
+                        <p className="text-[10px] text-muted-foreground leading-relaxed">
+                          {selectedSeat.promoDetails.discountType === 'BUNDLING_TICKET'
+                            ? `Bundling: beli ${selectedSeat.promoDetails.bundleSize} tiket, diskon Rp ${selectedSeat.promoDetails.bundleDiscount.toLocaleString('id-ID')}/bundle`
+                            : selectedSeat.promoDetails.discountType === 'PERCENT'
+                              ? `Diskon ${selectedSeat.promoDetails.discountValue}%`
+                              : `Diskon Rp ${selectedSeat.promoDetails.discountValue.toLocaleString('id-ID')}`
+                          }
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-[10px] text-muted-foreground italic">Tanpa promo</p>
+                  )}
+                </div>
               </div>
 
               {/* Email Delivery Status */}

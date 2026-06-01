@@ -53,15 +53,23 @@ export async function GET(request: NextRequest) {
 
     const rawResults: any[] = await db.$queryRawUnsafe(`
       SELECT
-        "transactionId", "customerName", "customerEmail", "customerWa",
-        "seatCodes", "paymentStatus", "checkInTime", "paidAt",
-        "totalAmount"${emailColumnsSelect}
-      FROM "Transaction"
-      WHERE "eventId" = $1
-        AND "seatCodes" IS NOT NULL
+        t."transactionId", t."customerName", t."customerEmail", t."customerWa",
+        t."seatCodes", t."paymentStatus", t."checkInTime", t."paidAt",
+        t."totalAmount"${emailColumnsSelect},
+        t."promoCodeId",
+        p."code" AS "promoCode",
+        p."discountType" AS "promoDiscountType",
+        p."discountValue" AS "promoDiscountValue",
+        p."target" AS "promoTarget",
+        p."bundleSize" AS "promoBundleSize",
+        p."bundleDiscount" AS "promoBundleDiscount"
+      FROM "Transaction" t
+      LEFT JOIN "PromoCode" p ON t."promoCodeId" = p."id"
+      WHERE t."eventId" = $1
+        AND t."seatCodes" IS NOT NULL
         ${statusFilter}
       ORDER BY
-        CASE "paymentStatus"
+        CASE t."paymentStatus"
           WHEN 'PAID' THEN 0
           WHEN 'PENDING' THEN 1
           WHEN 'EXPIRED' THEN 2
@@ -86,6 +94,8 @@ export async function GET(request: NextRequest) {
       emailStatus: string | null
       emailError: string | null
       lastEmailSentAt: string | null
+      promoCode: string | null
+      promoDetails: { discountType: string; discountValue: number; target: string; bundleSize: number; bundleDiscount: number } | null
     }> = {}
 
     const debugSeatCodes: string[] = []
@@ -123,6 +133,14 @@ export async function GET(request: NextRequest) {
             emailStatus: hasEmailColumns ? (txn.emailStatus || null) : null,
             emailError: hasEmailColumns ? (txn.emailError || null) : null,
             lastEmailSentAt: hasEmailColumns ? (txn.lastEmailSentAt?.toISOString?.() || null) : null,
+            promoCode: txn.promoCode || null,
+            promoDetails: txn.promoCodeId ? {
+              discountType: txn.promoDiscountType,
+              discountValue: txn.promoDiscountValue,
+              target: txn.promoTarget,
+              bundleSize: txn.promoBundleSize,
+              bundleDiscount: txn.promoBundleDiscount,
+            } : null,
           }
         }
       }
@@ -137,17 +155,25 @@ export async function GET(request: NextRequest) {
 
       // Fallback: LIKE search directly in DB
       try {
-        const fallbackResults: any[] = await db.$queryRaw`
+        const fallbackResults: any[] = await db.$queryRawUnsafe(`
           SELECT
-            "transactionId", "customerName", "customerEmail", "customerWa",
-            "seatCodes", "paymentStatus", "checkInTime", "paidAt",
-            "totalAmount"
-          FROM "Transaction"
-          WHERE "eventId" = ${eventId}
-            AND "seatCodes" IS NOT NULL
-            AND "seatCodes" LIKE ${'%' + targetSeatCode + '%'}
+            t."transactionId", t."customerName", t."customerEmail", t."customerWa",
+            t."seatCodes", t."paymentStatus", t."checkInTime", t."paidAt",
+            t."totalAmount",
+            t."promoCodeId",
+            p."code" AS "promoCode",
+            p."discountType" AS "promoDiscountType",
+            p."discountValue" AS "promoDiscountValue",
+            p."target" AS "promoTarget",
+            p."bundleSize" AS "promoBundleSize",
+            p."bundleDiscount" AS "promoBundleDiscount"
+          FROM "Transaction" t
+          LEFT JOIN "PromoCode" p ON t."promoCodeId" = p."id"
+          WHERE t."eventId" = $1
+            AND t."seatCodes" IS NOT NULL
+            AND t."seatCodes" LIKE $2
           LIMIT 5
-        `
+        `, eventId, '%' + targetSeatCode + '%')
 
         console.log(`[seats-info] LIKE fallback found ${fallbackResults.length} transactions containing "${targetSeatCode}"`)
 
@@ -180,6 +206,14 @@ export async function GET(request: NextRequest) {
               emailStatus: null,
               emailError: null,
               lastEmailSentAt: null,
+              promoCode: txn.promoCode || null,
+              promoDetails: txn.promoCodeId ? {
+                discountType: txn.promoDiscountType,
+                discountValue: txn.promoDiscountValue,
+                target: txn.promoTarget,
+                bundleSize: txn.promoBundleSize,
+                bundleDiscount: txn.promoBundleDiscount,
+              } : null,
             }
             seatInfoMap[targetSeatCode] = targetResult
             console.log(`[seats-info] LIKE fallback exact match for "${targetSeatCode}"`)
@@ -202,6 +236,14 @@ export async function GET(request: NextRequest) {
               emailStatus: null,
               emailError: null,
               lastEmailSentAt: null,
+              promoCode: txn.promoCode || null,
+              promoDetails: txn.promoCodeId ? {
+                discountType: txn.promoDiscountType,
+                discountValue: txn.promoDiscountValue,
+                target: txn.promoTarget,
+                bundleSize: txn.promoBundleSize,
+                bundleDiscount: txn.promoBundleDiscount,
+              } : null,
             }
             seatInfoMap[targetSeatCode] = targetResult
             seatInfoMap[matchCode] = targetResult
@@ -225,6 +267,14 @@ export async function GET(request: NextRequest) {
             emailStatus: null,
             emailError: null,
             lastEmailSentAt: null,
+            promoCode: txn.promoCode || null,
+            promoDetails: txn.promoCodeId ? {
+              discountType: txn.promoDiscountType,
+              discountValue: txn.promoDiscountValue,
+              target: txn.promoTarget,
+              bundleSize: txn.promoBundleSize,
+              bundleDiscount: txn.promoBundleDiscount,
+            } : null,
           }
           seatInfoMap[targetSeatCode] = targetResult
           console.log(`[seats-info] LIKE fallback substring match for "${targetSeatCode}"`)

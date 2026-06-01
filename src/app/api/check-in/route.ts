@@ -16,6 +16,7 @@ export async function POST(request: NextRequest) {
 
     const transaction = await db.transaction.findUnique({
       where: { transactionId },
+      include: { promoCode: { select: { code: true, discountType: true, discountValue: true, target: true, bundleSize: true, bundleDiscount: true } } },
     })
 
     if (!transaction) {
@@ -53,6 +54,14 @@ export async function POST(request: NextRequest) {
           merchandiseData: transaction.merchandiseData,
           totalAmount: transaction.totalAmount,
           adminFeeApplied: transaction.adminFeeApplied,
+          promoCode: transaction.promoCode ? transaction.promoCode.code : null,
+          promoDetails: transaction.promoCode ? {
+            discountType: transaction.promoCode.discountType,
+            discountValue: transaction.promoCode.discountValue,
+            target: transaction.promoCode.target,
+            bundleSize: transaction.promoCode.bundleSize,
+            bundleDiscount: transaction.promoCode.bundleDiscount,
+          } : null,
         },
       })
     }
@@ -67,6 +76,9 @@ export async function POST(request: NextRequest) {
 
     // Fetch event title separately — NO include
     const event = await db.event.findUnique({ where: { id: checkedIn.eventId } })
+
+    // Promo info from the earlier findUnique (which included promoCode)
+    const promo = transaction.promoCode
 
     return NextResponse.json({
       status: 'SUCCESS',
@@ -83,6 +95,14 @@ export async function POST(request: NextRequest) {
         totalAmount: checkedIn.totalAmount,
         adminFeeApplied: checkedIn.adminFeeApplied,
         eventTitle: event?.title || null,
+        promoCode: promo ? promo.code : null,
+        promoDetails: promo ? {
+          discountType: promo.discountType,
+          discountValue: promo.discountValue,
+          target: promo.target,
+          bundleSize: promo.bundleSize,
+          bundleDiscount: promo.bundleDiscount,
+        } : null,
       },
     })
   } catch (error) {

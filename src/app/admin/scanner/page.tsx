@@ -2,9 +2,17 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { Button } from '@/components/ui/button'
-import { QrCode, RotateCcw, LogIn, ArrowLeft, Loader2, CheckCircle, AlertTriangle, XCircle } from 'lucide-react'
+import { QrCode, RotateCcw, LogIn, ArrowLeft, Loader2, CheckCircle, AlertTriangle, XCircle, Tag } from 'lucide-react'
 
 type ScanResultState = 'SCANNING' | 'LOADING' | 'SUCCESS' | 'WARNING' | 'ERROR'
+
+interface PromoDetails {
+  discountType: string
+  discountValue: number
+  target: string
+  bundleSize: number
+  bundleDiscount: number
+}
 
 interface CheckInTransaction {
   transactionId: string
@@ -18,6 +26,8 @@ interface CheckInTransaction {
   merchandiseData: string | null
   totalAmount: number
   eventTitle: string | null
+  promoCode: string | null
+  promoDetails: PromoDetails | null
 }
 
 interface ScanResult {
@@ -32,6 +42,24 @@ export default function UsherScannerPage() {
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null)
   const scannerRef = useRef<any>(null)
   const scannerContainerRef = useRef<HTMLDivElement>(null)
+
+  // Format promo description for display
+  function formatPromoDescription(promo: PromoDetails): string {
+    if (promo.discountType === 'BUNDLING_TICKET') {
+      return `Bundling: beli ${promo.bundleSize} tiket, diskon Rp ${promo.bundleDiscount.toLocaleString('id-ID')}/bundle`
+    }
+    const valueStr = promo.discountType === 'PERCENT'
+      ? `${promo.discountValue}%`
+      : `Rp ${promo.discountValue.toLocaleString('id-ID')}`
+    const targetMap: Record<string, string> = {
+      ALL: 'semua',
+      TICKET: 'tiket',
+      MERCH: 'merchandise',
+      BUNDLING: 'tiket + merchandise',
+    }
+    const targetStr = targetMap[promo.target] || promo.target
+    return `Diskon ${valueStr} (${targetStr})`
+  }
 
   // Parse merchandise data from JSON string
   function parseMerchandise(data: string | null): Array<{ name: string; quantity: number }> {
@@ -264,6 +292,27 @@ export default function UsherScannerPage() {
                 </ul>
               </div>
             )}
+
+            {/* Promo Info */}
+            {txn.promoCode ? (
+              <div className="bg-yellow-400/20 border border-yellow-400/30 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-yellow-300 shrink-0" />
+                  <p className="text-yellow-200 text-xs uppercase tracking-wider font-medium">Promo</p>
+                </div>
+                <p className="text-white font-semibold mt-1">{txn.promoCode}</p>
+                {txn.promoDetails && (
+                  <p className="text-white/70 text-xs mt-0.5">{formatPromoDescription(txn.promoDetails)}</p>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-white/30 shrink-0" />
+                  <p className="text-white/30 text-xs">Tanpa promo</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Button */}
@@ -332,6 +381,27 @@ export default function UsherScannerPage() {
                 ))}
               </div>
             </div>
+
+            {/* Promo Info */}
+            {txn.promoCode ? (
+              <div className="bg-yellow-400/20 border border-yellow-400/30 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-yellow-300 shrink-0" />
+                  <p className="text-yellow-200 text-xs uppercase tracking-wider font-medium">Promo</p>
+                </div>
+                <p className="text-white font-semibold mt-1">{txn.promoCode}</p>
+                {txn.promoDetails && (
+                  <p className="text-white/70 text-xs mt-0.5">{formatPromoDescription(txn.promoDetails)}</p>
+                )}
+              </div>
+            ) : (
+              <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-white/30 shrink-0" />
+                  <p className="text-white/30 text-xs">Tanpa promo</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Action Button */}
