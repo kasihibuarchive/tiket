@@ -52,6 +52,8 @@ interface FinanceData {
   }>
 }
 
+type ViewMode = 'gross' | 'net'
+
 export default function EventFinancePage() {
   const params = useParams()
   const router = useRouter()
@@ -60,6 +62,7 @@ export default function EventFinancePage() {
 
   const [data, setData] = useState<FinanceData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [viewMode, setViewMode] = useState<ViewMode>('net')
 
   useEffect(() => {
     async function fetchFinance() {
@@ -80,14 +83,17 @@ export default function EventFinancePage() {
     if (!printWindow || !data) return
 
     const s = data.summary
+    const isNet = viewMode === 'net'
     const catNetRatio = s.grossRevenue > 0 ? s.netRevenue / s.grossRevenue : 1
+    const modeLabel = isNet ? 'Bersih' : 'Kotor'
+    const mainRevenue = isNet ? s.netRevenue : s.grossRevenue
 
     const html = `
 <!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Laporan Keuangan - ${data.event.title}</title>
+  <title>Laporan Keuangan ${modeLabel} - ${data.event.title}</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -98,14 +104,18 @@ export default function EventFinancePage() {
     .header .brand { text-align: right; }
     .header .brand-name { font-size: 14px; font-weight: 700; color: #C8A951; }
     .header .brand-sub { font-size: 9px; color: #999; }
+    .mode-badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 9px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 16px; }
+    .mode-badge.bersih { background: #ecfdf5; color: #059669; }
+    .mode-badge.kotor { background: #fffbeb; color: #b45309; }
     .section { margin-bottom: 20px; }
     .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #1a1a2e; margin-bottom: 8px; padding-bottom: 4px; border-bottom: 1px solid #e5e7eb; }
-    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(${isNet ? '4' : '5'}, 1fr); gap: 12px; margin-bottom: 16px; }
     .stat-box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
     .stat-box .label { font-size: 9px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
     .stat-box .value { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
     .stat-box .sub { font-size: 8px; color: #aaa; margin-top: 2px; }
     .stat-box.highlight .value { color: #C8A951; }
+    .stat-box.emerald .value { color: #059669; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 10px; }
     th { background: #f9fafb; text-align: left; padding: 6px 8px; border-bottom: 2px solid #e5e7eb; font-weight: 600; color: #666; font-size: 9px; text-transform: uppercase; }
     td { padding: 5px 8px; border-bottom: 1px solid #f3f4f6; }
@@ -132,10 +142,12 @@ export default function EventFinancePage() {
     </div>
   </div>
 
+  <div class="mode-badge ${isNet ? 'bersih' : 'kotor'}">MODE ${modeLabel.toUpperCase()}</div>
+
   <div class="stat-grid">
-    <div class="stat-box highlight">
-      <div class="label">Pendapatan</div>
-      <div class="value">${fmt(s.netRevenue)}</div>
+    <div class="stat-box ${isNet ? 'emerald' : 'highlight'}">
+      <div class="label">Pendapatan ${modeLabel}</div>
+      <div class="value">${fmt(mainRevenue)}</div>
       <div class="sub">${s.totalPaidTransactions} transaksi</div>
     </div>
     <div class="stat-box">
@@ -151,6 +163,12 @@ export default function EventFinancePage() {
       <div class="label">Diskon Promo</div>
       <div class="value" style="color:#3b82f6;">${fmt(s.discountGiven)}</div>
     </div>
+    ${!isNet ? `
+    <div class="stat-box">
+      <div class="label">Biaya Admin</div>
+      <div class="value" style="color:#f59e0b;">${fmt(s.adminFeeRevenue)}</div>
+      <div class="sub">${s.adminFeePct}% dari kotor</div>
+    </div>` : ''}
   </div>
 
   ${data.categoryBreakdown.length > 0 ? `
@@ -162,7 +180,7 @@ export default function EventFinancePage() {
           <th>Kategori</th>
           <th class="text-right">Harga</th>
           <th class="text-center">Terjual</th>
-          <th class="text-right">Pendapatan</th>
+          <th class="text-right">Pendapatan ${modeLabel}</th>
         </tr>
       </thead>
       <tbody>
@@ -171,7 +189,7 @@ export default function EventFinancePage() {
             <td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${cat.color};margin-right:6px;vertical-align:middle;"></span>${cat.name}</td>
             <td class="text-right">${fmt(cat.price)}</td>
             <td class="text-center">${cat.count}</td>
-            <td class="text-right" style="font-weight:600;">${fmt(Math.round(cat.grossRevenue * catNetRatio))}</td>
+            <td class="text-right" style="font-weight:600;">${fmt(isNet ? Math.round(cat.grossRevenue * catNetRatio) : cat.grossRevenue)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -188,7 +206,8 @@ export default function EventFinancePage() {
           <th>Tanggal</th>
           <th class="text-center">Tiket</th>
           <th class="text-center">Transaksi</th>
-          <th class="text-right">Pendapatan</th>
+          ${!isNet ? '<th class="text-right">Kotor</th><th class="text-right">Admin</th>' : ''}
+          <th class="text-right">Pendapatan ${modeLabel}</th>
         </tr>
       </thead>
       <tbody>
@@ -198,7 +217,8 @@ export default function EventFinancePage() {
             <td>${fmtShortDate(sd.date)}</td>
             <td class="text-center">${sd.ticketCount}</td>
             <td class="text-center">${sd.transactions}</td>
-            <td class="text-right" style="font-weight:600;">${fmt(sd.netRevenue)}</td>
+            ${!isNet ? `<td class="text-right">${fmt(sd.grossRevenue)}</td><td class="text-right" style="color:#f59e0b;">${fmt(sd.adminFee)}</td>` : ''}
+            <td class="text-right" style="font-weight:600;">${fmt(isNet ? sd.netRevenue : sd.grossRevenue)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -213,7 +233,8 @@ export default function EventFinancePage() {
         <tr>
           <th>Metode</th>
           <th class="text-center">Transaksi</th>
-          <th class="text-right">Pendapatan</th>
+          ${!isNet ? '<th class="text-right">Kotor</th><th class="text-right">Admin</th>' : ''}
+          <th class="text-right">Pendapatan ${modeLabel}</th>
         </tr>
       </thead>
       <tbody>
@@ -221,7 +242,8 @@ export default function EventFinancePage() {
           <tr>
             <td>${PAYMENT_LABELS[pm.method] || pm.method}</td>
             <td class="text-center">${pm.count}</td>
-            <td class="text-right" style="font-weight:600;">${fmt(pm.netRevenue)}</td>
+            ${!isNet ? `<td class="text-right">${fmt(pm.grossRevenue)}</td><td class="text-right" style="color:#f59e0b;">${fmt(pm.adminFee)}</td>` : ''}
+            <td class="text-right" style="font-weight:600;">${fmt(isNet ? pm.netRevenue : pm.grossRevenue)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -236,7 +258,8 @@ export default function EventFinancePage() {
           <th>ID</th>
           <th>Pembeli</th>
           <th class="text-center">Tiket</th>
-          <th class="text-right">Total</th>
+          ${!isNet ? '<th class="text-right">Kotor</th><th class="text-right">Admin</th>' : ''}
+          <th class="text-right">${modeLabel}</th>
           <th>Metode</th>
           <th>Promo</th>
           <th class="text-center">Check-In</th>
@@ -249,7 +272,8 @@ export default function EventFinancePage() {
             <td style="font-family:monospace;font-size:9px;">${tx.transactionId}</td>
             <td>${tx.customerName}</td>
             <td class="text-center">${tx.seatCount}</td>
-            <td class="text-right" style="font-weight:600;">${fmt(tx.netAmount)}</td>
+            ${!isNet ? `<td class="text-right">${fmt(tx.totalAmount)}</td><td class="text-right" style="color:#f59e0b;">${fmt(tx.adminFeeApplied)}</td>` : ''}
+            <td class="text-right" style="font-weight:600;">${fmt(isNet ? tx.netAmount : tx.totalAmount)}</td>
             <td><span class="badge">${PAYMENT_LABELS[tx.paymentMethod || ''] || tx.paymentMethod || '-'}</span></td>
             <td>${tx.promoCode ? `<span class="badge badge-amber">${tx.promoCode}</span>` : '-'}</td>
             <td class="text-center">${tx.checkedIn ? '<span class="badge badge-green">&check;</span>' : '&cross;'}</td>
@@ -261,7 +285,7 @@ export default function EventFinancePage() {
   </div>
 
   <div class="footer">
-    <span>Laporan ini dihasilkan secara otomatis oleh Teateran &middot; ${new Date().toLocaleDateString('id-ID')}</span>
+    <span>Laporan ini dihasilkan secara otomatis oleh Teateran &middot; Mode ${modeLabel} &middot; ${new Date().toLocaleDateString('id-ID')}</span>
     <span>Halaman 1 dari 1</span>
   </div>
 </body>
@@ -295,6 +319,7 @@ export default function EventFinancePage() {
   }
 
   const s = data.summary
+  const isNet = viewMode === 'net'
   const catNetRatio = s.grossRevenue > 0 ? s.netRevenue / s.grossRevenue : 1
 
   return (
@@ -315,6 +340,29 @@ export default function EventFinancePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          {/* ── Kotor / Bersih Toggle ── */}
+          <div className="flex items-center bg-muted rounded-full p-1 border border-border/50">
+            <button
+              onClick={() => setViewMode('gross')}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                viewMode === 'gross'
+                  ? 'bg-charcoal text-gold shadow-sm'
+                  : 'text-muted-foreground hover:text-charcoal'
+              }`}
+            >
+              Kotor
+            </button>
+            <button
+              onClick={() => setViewMode('net')}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                viewMode === 'net'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-muted-foreground hover:text-charcoal'
+              }`}
+            >
+              Bersih
+            </button>
+          </div>
           <Button onClick={handleDownloadPDF} className="bg-charcoal hover:bg-charcoal/90 text-gold" size="sm">
             <Download className="w-4 h-4 mr-2" />
             Download PDF
@@ -322,61 +370,151 @@ export default function EventFinancePage() {
         </div>
       </div>
 
+      {/* ── View Mode Indicator ── */}
+      {isNet ? (
+        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/50 rounded-lg px-4 py-2">
+          <TrendingUp className="w-4 h-4 text-emerald-600" />
+          <p className="text-xs text-emerald-700">
+            <span className="font-semibold">Mode Bersih</span> — Hanya menampilkan pendapatan yang masuk rekening. Biaya admin &amp; angka kotor disembunyikan.
+          </p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 bg-gold/5 border border-gold/20 rounded-lg px-4 py-2">
+          <CircleDollarSign className="w-4 h-4 text-gold" />
+          <p className="text-xs text-charcoal/70">
+            <span className="font-semibold text-charcoal">Mode Kotor</span> — Total uang masuk sebelum dipotong biaya admin. Kolom Bersih &amp; Admin ditampilkan untuk perbandingan.
+          </p>
+        </div>
+      )}
+
       {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        <Card className="border-gold/30 ring-1 ring-gold/20">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <CircleDollarSign className="w-4 h-4 text-gold" />
-              <p className="text-[10px] uppercase tracking-wider text-gold">Pendapatan</p>
-            </div>
-            <p className="text-lg font-bold text-charcoal">{fmt(s.netRevenue)}</p>
-            <p className="text-[10px] text-muted-foreground">{s.totalPaidTransactions} transaksi</p>
-          </CardContent>
-        </Card>
+      <div className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-${isNet ? '5' : '6'} gap-4`}>
+        {isNet ? (
+          <>
+            {/* ── BERSIH MODE CARDS ── */}
+            <Card className="border-emerald-200/50 ring-1 ring-emerald-200/30">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  <p className="text-[10px] uppercase tracking-wider text-emerald-600">Pendapatan Bersih</p>
+                </div>
+                <p className="text-lg font-bold text-charcoal">{fmt(s.netRevenue)}</p>
+                <p className="text-[10px] text-muted-foreground">{s.totalPaidTransactions} transaksi</p>
+              </CardContent>
+            </Card>
 
-        <Card className="border-border/50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Ticket className="w-4 h-4 text-charcoal" />
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket</p>
-            </div>
-            <p className="text-lg font-bold text-charcoal">{s.totalTickets}</p>
-            <p className="text-[10px] text-muted-foreground">{s.soldRate}% terjual &middot; {s.checkedIn} check-in</p>
-          </CardContent>
-        </Card>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Ticket className="w-4 h-4 text-charcoal" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket</p>
+                </div>
+                <p className="text-lg font-bold text-charcoal">{s.totalTickets}</p>
+                <p className="text-[10px] text-muted-foreground">{s.soldRate}% terjual &middot; {s.checkedIn} check-in</p>
+              </CardContent>
+            </Card>
 
-        <Card className="border-border/50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <ShoppingBag className="w-4 h-4 text-purple-600" />
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Merch</p>
-            </div>
-            <p className="text-lg font-bold text-charcoal">{fmt(s.merchRevenue)}</p>
-          </CardContent>
-        </Card>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShoppingBag className="w-4 h-4 text-purple-600" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Merch</p>
+                </div>
+                <p className="text-lg font-bold text-charcoal">{fmt(s.merchRevenue)}</p>
+              </CardContent>
+            </Card>
 
-        <Card className="border-border/50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Wallet className="w-4 h-4 text-blue-500" />
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Diskon</p>
-            </div>
-            <p className="text-lg font-bold text-blue-500">{fmt(s.discountGiven)}</p>
-            <p className="text-[10px] text-blue-400">dari promo code</p>
-          </CardContent>
-        </Card>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Wallet className="w-4 h-4 text-blue-500" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Diskon</p>
+                </div>
+                <p className="text-lg font-bold text-blue-500">{fmt(s.discountGiven)}</p>
+                <p className="text-[10px] text-blue-400">dari promo code</p>
+              </CardContent>
+            </Card>
 
-        <Card className="border-border/50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <Users className="w-4 h-4 text-charcoal" />
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Check-In</p>
-            </div>
-            <p className="text-lg font-bold text-charcoal">{s.checkInRate}%</p>
-            <p className="text-[10px] text-muted-foreground">{s.checkedIn} dari {s.totalPaidTransactions} trx</p>
-          </CardContent>
-        </Card>
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Users className="w-4 h-4 text-charcoal" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Check-In</p>
+                </div>
+                <p className="text-lg font-bold text-charcoal">{s.checkInRate}%</p>
+                <p className="text-[10px] text-muted-foreground">{s.checkedIn} dari {s.totalPaidTransactions} trx</p>
+              </CardContent>
+            </Card>
+          </>
+        ) : (
+          <>
+            {/* ── KOTOR MODE CARDS ── */}
+            <Card className="border-gold/30 ring-1 ring-gold/20">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <CircleDollarSign className="w-4 h-4 text-gold" />
+                  <p className="text-[10px] uppercase tracking-wider text-gold">Pendapatan Kotor</p>
+                </div>
+                <p className="text-lg font-bold text-charcoal">{fmt(s.grossRevenue)}</p>
+                <p className="text-[10px] text-muted-foreground">{s.totalPaidTransactions} transaksi</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-emerald-200/50 ring-1 ring-emerald-200/30">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  <p className="text-[10px] uppercase tracking-wider text-emerald-600">Pendapatan Bersih</p>
+                </div>
+                <p className="text-lg font-bold text-emerald-600">{fmt(s.netRevenue)}</p>
+                <p className="text-[10px] text-muted-foreground">Kotor − Admin</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Receipt className="w-4 h-4 text-orange-500" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
+                </div>
+                <p className="text-lg font-bold text-orange-500">{fmt(s.adminFeeRevenue)}</p>
+                <p className="text-[10px] text-orange-400">{s.adminFeePct}% dari kotor</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Ticket className="w-4 h-4 text-charcoal" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket</p>
+                </div>
+                <p className="text-lg font-bold text-charcoal">{s.totalTickets}</p>
+                <p className="text-[10px] text-muted-foreground">{s.soldRate}% terjual</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <ShoppingBag className="w-4 h-4 text-purple-600" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Merch</p>
+                </div>
+                <p className="text-lg font-bold text-charcoal">{fmt(s.merchRevenue)}</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-border/50">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-1">
+                  <Wallet className="w-4 h-4 text-blue-500" />
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Diskon</p>
+                </div>
+                <p className="text-lg font-bold text-blue-500">{fmt(s.discountGiven)}</p>
+                <p className="text-[10px] text-blue-400">dari promo code</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* ── Transaction Status ── */}
@@ -405,7 +543,7 @@ export default function EventFinancePage() {
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Kategori</th>
                     <th className="text-right py-2 px-2 text-muted-foreground font-medium">Harga</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Terjual</th>
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan</th>
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan {isNet ? 'Bersih' : 'Kotor'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -419,7 +557,9 @@ export default function EventFinancePage() {
                       </td>
                       <td className="py-2 px-2 text-right text-charcoal">{fmt(cat.price)}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{cat.count}</td>
-                      <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(Math.round(cat.grossRevenue * catNetRatio))}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-charcoal">
+                        {fmt(isNet ? Math.round(cat.grossRevenue * catNetRatio) : cat.grossRevenue)}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -447,7 +587,9 @@ export default function EventFinancePage() {
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Tanggal</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Tiket</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Transaksi</th>
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan</th>
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>}
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>}
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan {isNet ? 'Bersih' : 'Bersih'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -457,7 +599,9 @@ export default function EventFinancePage() {
                       <td className="py-2 px-2 text-muted-foreground">{fmtShortDate(sd.date)}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{sd.ticketCount}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{sd.transactions}</td>
-                      <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(sd.netRevenue)}</td>
+                      {!isNet && <td className="py-2 px-2 text-right text-charcoal">{fmt(sd.grossRevenue)}</td>}
+                      {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(sd.adminFee)}</td>}
+                      <td className="py-2 px-2 text-right font-semibold text-emerald-600">{fmt(sd.netRevenue)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -483,7 +627,9 @@ export default function EventFinancePage() {
                   <tr className="border-b border-border/50">
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Metode</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Transaksi</th>
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan</th>
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>}
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>}
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan {isNet ? 'Bersih' : 'Bersih'}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -491,7 +637,9 @@ export default function EventFinancePage() {
                     <tr key={idx} className="border-b border-border/20">
                       <td className="py-2 px-2 font-medium text-charcoal">{PAYMENT_LABELS[pm.method] || pm.method}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{pm.count}</td>
-                      <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(pm.netRevenue)}</td>
+                      {!isNet && <td className="py-2 px-2 text-right text-charcoal">{fmt(pm.grossRevenue)}</td>}
+                      {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(pm.adminFee)}</td>}
+                      <td className="py-2 px-2 text-right font-semibold text-emerald-600">{fmt(pm.netRevenue)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -520,7 +668,9 @@ export default function EventFinancePage() {
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">ID</th>
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">Pembeli</th>
                   <th className="text-center py-2 px-2 text-muted-foreground font-medium">Tiket</th>
-                  <th className="text-right py-2 px-2 text-muted-foreground font-medium">Total</th>
+                  {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>}
+                  {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>}
+                  <th className="text-right py-2 px-2 text-muted-foreground font-medium">{isNet ? 'Bersih' : 'Bersih'}</th>
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">Metode</th>
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">Promo</th>
                   <th className="text-center py-2 px-2 text-muted-foreground font-medium">Check-In</th>
@@ -533,7 +683,11 @@ export default function EventFinancePage() {
                     <td className="py-2 px-2 font-mono text-[10px] text-charcoal">{tx.transactionId}</td>
                     <td className="py-2 px-2 text-charcoal">{tx.customerName}</td>
                     <td className="py-2 px-2 text-center text-charcoal">{tx.seatCount}</td>
-                    <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(tx.netAmount)}</td>
+                    {!isNet && <td className="py-2 px-2 text-right text-charcoal">{fmt(tx.totalAmount)}</td>}
+                    {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(tx.adminFeeApplied)}</td>}
+                    <td className={`py-2 px-2 text-right font-semibold ${isNet ? 'text-emerald-600' : 'text-emerald-600'}`}>
+                      {fmt(tx.netAmount)}
+                    </td>
                     <td className="py-2 px-2">
                       <Badge variant="secondary" className="text-[9px]">
                         {PAYMENT_LABELS[tx.paymentMethod || ''] || tx.paymentMethod || '-'}
