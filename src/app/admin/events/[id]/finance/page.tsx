@@ -12,8 +12,6 @@ import {
   TrendingUp, CircleDollarSign, Users, CreditCard,
 } from 'lucide-react'
 
-type ViewMode = 'gross' | 'net'
-
 const fmt = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID')
 const fmtDate = (d: string) => new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
 const fmtShortDate = (d: string) => new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
@@ -62,7 +60,6 @@ export default function EventFinancePage() {
 
   const [data, setData] = useState<FinanceData | null>(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [viewMode, setViewMode] = useState<ViewMode>('gross')
 
   useEffect(() => {
     async function fetchFinance() {
@@ -82,9 +79,8 @@ export default function EventFinancePage() {
     const printWindow = window.open('', '_blank')
     if (!printWindow || !data) return
 
-    const isNet = viewMode === 'net'
-    const primaryRevenue = isNet ? data.summary.netRevenue : data.summary.grossRevenue
-    const primaryLabel = isNet ? 'BERSIH' : 'KOTOR'
+    const s = data.summary
+    const catNetRatio = s.grossRevenue > 0 ? s.netRevenue / s.grossRevenue : 1
 
     const html = `
 <!DOCTYPE html>
@@ -109,8 +105,7 @@ export default function EventFinancePage() {
     .stat-box .label { font-size: 9px; text-transform: uppercase; color: #888; letter-spacing: 0.5px; }
     .stat-box .value { font-size: 16px; font-weight: 700; color: #1a1a2e; margin-top: 2px; }
     .stat-box .sub { font-size: 8px; color: #aaa; margin-top: 2px; }
-    .stat-box.net .value { color: #22c55e; }
-    .stat-box.admin .value { color: #f97316; }
+    .stat-box.highlight .value { color: #C8A951; }
     table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 10px; }
     th { background: #f9fafb; text-align: left; padding: 6px 8px; border-bottom: 2px solid #e5e7eb; font-weight: 600; color: #666; font-size: 9px; text-transform: uppercase; }
     td { padding: 5px 8px; border-bottom: 1px solid #f3f4f6; }
@@ -119,6 +114,7 @@ export default function EventFinancePage() {
     .text-center { text-align: center; }
     .badge { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 8px; font-weight: 600; background: #f3f4f6; color: #666; }
     .badge-green { background: #ecfdf5; color: #22c55e; }
+    .badge-amber { background: #fffbeb; color: #b45309; }
     .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 8px; color: #aaa; }
     @media print { body { padding: 0; } }
   </style>
@@ -127,40 +123,33 @@ export default function EventFinancePage() {
   <div class="header">
     <div>
       <h1>${data.event.title}</h1>
-      <div class="subtitle">${data.event.category} · ${fmtDate(data.event.showDate)} · ${data.event.location}</div>
+      <div class="subtitle">${data.event.category} &middot; ${fmtDate(data.event.showDate)} &middot; ${data.event.location}</div>
     </div>
     <div class="brand">
       <div class="brand-name">TEATERAN</div>
-      <div class="brand-sub">Laporan Keuangan ${primaryLabel}</div>
+      <div class="brand-sub">Laporan Keuangan</div>
       <div class="brand-sub">Dicetak: ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
     </div>
   </div>
 
   <div class="stat-grid">
-    <div class="stat-box">
-      <div class="label">Pendapatan Kotor</div>
-      <div class="value">${fmt(data.summary.grossRevenue)}</div>
-      <div class="sub">${data.summary.totalPaidTransactions} transaksi</div>
-    </div>
-    ${!isNet ? `
-    <div class="stat-box admin">
-      <div class="label">Biaya Admin</div>
-      <div class="value">${fmt(data.summary.adminFeeRevenue)}</div>
-      <div class="sub">${data.summary.adminFeePct}% dari kotor</div>
-    </div>` : ''}
-    <div class="stat-box net">
-      <div class="label">Pendapatan Bersih</div>
-      <div class="value">${fmt(data.summary.netRevenue)}</div>
-      <div class="sub">${data.summary.adminFeePct > 0 ? (100 - data.summary.adminFeePct).toFixed(1) : 100}% masuk rekening</div>
+    <div class="stat-box highlight">
+      <div class="label">Pendapatan</div>
+      <div class="value">${fmt(s.netRevenue)}</div>
+      <div class="sub">${s.totalPaidTransactions} transaksi</div>
     </div>
     <div class="stat-box">
       <div class="label">Tiket Terjual</div>
-      <div class="value">${data.summary.totalTickets}</div>
-      <div class="sub">${data.summary.soldRate}% terjual</div>
+      <div class="value">${s.totalTickets}</div>
+      <div class="sub">${s.soldRate}% terjual</div>
     </div>
     <div class="stat-box">
       <div class="label">Merchandise</div>
-      <div class="value">${fmt(data.summary.merchRevenue)}</div>
+      <div class="value">${fmt(s.merchRevenue)}</div>
+    </div>
+    <div class="stat-box">
+      <div class="label">Diskon Promo</div>
+      <div class="value" style="color:#3b82f6;">${fmt(s.discountGiven)}</div>
     </div>
   </div>
 
@@ -173,8 +162,7 @@ export default function EventFinancePage() {
           <th>Kategori</th>
           <th class="text-right">Harga</th>
           <th class="text-center">Terjual</th>
-          <th class="text-right">Pendapatan Kotor</th>
-          ${!isNet ? '<th class="text-right">Pendapatan Bersih</th>' : ''}
+          <th class="text-right">Pendapatan</th>
         </tr>
       </thead>
       <tbody>
@@ -183,8 +171,7 @@ export default function EventFinancePage() {
             <td><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${cat.color};margin-right:6px;vertical-align:middle;"></span>${cat.name}</td>
             <td class="text-right">${fmt(cat.price)}</td>
             <td class="text-center">${cat.count}</td>
-            <td class="text-right">${fmt(cat.grossRevenue)}</td>
-            ${!isNet ? `<td class="text-right" style="color:#22c55e;">${fmt(cat.grossRevenue - (cat.grossRevenue * data.summary.adminFeeRevenue / data.summary.grossRevenue))}</td>` : ''}
+            <td class="text-right" style="font-weight:600;">${fmt(Math.round(cat.grossRevenue * catNetRatio))}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -201,8 +188,7 @@ export default function EventFinancePage() {
           <th>Tanggal</th>
           <th class="text-center">Tiket</th>
           <th class="text-center">Transaksi</th>
-          <th class="text-right">Kotor</th>
-          <th class="text-right">Bersih</th>
+          <th class="text-right">Pendapatan</th>
         </tr>
       </thead>
       <tbody>
@@ -212,8 +198,7 @@ export default function EventFinancePage() {
             <td>${fmtShortDate(sd.date)}</td>
             <td class="text-center">${sd.ticketCount}</td>
             <td class="text-center">${sd.transactions}</td>
-            <td class="text-right">${fmt(sd.grossRevenue)}</td>
-            <td class="text-right" style="color:#22c55e;">${fmt(sd.netRevenue)}</td>
+            <td class="text-right" style="font-weight:600;">${fmt(sd.netRevenue)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -228,9 +213,7 @@ export default function EventFinancePage() {
         <tr>
           <th>Metode</th>
           <th class="text-center">Transaksi</th>
-          <th class="text-right">Kotor</th>
-          <th class="text-right">Admin</th>
-          <th class="text-right">Bersih</th>
+          <th class="text-right">Pendapatan</th>
         </tr>
       </thead>
       <tbody>
@@ -238,9 +221,7 @@ export default function EventFinancePage() {
           <tr>
             <td>${PAYMENT_LABELS[pm.method] || pm.method}</td>
             <td class="text-center">${pm.count}</td>
-            <td class="text-right">${fmt(pm.grossRevenue)}</td>
-            <td class="text-right" style="color:#f97316;">${fmt(pm.adminFee)}</td>
-            <td class="text-right" style="color:#22c55e;">${fmt(pm.netRevenue)}</td>
+            <td class="text-right" style="font-weight:600;">${fmt(pm.netRevenue)}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -255,10 +236,9 @@ export default function EventFinancePage() {
           <th>ID</th>
           <th>Pembeli</th>
           <th class="text-center">Tiket</th>
-          <th class="text-right">Kotor</th>
-          ${!isNet ? '<th class="text-right">Admin</th>' : ''}
-          <th class="text-right">Bersih</th>
+          <th class="text-right">Total</th>
           <th>Metode</th>
+          <th>Promo</th>
           <th class="text-center">Check-In</th>
           <th>Tgl Bayar</th>
         </tr>
@@ -269,11 +249,10 @@ export default function EventFinancePage() {
             <td style="font-family:monospace;font-size:9px;">${tx.transactionId}</td>
             <td>${tx.customerName}</td>
             <td class="text-center">${tx.seatCount}</td>
-            <td class="text-right">${fmt(tx.totalAmount)}</td>
-            ${!isNet ? `<td class="text-right" style="color:#f97316;">${fmt(tx.adminFeeApplied)}</td>` : ''}
-            <td class="text-right" style="color:#22c55e;">${fmt(tx.netAmount)}</td>
+            <td class="text-right" style="font-weight:600;">${fmt(tx.netAmount)}</td>
             <td><span class="badge">${PAYMENT_LABELS[tx.paymentMethod || ''] || tx.paymentMethod || '-'}</span></td>
-            <td class="text-center">${tx.checkedIn ? '<span class="badge badge-green">✓</span>' : '✗'}</td>
+            <td>${tx.promoCode ? `<span class="badge badge-amber">${tx.promoCode}</span>` : '-'}</td>
+            <td class="text-center">${tx.checkedIn ? '<span class="badge badge-green">&check;</span>' : '&cross;'}</td>
             <td>${tx.paidAt ? fmtShortDate(tx.paidAt) : '-'}</td>
           </tr>
         `).join('')}
@@ -282,7 +261,7 @@ export default function EventFinancePage() {
   </div>
 
   <div class="footer">
-    <span>Laporan ini dihasilkan secara otomatis oleh Teateran · ${new Date().toLocaleDateString('id-ID')}</span>
+    <span>Laporan ini dihasilkan secara otomatis oleh Teateran &middot; ${new Date().toLocaleDateString('id-ID')}</span>
     <span>Halaman 1 dari 1</span>
   </div>
 </body>
@@ -315,8 +294,8 @@ export default function EventFinancePage() {
     )
   }
 
-  const isNet = viewMode === 'net'
   const s = data.summary
+  const catNetRatio = s.grossRevenue > 0 ? s.netRevenue / s.grossRevenue : 1
 
   return (
     <div ref={printRef} className="space-y-6">
@@ -336,25 +315,6 @@ export default function EventFinancePage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {/* Kotor / Bersih Toggle */}
-          <div className="flex items-center bg-muted rounded-full p-1 border border-border/50">
-            <button
-              onClick={() => setViewMode('gross')}
-              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                viewMode === 'gross' ? 'bg-charcoal text-gold shadow-sm' : 'text-muted-foreground hover:text-charcoal'
-              }`}
-            >
-              Kotor
-            </button>
-            <button
-              onClick={() => setViewMode('net')}
-              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                viewMode === 'net' ? 'bg-emerald-600 text-white shadow-sm' : 'text-muted-foreground hover:text-charcoal'
-              }`}
-            >
-              Bersih
-            </button>
-          </div>
           <Button onClick={handleDownloadPDF} className="bg-charcoal hover:bg-charcoal/90 text-gold" size="sm">
             <Download className="w-4 h-4 mr-2" />
             Download PDF
@@ -362,58 +322,16 @@ export default function EventFinancePage() {
         </div>
       </div>
 
-      {/* Mode indicator */}
-      {isNet && (
-        <div className="flex items-center gap-2 bg-emerald-50 border border-emerald-200/50 rounded-lg px-4 py-2">
-          <TrendingUp className="w-4 h-4 text-emerald-600" />
-          <p className="text-xs text-emerald-700">
-            <span className="font-semibold">Mode Bersih</span> — Pendapatan setelah biaya admin dipotong. Biaya admin disembunyikan karena sudah tidak relevan.
-          </p>
-        </div>
-      )}
-      {!isNet && (
-        <div className="flex items-center gap-2 bg-gold/5 border border-gold/20 rounded-lg px-4 py-2">
-          <CircleDollarSign className="w-4 h-4 text-gold" />
-          <p className="text-xs text-charcoal/70">
-            <span className="font-semibold text-charcoal">Mode Kotor</span> — Total uang masuk. Kolom Bersih ditampilkan untuk perbandingan.
-          </p>
-        </div>
-      )}
-
       {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4">
-        <Card className="border-border/50">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <Card className="border-gold/30 ring-1 ring-gold/20">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
               <CircleDollarSign className="w-4 h-4 text-gold" />
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Kotor</p>
+              <p className="text-[10px] uppercase tracking-wider text-gold">Pendapatan</p>
             </div>
-            <p className="text-lg font-bold text-charcoal">{fmt(s.grossRevenue)}</p>
+            <p className="text-lg font-bold text-charcoal">{fmt(s.netRevenue)}</p>
             <p className="text-[10px] text-muted-foreground">{s.totalPaidTransactions} transaksi</p>
-          </CardContent>
-        </Card>
-
-        {!isNet && (
-          <Card className="border-border/50">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2 mb-1">
-                <Receipt className="w-4 h-4 text-orange-500" />
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Biaya Admin</p>
-              </div>
-              <p className="text-lg font-bold text-orange-500">{fmt(s.adminFeeRevenue)}</p>
-              <p className="text-[10px] text-orange-400">{s.adminFeePct}% dari kotor</p>
-            </CardContent>
-          </Card>
-        )}
-
-        <Card className={`border-border/50 ${isNet ? 'ring-1 ring-emerald-200' : ''}`}>
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp className="w-4 h-4 text-emerald-600" />
-              <p className="text-[10px] uppercase tracking-wider text-emerald-600">Bersih</p>
-            </div>
-            <p className="text-lg font-bold text-emerald-600">{fmt(s.netRevenue)}</p>
-            <p className="text-[10px] text-emerald-500">{s.adminFeePct > 0 ? (100 - s.adminFeePct).toFixed(1) : 100}% masuk rekening</p>
           </CardContent>
         </Card>
 
@@ -424,7 +342,7 @@ export default function EventFinancePage() {
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Tiket</p>
             </div>
             <p className="text-lg font-bold text-charcoal">{s.totalTickets}</p>
-            <p className="text-[10px] text-muted-foreground">{s.soldRate}% terjual · {s.checkedIn} check-in</p>
+            <p className="text-[10px] text-muted-foreground">{s.soldRate}% terjual &middot; {s.checkedIn} check-in</p>
           </CardContent>
         </Card>
 
@@ -441,11 +359,22 @@ export default function EventFinancePage() {
         <Card className="border-border/50">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 mb-1">
-              <Wallet className="w-4 h-4 text-charcoal" />
+              <Wallet className="w-4 h-4 text-blue-500" />
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Diskon</p>
             </div>
             <p className="text-lg font-bold text-blue-500">{fmt(s.discountGiven)}</p>
             <p className="text-[10px] text-blue-400">dari promo code</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Users className="w-4 h-4 text-charcoal" />
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Check-In</p>
+            </div>
+            <p className="text-lg font-bold text-charcoal">{s.checkInRate}%</p>
+            <p className="text-[10px] text-muted-foreground">{s.checkedIn} dari {s.totalPaidTransactions} trx</p>
           </CardContent>
         </Card>
       </div>
@@ -457,7 +386,6 @@ export default function EventFinancePage() {
         {s.expiredCount > 0 && <span className="text-gray-500">{s.expiredCount} Expired</span>}
         {s.failedCount > 0 && <span className="text-red-500">{s.failedCount} Gagal</span>}
         {s.cancelledCount > 0 && <span className="text-slate-500">{s.cancelledCount} Dibatalkan</span>}
-        <span className="text-muted-foreground">· Check-in {s.checkInRate}%</span>
       </div>
 
       {/* ── Category Breakdown ── */}
@@ -477,30 +405,23 @@ export default function EventFinancePage() {
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Kategori</th>
                     <th className="text-right py-2 px-2 text-muted-foreground font-medium">Harga</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Terjual</th>
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>
-                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Bersih</th>}
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.categoryBreakdown.map((cat, idx) => {
-                    const catNet = data.summary.grossRevenue > 0
-                      ? cat.grossRevenue - (cat.grossRevenue * data.summary.adminFeeRevenue / data.summary.grossRevenue)
-                      : cat.grossRevenue
-                    return (
-                      <tr key={idx} className="border-b border-border/20">
-                        <td className="py-2 px-2">
-                          <div className="flex items-center gap-2">
-                            <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: cat.color }} />
-                            <span className="font-medium text-charcoal">{cat.name}</span>
-                          </div>
-                        </td>
-                        <td className="py-2 px-2 text-right text-charcoal">{fmt(cat.price)}</td>
-                        <td className="py-2 px-2 text-center text-charcoal">{cat.count}</td>
-                        <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(cat.grossRevenue)}</td>
-                        {!isNet && <td className="py-2 px-2 text-right font-semibold text-emerald-600">{fmt(catNet)}</td>}
-                      </tr>
-                    )
-                  })}
+                  {data.categoryBreakdown.map((cat, idx) => (
+                    <tr key={idx} className="border-b border-border/20">
+                      <td className="py-2 px-2">
+                        <div className="flex items-center gap-2">
+                          <span className="w-3 h-3 rounded-sm" style={{ backgroundColor: cat.color }} />
+                          <span className="font-medium text-charcoal">{cat.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-2 px-2 text-right text-charcoal">{fmt(cat.price)}</td>
+                      <td className="py-2 px-2 text-center text-charcoal">{cat.count}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(Math.round(cat.grossRevenue * catNetRatio))}</td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -526,8 +447,7 @@ export default function EventFinancePage() {
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Tanggal</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Tiket</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Transaksi</th>
-                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>}
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Bersih</th>
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -537,8 +457,7 @@ export default function EventFinancePage() {
                       <td className="py-2 px-2 text-muted-foreground">{fmtShortDate(sd.date)}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{sd.ticketCount}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{sd.transactions}</td>
-                      {!isNet && <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(sd.grossRevenue)}</td>}
-                      <td className="py-2 px-2 text-right font-semibold text-emerald-600">{fmt(sd.netRevenue)}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(sd.netRevenue)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -564,9 +483,7 @@ export default function EventFinancePage() {
                   <tr className="border-b border-border/50">
                     <th className="text-left py-2 px-2 text-muted-foreground font-medium">Metode</th>
                     <th className="text-center py-2 px-2 text-muted-foreground font-medium">Transaksi</th>
-                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>}
-                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>}
-                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Bersih</th>
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -574,9 +491,7 @@ export default function EventFinancePage() {
                     <tr key={idx} className="border-b border-border/20">
                       <td className="py-2 px-2 font-medium text-charcoal">{PAYMENT_LABELS[pm.method] || pm.method}</td>
                       <td className="py-2 px-2 text-center text-charcoal">{pm.count}</td>
-                      {!isNet && <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(pm.grossRevenue)}</td>}
-                      {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(pm.adminFee)}</td>}
-                      <td className="py-2 px-2 text-right font-semibold text-emerald-600">{fmt(pm.netRevenue)}</td>
+                      <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(pm.netRevenue)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -605,9 +520,7 @@ export default function EventFinancePage() {
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">ID</th>
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">Pembeli</th>
                   <th className="text-center py-2 px-2 text-muted-foreground font-medium">Tiket</th>
-                  {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>}
-                  {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>}
-                  <th className="text-right py-2 px-2 text-muted-foreground font-medium">Bersih</th>
+                  <th className="text-right py-2 px-2 text-muted-foreground font-medium">Total</th>
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">Metode</th>
                   <th className="text-left py-2 px-2 text-muted-foreground font-medium">Promo</th>
                   <th className="text-center py-2 px-2 text-muted-foreground font-medium">Check-In</th>
@@ -620,15 +533,19 @@ export default function EventFinancePage() {
                     <td className="py-2 px-2 font-mono text-[10px] text-charcoal">{tx.transactionId}</td>
                     <td className="py-2 px-2 text-charcoal">{tx.customerName}</td>
                     <td className="py-2 px-2 text-center text-charcoal">{tx.seatCount}</td>
-                    {!isNet && <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(tx.totalAmount)}</td>}
-                    {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(tx.adminFeeApplied)}</td>}
-                    <td className="py-2 px-2 text-right font-semibold text-emerald-600">{fmt(tx.netAmount)}</td>
+                    <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(tx.netAmount)}</td>
                     <td className="py-2 px-2">
                       <Badge variant="secondary" className="text-[9px]">
                         {PAYMENT_LABELS[tx.paymentMethod || ''] || tx.paymentMethod || '-'}
                       </Badge>
                     </td>
-                    <td className="py-2 px-2 text-muted-foreground">{tx.promoCode || '-'}</td>
+                    <td className="py-2 px-2">
+                      {tx.promoCode ? (
+                        <Badge className="bg-amber-50 text-amber-700 border-amber-200 text-[9px]">{tx.promoCode}</Badge>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </td>
                     <td className="py-2 px-2 text-center">
                       {tx.checkedIn ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 mx-auto" /> : <span className="text-muted-foreground">✗</span>}
                     </td>
