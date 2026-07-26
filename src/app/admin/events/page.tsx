@@ -25,7 +25,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import {
-  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users, RotateCcw, Star
+  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users, RotateCcw, Star, Ticket
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 
@@ -60,6 +60,8 @@ interface EventData {
   multiDayPassEnabled?: boolean
   scanCooldownMinutes?: number
   cooldownEnabled?: boolean
+  // GA Zone Config (JSON string from DB) — used to pre-fill capacity in price category form
+  gaZoneConfig?: string | null
 }
 
 interface SeatMapOption {
@@ -72,6 +74,7 @@ interface PriceCategoryForm {
   name: string
   price: number
   colorCode: string
+  capacity?: number            // GA only — auto-generates GA zone with this capacity
   packageType?: string | null   // "SINGLE" | "MULTI" | "FULL" | null
   applicableDayIds?: string[]  // Array of showDate temp IDs (frontend only)
 }
@@ -102,6 +105,8 @@ interface EventFormData {
   eventMode: string  // "REGULAR" | "FESTIVAL"
   scanCooldownMinutes: number
   cooldownEnabled: boolean
+  // GA Zone Config (raw JSON string from DB, used to preserve existing zone notes/capacity on edits)
+  gaZoneConfig?: string | null
 }
 
 const emptyForm: EventFormData = {
@@ -117,9 +122,9 @@ const emptyForm: EventFormData = {
   adminFee: 0,
   seatType: 'NUMBERED',
   priceCategories: [
-    { name: 'VIP', price: 150000, colorCode: '#C8A951' },
-    { name: 'Regular', price: 75000, colorCode: '#8B8680' },
-    { name: 'Student', price: 35000, colorCode: '#7BA7A5' },
+    { name: 'VIP', price: 150000, colorCode: '#C8A951', capacity: 100 },
+    { name: 'Regular', price: 75000, colorCode: '#8B8680', capacity: 200 },
+    { name: 'Student', price: 35000, colorCode: '#7BA7A5', capacity: 50 },
   ],
   showDates: [{ date: '', openGate: '', label: '', tempId: 'd1' }],
   eventMode: 'REGULAR',
@@ -225,18 +230,32 @@ export default function AdminEventsPage() {
       isPublished: event.isPublished,
       adminFee: event.adminFee || 0,
       seatType: event.seatType || 'NUMBERED',
-      priceCategories: event.priceCategories.map((pc) => ({
-        name: pc.name,
-        price: pc.price,
-        colorCode: pc.colorCode,
-        packageType: pc.packageType || null,
-        applicableDayIds: (pc.applicableDayIds || []).map((id: string) => showDateIdToTempId[id] || id),
-      })),
+      priceCategories: event.priceCategories.map((pc) => {
+        // Pre-fill capacity from existing gaZoneConfig (if zone with matching name exists)
+        let existingCapacity = 100
+        try {
+          if (event.gaZoneConfig) {
+            const zones = JSON.parse(event.gaZoneConfig) as Array<{ name?: string; priceCategoryName?: string; capacity?: number }>
+            const match = zones.find(z => z.priceCategoryName === pc.name || z.name === pc.name)
+            if (match?.capacity) existingCapacity = match.capacity
+          }
+        } catch { /* ignore */ }
+        return {
+          name: pc.name,
+          price: pc.price,
+          colorCode: pc.colorCode,
+          capacity: existingCapacity,
+          packageType: pc.packageType || null,
+          applicableDayIds: (pc.applicableDayIds || []).map((id: string) => showDateIdToTempId[id] || id),
+        }
+      }),
       showDates,
       // Festival Mode
       eventMode: event.eventMode || 'REGULAR',
       scanCooldownMinutes: event.scanCooldownMinutes ?? 30,
       cooldownEnabled: event.cooldownEnabled ?? true,
+      // GA Zone Config — preserve original so we can extract notes when re-syncing zones
+      gaZoneConfig: event.gaZoneConfig || null,
     })
     setIsDialogOpen(true)
   }
@@ -256,6 +275,7 @@ export default function AdminEventsPage() {
         name: '',
         price: 0,
         colorCode: '#8B8680',
+        capacity: 100,
         // Festival defaults — inherit from previous category if exists
         packageType: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].packageType : null,
         applicableDayIds: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].applicableDayIds : [],
@@ -354,6 +374,38 @@ export default function AdminEventsPage() {
           }
         })
 
+      // ─── GA Integration: auto-build gaZoneConfig from price categories ──
+      // For GA events (REGULAR+GA or FESTIVAL), auto-generate one zone per
+      // price category so admin doesn't have to redefine zones in seats page.
+      const effectiveSeatType = isFestival ? 'GENERAL_ADMISSION' : formData.seatType
+      const isGA = effectiveSeatType === 'GENERAL_ADMISSION'
+
+      // Preserve existing zone notes if a zone with the same name already exists
+      let existingZones: Array<{ name?: string; priceCategoryName?: string; notes?: string }> = []
+      try {
+        if (formData.gaZoneConfig) {
+          existingZones = JSON.parse(formData.gaZoneConfig)
+        }
+      } catch { /* ignore */ }
+
+      // Build new gaZoneConfig from price categories (1 zone per category)
+      const gaZoneConfig = isGA
+        ? JSON.stringify(formData.priceCategories
+            .filter(pc => pc.name.trim())
+            .map(pc => {
+              const match = existingZones.find(z =>
+                z.priceCategoryName === pc.name || z.name === pc.name)
+              return {
+                name: pc.name,
+                capacity: pc.capacity ?? 100,
+                price: pc.price,
+                color: pc.colorCode,
+                priceCategoryName: pc.name,
+                notes: match?.notes || '',
+              }
+            }))
+        : undefined
+
       const payload = {
         ...formData,
         // Use first showDate entry as the primary showDate (backward compat)
@@ -373,6 +425,8 @@ export default function AdminEventsPage() {
         cooldownEnabled: formData.cooldownEnabled,
         // Force seatType = GA when FESTIVAL
         seatType: isFestival ? 'GENERAL_ADMISSION' : formData.seatType,
+        // GA Integration: auto-sync gaZoneConfig from price categories
+        ...(gaZoneConfig !== undefined ? { gaZoneConfig } : {}),
       }
 
       const res = await fetch(url, {
@@ -1191,6 +1245,16 @@ export default function AdminEventsPage() {
                 </div>
               )}
 
+              {/* GA Integration hint */}
+              {(formData.seatType === 'GENERAL_ADMISSION' || formData.eventMode === 'FESTIVAL') && (
+                <div className="text-[11px] text-muted-foreground bg-emerald-50 border border-emerald-200 rounded p-2 flex items-start gap-1.5">
+                  <Ticket className="w-3 h-3 text-emerald-600 mt-0.5 shrink-0" />
+                  <span>
+                    <span className="font-medium text-emerald-700">Auto GA Zona:</span> Isi kapasitas per kategori — zona GA akan otomatis ter-generate di halaman Seat Editor saat event disimpan. Tidak perlu input zona manual lagi.
+                  </span>
+                </div>
+              )}
+
               {formData.priceCategories.map((pc, index) => (
                 <div key={index} className="rounded-lg border border-border/60 p-3 space-y-2 bg-muted/20">
                   <div className="flex items-end gap-2">
@@ -1230,6 +1294,28 @@ export default function AdminEventsPage() {
                       <X className="w-3.5 h-3.5" />
                     </Button>
                   </div>
+
+                  {/* GA Integration: Capacity input (only for GA events) */}
+                  {(formData.seatType === 'GENERAL_ADMISSION' || formData.eventMode === 'FESTIVAL') && (
+                    <div className="flex items-end gap-2 pt-1">
+                      <div className="w-40">
+                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Users className="w-3 h-3" />
+                          Kapasitas Zona
+                        </Label>
+                        <Input
+                          type="number"
+                          min={1}
+                          value={pc.capacity ?? 100}
+                          onChange={(e) => updatePriceCategory(index, 'capacity', Math.max(1, Number(e.target.value) || 0))}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground pb-2">
+                        Jumlah slot tersedia untuk kategori ini. Zona GA akan terbentuk otomatis di Seat Editor.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Festival Mode: Package Type + Applicable Days */}
                   {formData.eventMode === 'FESTIVAL' && (

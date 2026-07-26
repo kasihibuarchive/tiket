@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
       showDates,
       teaserVideoUrl,
       seatType,
+      gaZoneConfig,
       // Festival Mode fields
       eventMode,
       scanCooldownMinutes,
@@ -150,6 +151,8 @@ export async function POST(request: NextRequest) {
         isPublished: isPublished || false,
         adminFee: adminFee || 0,
         seatType: effectiveSeatType,
+        // GA Zone Config — auto-built from price categories on frontend
+        gaZoneConfig: gaZoneConfig || null,
         // Festival Mode settings
         eventMode: isFestival ? 'FESTIVAL' : 'REGULAR',
         multiDayPassEnabled: isFestival,

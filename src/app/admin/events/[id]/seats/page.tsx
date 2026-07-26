@@ -95,6 +95,7 @@ function GaZoneManagementPanel({
   fileInputRef,
   existingZoneSummary,
   existingSeatsCount,
+  onRefresh,
 }: {
   eventId: string
   eventInfo: EventInfo | null
@@ -306,6 +307,53 @@ function GaZoneManagementPanel({
     setGaZonesDef(gaZonesDef.filter((_, i) => i !== index))
   }
 
+  // ─── Sync zones from price categories ───────────────────────────────
+  // Rebuilds gaZonesDef from current priceCategories. Preserves notes &
+  // capacity for zones that already exist (matched by name).
+  function handleSyncFromCategories() {
+    if (priceCategories.length === 0) {
+      alert('Belum ada kategori harga di event ini. Tambahkan kategori di halaman Events terlebih dahulu.')
+      return
+    }
+    const confirmMsg = `Sync zona dari ${priceCategories.length} kategori harga?\n\n` +
+      `Zona yang ada akan diperbarui (capacity & price mengikuti kategori).\n` +
+      `Zona yang sudah ada tapi tidak ada di kategori akan tetap dipertahankan.\n\n` +
+      `Kategori:\n${priceCategories.map(pc => `• ${pc.name} — Rp ${pc.price.toLocaleString('id-ID')}`).join('\n')}`
+    if (!confirm(confirmMsg)) return
+
+    const next: GaZoneDef[] = []
+    const usedZoneNames = new Set<string>()
+
+    // 1. For each price category, ensure a matching zone exists
+    for (const pc of priceCategories) {
+      const existing = gaZonesDef.find(z =>
+        z.name.toLowerCase() === pc.name.toLowerCase() ||
+        (z.priceCategoryName || '').toLowerCase() === pc.name.toLowerCase()
+      )
+      next.push({
+        name: pc.name,
+        capacity: existing?.capacity ?? 100,
+        price: pc.price,
+        color: pc.colorCode,
+        priceCategoryName: pc.name,
+        notes: existing?.notes || '',
+      })
+      usedZoneNames.add(pc.name.toLowerCase())
+    }
+
+    // 2. Keep zones that don't match any price category (admin-added custom zones)
+    for (const z of gaZonesDef) {
+      const matched = priceCategories.some(pc =>
+        pc.name.toLowerCase() === z.name.toLowerCase() ||
+        pc.name.toLowerCase() === (z.priceCategoryName || '').toLowerCase()
+      )
+      if (!matched) next.push(z)
+    }
+
+    setGaZonesDef(next)
+    alert(`✓ Synced ${priceCategories.length} zona dari kategori harga. Klik "Simpan Zona" untuk menyimpan.`)
+  }
+
   async function handleSaveZones() {
     setIsSavingZones(true)
     try {
@@ -472,20 +520,44 @@ function GaZoneManagementPanel({
               <Zap className="w-4 h-4 text-gold" />
               <h2 className="font-serif text-lg font-semibold text-charcoal">Definisi Zona</h2>
             </div>
-            <Button
-              size="sm"
-              onClick={handleSaveZones}
-              disabled={isSavingZones || gaZonesDef.length === 0}
-              className="bg-gold hover:bg-gold/90 text-charcoal font-semibold text-xs"
-            >
-              {isSavingZones ? (
-                <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
-              ) : (
-                <Save className="w-3 h-3 mr-1.5" />
-              )}
-              Simpan Zona
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleSyncFromCategories}
+                disabled={isSavingZones || priceCategories.length === 0}
+                className="border-emerald-400 text-emerald-700 hover:bg-emerald-50 text-xs"
+                title="Auto-generate zona dari kategori harga yang ada di event"
+              >
+                <RefreshCw className="w-3 h-3 mr-1.5" />
+                Sync dari Kategori
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveZones}
+                disabled={isSavingZones || gaZonesDef.length === 0}
+                className="bg-gold hover:bg-gold/90 text-charcoal font-semibold text-xs"
+              >
+                {isSavingZones ? (
+                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                ) : (
+                  <Save className="w-3 h-3 mr-1.5" />
+                )}
+                Simpan Zona
+              </Button>
+            </div>
           </div>
+
+          {/* Auto-synced indicator */}
+          {gaZonesDef.length > 0 && priceCategories.length > 0 && (
+            <div className="mb-3 text-[11px] text-muted-foreground bg-emerald-50/50 border border-emerald-200/50 rounded px-3 py-1.5 flex items-center gap-1.5">
+              <Ticket className="w-3 h-3 text-emerald-600" />
+              <span>
+                <span className="font-medium text-emerald-700">{priceCategories.length} kategori harga</span> terdeteksi.
+                Klik <span className="font-medium">Sync dari Kategori</span> untuk memperbarui zona mengikuti perubahan kategori harga di halaman Events.
+              </span>
+            </div>
+          )}
 
           {/* Existing zones */}
           {gaZonesDef.length > 0 && (
