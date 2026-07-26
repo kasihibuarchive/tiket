@@ -49,6 +49,15 @@ interface AppliedPromo {
   termsAndConditions: string | null
 }
 
+interface FestivalPackageInfo {
+  priceCategoryId: string
+  packageName: string
+  packageType: string  // SINGLE | MULTI | FULL
+  applicableDayIds: string[]
+  quantity: number
+  unitPrice: number
+}
+
 interface CheckoutFormProps {
   eventId: string
   showDateId?: string | null
@@ -56,6 +65,7 @@ interface CheckoutFormProps {
   totalPrice: number
   onBack: () => void
   adminFee?: number
+  festivalPackage?: FestivalPackageInfo
 }
 
 // Payment channels grouped for the selector
@@ -88,7 +98,7 @@ const ICON_MAP: Record<string, any> = {
   QrCode,
 }
 
-export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, onBack, adminFee = 0 }: CheckoutFormProps) {
+export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, onBack, adminFee = 0, festivalPackage }: CheckoutFormProps) {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
   const [formData, setFormData] = useState({
@@ -97,6 +107,8 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     customerWa: '',
   })
   const [error, setError] = useState<string | null>(null)
+
+  const isFestival = !!festivalPackage
 
   // Merchandise state
   const [merchandise, setMerchandise] = useState<MerchItem[]>([])
@@ -118,10 +130,19 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
   const sessionId = getSessionId()
   const seatCodes = selectedSeats.map((s) => s.seatCode)
 
+  // Festival Mode: build virtual "seat codes" from package — these will be
+  // resolved to real GA seats by the checkout API on the backend.
+  // For UI purposes, we use package name + quantity as the "items".
+  const festivalTicketCount = festivalPackage?.quantity || 0
+  const effectiveTicketCount = isFestival ? festivalTicketCount : seatCodes.length
+
   // Collect unique zone/category names from selected seats for promo zone validation
   // Numbered Seating: use priceCategory.name (e.g., "VIP", "Presale 1")
   // General Admission: use zoneName from seat code prefix or category name
-  const zoneNames = [...new Set(selectedSeats.map((s) => s.priceCategory?.name).filter(Boolean))] as string[]
+  // Festival Mode: use package name
+  const zoneNames = isFestival && festivalPackage
+    ? [festivalPackage.packageName]
+    : [...new Set(selectedSeats.map((s) => s.priceCategory?.name).filter(Boolean))] as string[]
 
   // Payment method state — now uses specific Tripay channel codes
   const [paymentMethod, setPaymentMethod] = useState<string>('QRIS')
@@ -166,7 +187,8 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
   // === ALL CALCULATIONS ===
   const seatTotal = totalPrice
   const resolvedAdminFee = adminFee > 0 ? adminFee : eventAdminFee
-  const effectiveAdminFee = resolvedAdminFee * seatCodes.length
+  // Festival Mode: admin fee is per ticket (quantity), not per seat code
+  const effectiveAdminFee = resolvedAdminFee * effectiveTicketCount
   const merchSubtotal = merchandise.reduce((sum, m) => sum + m.price * m.quantity, 0)
   const totalBeforeDiscount = seatTotal + effectiveAdminFee + merchSubtotal
 
@@ -178,19 +200,22 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     const ticketSubtotal = seatTotal + effectiveAdminFee
     const { target = 'ALL', isPerItem = false, discountType, discountValue, bundleSize, bundleDiscount } = appliedPromo
 
+    // Use effectiveTicketCount for festival mode (where seatCodes is empty but quantity > 0)
+    const ticketCount = effectiveTicketCount
+
     // --- Bundling discount: per X tickets, discount Y ---
-    if (bundleSize > 0 && bundleDiscount > 0 && seatCodes.length >= bundleSize) {
-      const bundleCount = Math.floor(seatCodes.length / bundleSize)
+    if (bundleSize > 0 && bundleDiscount > 0 && ticketCount >= bundleSize) {
+      const bundleCount = Math.floor(ticketCount / bundleSize)
       discountAmount = bundleCount * bundleDiscount
       discountLabel = `Rp ${bundleDiscount.toLocaleString('id-ID')}/bundle × ${bundleCount} bundle (${bundleSize} tiket/bundle)`
     } else if (target === 'TICKET') {
-      if (isPerItem && seatCodes.length > 0) {
+      if (isPerItem && ticketCount > 0) {
         const perItemDiscount =
           discountType === 'PERCENT'
-            ? Math.round((ticketSubtotal / seatCodes.length) * discountValue / 100)
-            : Math.min(discountValue, ticketSubtotal / seatCodes.length)
-        discountAmount = perItemDiscount * seatCodes.length
-        discountLabel = `Rp ${perItemDiscount.toLocaleString('id-ID')}/tiket × ${seatCodes.length} tiket`
+            ? Math.round((ticketSubtotal / ticketCount) * discountValue / 100)
+            : Math.min(discountValue, ticketSubtotal / ticketCount)
+        discountAmount = perItemDiscount * ticketCount
+        discountLabel = `Rp ${perItemDiscount.toLocaleString('id-ID')}/tiket × ${ticketCount} tiket`
       } else {
         discountAmount =
           discountType === 'PERCENT'
@@ -213,7 +238,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
             : Math.min(discountValue, merchSubtotal)
       }
     } else if (target === 'BUNDLING' || target === 'ALL') {
-      const totalItems = seatCodes.length + merchandise.filter(m => m.quantity > 0).reduce((s, m) => s + m.quantity, 0)
+      const totalItems = ticketCount + merchandise.filter(m => m.quantity > 0).reduce((s, m) => s + m.quantity, 0)
       if (isPerItem && totalItems > 0) {
         const perItemDiscount =
           discountType === 'PERCENT'
@@ -248,7 +273,7 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
         body: JSON.stringify({
           code: promoInput.trim(),
           eventId,
-          seatCount: seatCodes.length,
+          seatCount: effectiveTicketCount,
           hasMerchandise: merchandise.some((m) => m.quantity > 0),
           zoneNames, // Send zone/category names for promo zone restriction check
         }),
@@ -300,22 +325,25 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
     if (!formData.customerWa.trim()) { setError('Nomor WhatsApp harus diisi'); setIsLoading(false); return }
 
     try {
-      // Gate: Atomic checkout lock
-      const confirmRes = await fetch('/api/seats/confirm-lock', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eventId, seatCodes, sessionId, showDateId: showDateId || undefined }),
-      })
+      // Festival Mode: skip seat lock — backend will auto-pick GA seats
+      if (!isFestival) {
+        // Gate: Atomic checkout lock
+        const confirmRes = await fetch('/api/seats/confirm-lock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ eventId, seatCodes, sessionId, showDateId: showDateId || undefined }),
+        })
 
-      if (!confirmRes.ok) {
-        try { const errData = await confirmRes.json(); setError(errData.error || 'Gagal mengunci kursi') } catch { setError('Gagal mengunci kursi') }
-        setIsLoading(false); return
-      }
-      const confirmData = await confirmRes.json()
-      if (!confirmData.ok || confirmData.takenSeats?.length > 0) {
-        const taken = confirmData.takenSeats?.join(', ') || seatCodes.join(', ')
-        setError(`Kursi ${taken} sudah diamankan orang lain.`)
-        setIsLoading(false); return
+        if (!confirmRes.ok) {
+          try { const errData = await confirmRes.json(); setError(errData.error || 'Gagal mengunci kursi') } catch { setError('Gagal mengunci kursi') }
+          setIsLoading(false); return
+        }
+        const confirmData = await confirmRes.json()
+        if (!confirmData.ok || confirmData.takenSeats?.length > 0) {
+          const taken = confirmData.takenSeats?.join(', ') || seatCodes.join(', ')
+          setError(`Kursi ${taken} sudah diamankan orang lain.`)
+          setIsLoading(false); return
+        }
       }
 
       // Build checkout payload
@@ -323,21 +351,35 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
         .filter((m) => m.quantity > 0)
         .map((m) => ({ merchandiseId: m.id, name: m.name, price: m.price, quantity: m.quantity }))
 
+      const checkoutPayload: any = {
+        eventId,
+        showDateId: showDateId || undefined,
+        customerName: formData.customerName,
+        customerEmail: formData.customerEmail,
+        customerWa: formData.customerWa.startsWith('+') ? formData.customerWa : '+62' + formData.customerWa,
+        seatCodes,
+        sessionId,
+        promoCodeId: appliedPromo?.id || null,
+        merchandise: selectedMerch.length > 0 ? selectedMerch : undefined,
+        paymentMethod,
+      }
+
+      // Festival Mode: send package info instead of seat codes
+      if (isFestival && festivalPackage) {
+        checkoutPayload.festivalPackage = {
+          priceCategoryId: festivalPackage.priceCategoryId,
+          packageName: festivalPackage.packageName,
+          packageType: festivalPackage.packageType,
+          applicableDayIds: festivalPackage.applicableDayIds,
+          quantity: festivalPackage.quantity,
+          unitPrice: festivalPackage.unitPrice,
+        }
+      }
+
       const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventId,
-          showDateId: showDateId || undefined,
-          customerName: formData.customerName,
-          customerEmail: formData.customerEmail,
-          customerWa: formData.customerWa.startsWith('+') ? formData.customerWa : '+62' + formData.customerWa,
-          seatCodes,
-          sessionId,
-          promoCodeId: appliedPromo?.id || null,
-          merchandise: selectedMerch.length > 0 ? selectedMerch : undefined,
-          paymentMethod,
-        }),
+        body: JSON.stringify(checkoutPayload),
       })
 
       if (!res.ok) {
@@ -394,20 +436,46 @@ export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, o
             {/* Order Summary */}
             <div className="bg-warm-white rounded-lg p-4 space-y-2">
               <h4 className="text-sm font-semibold text-charcoal">Ringkasan Pesanan</h4>
-              {selectedSeats.map((seat) => (
-                <div key={seat.id} className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">
-                    Kursi {seat.seatCode}
-                    {seat.priceCategory && <span className="text-xs ml-1">({seat.priceCategory.name})</span>}
-                  </span>
-                  <span className="text-charcoal">Rp {(seat.priceCategory?.price || 0).toLocaleString('id-ID')}</span>
-                </div>
-              ))}
+              {isFestival && festivalPackage ? (
+                // Festival Mode: show package info
+                <>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      <Ticket className="w-3 h-3 inline mr-1" />
+                      {festivalPackage.packageName}
+                      <Badge variant="secondary" className="text-[10px] ml-1">
+                        {festivalPackage.packageType === 'FULL' ? 'Full Pass' : festivalPackage.packageType === 'MULTI' ? 'Multi-Day' : 'Single Day'}
+                      </Badge>
+                    </span>
+                    <span className="text-charcoal">
+                      Rp {festivalPackage.unitPrice.toLocaleString('id-ID')}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs text-muted-foreground pl-5">
+                    <span>× {festivalPackage.quantity} tiket</span>
+                    <span>= Rp {(festivalPackage.unitPrice * festivalPackage.quantity).toLocaleString('id-ID')}</span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground pl-5 pt-0.5">
+                    Berlaku untuk {festivalPackage.applicableDayIds.length} hari pertunjukan · 1 QR untuk semua hari
+                  </div>
+                </>
+              ) : (
+                // REGULAR Mode: show seat codes
+                selectedSeats.map((seat) => (
+                  <div key={seat.id} className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">
+                      Kursi {seat.seatCode}
+                      {seat.priceCategory && <span className="text-xs ml-1">({seat.priceCategory.name})</span>}
+                    </span>
+                    <span className="text-charcoal">Rp {(seat.priceCategory?.price || 0).toLocaleString('id-ID')}</span>
+                  </div>
+                ))
+              )}
 
               {effectiveAdminFee > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">
-                    Biaya Admin ({seatCodes.length} tiket)
+                    Biaya Admin ({effectiveTicketCount} tiket)
                   </span>
                   <span className="text-charcoal">Rp {effectiveAdminFee.toLocaleString('id-ID')}</span>
                 </div>

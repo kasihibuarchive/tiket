@@ -6,6 +6,7 @@ import { Navbar } from '@/components/navbar'
 import { Footer } from '@/components/footer'
 import { SeatMap } from '@/components/seat-map'
 import { CheckoutForm } from '@/components/checkout-form'
+import { FestivalPackagePicker } from '@/components/festival-package-picker'
 import { QueueGate } from '@/components/queue-gate'
 import { OptimizedImage } from '@/components/optimized-image'
 import { Badge } from '@/components/ui/badge'
@@ -38,7 +39,14 @@ interface EventData {
   seatType?: string | null
   layoutImage?: string | null
   gaZoneConfig?: string | null
-  priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
+  priceCategories: Array<{
+    id: string
+    name: string
+    price: number
+    colorCode: string
+    packageType?: string | null
+    applicableDayIds?: string | null
+  }>
   seatSummary: { total: number; available: number; sold: number }
   seatMapLayout?: any
   showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
@@ -47,6 +55,11 @@ interface EventData {
   reviewStats?: { average: number; total: number }
   hideSeatAvailability?: boolean
   hideSoldCount?: boolean
+  // Festival Mode
+  eventMode?: string
+  multiDayPassEnabled?: boolean
+  scanCooldownMinutes?: number
+  cooldownEnabled?: boolean
 }
 
 interface SeatData {
@@ -146,6 +159,13 @@ export default function EventDetailPage() {
   const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(0)
   const [countdown, setCountdown] = useState<{ days: number; hours: number; minutes: number; seconds: number; passed: boolean } | null>(null)
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Festival Mode state
+  const [festivalPkg, setFestivalPkg] = useState<{
+    priceCategory: EventData['priceCategories'][0]
+    quantity: number
+    applicableDayIds: string[]
+  } | null>(null)
 
   // Review state
   const [reviews, setReviews] = useState<ReviewData[]>([])
@@ -967,6 +987,7 @@ export default function EventDetailPage() {
 
         {/* ═══════════════════════════════════════════════════════════════
             SEAT SELECTION — Only for active (non-completed) events
+            FESTIVAL events use package picker; REGULAR uses SeatMap
             ═══════════════════════════════════════════════════════════════ */}
         {!isCompleted && (
           <QueueGate eventId={eventId}>
@@ -974,15 +995,55 @@ export default function EventDetailPage() {
               <div className="max-w-7xl mx-auto">
                 <div className="text-center mb-8">
                   <p className="text-gold text-xs tracking-[0.3em] uppercase font-medium mb-2">
-                    {event.seatType === 'GENERAL_ADMISSION' ? 'Pilih zona Anda' : 'Pilih kursi Anda'}
+                    {event.eventMode === 'FESTIVAL'
+                      ? 'Pilih paket festival Anda'
+                      : event.seatType === 'GENERAL_ADMISSION' ? 'Pilih zona Anda' : 'Pilih kursi Anda'}
                   </p>
                   <h2 className="font-serif text-2xl sm:text-3xl font-bold text-charcoal">
-                    {event.seatType === 'GENERAL_ADMISSION' ? 'PILIH ZONA' : 'PILIH KURSI'}
+                    {event.eventMode === 'FESTIVAL'
+                      ? 'PILIH PAKET'
+                      : event.seatType === 'GENERAL_ADMISSION' ? 'PILIH ZONA' : 'PILIH KURSI'}
                   </h2>
                   <div className="zen-divider w-16 mx-auto mt-4" />
                 </div>
 
-                {!showCheckout ? (
+                {event.eventMode === 'FESTIVAL' ? (
+                  // ─── FESTIVAL MODE: Package picker flow ──
+                  !showCheckout ? (
+                    <FestivalPackagePicker
+                      eventId={eventId}
+                      priceCategories={event.priceCategories}
+                      showDates={event.showDates || []}
+                      onProceedToCheckout={(data) => {
+                        setFestivalPkg(data)
+                        setTotalPrice(data.priceCategory.price * data.quantity)
+                        setShowCheckout(true)
+                        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+                      }}
+                    />
+                  ) : (
+                    <CheckoutForm
+                      eventId={eventId}
+                      showDateId={null}
+                      festivalPackage={festivalPkg ? {
+                        priceCategoryId: festivalPkg.priceCategory.id,
+                        packageName: festivalPkg.priceCategory.name,
+                        packageType: festivalPkg.priceCategory.packageType || 'SINGLE',
+                        applicableDayIds: festivalPkg.applicableDayIds,
+                        quantity: festivalPkg.quantity,
+                        unitPrice: festivalPkg.priceCategory.price,
+                      } : undefined}
+                      selectedSeats={[]}
+                      totalPrice={totalPrice}
+                      onBack={() => {
+                        setShowCheckout(false)
+                        setFestivalPkg(null)
+                      }}
+                    />
+                  )
+                ) : (
+                  // ─── REGULAR MODE: Existing SeatMap flow ──
+                  !showCheckout ? (
                     <SeatMap
                       key={activeShowDate?.id || 'default'}
                       eventId={eventId}
@@ -998,14 +1059,15 @@ export default function EventDetailPage() {
                       onSelectionChange={handleSelectionChange}
                       onProceedToCheckout={handleProceedToCheckout}
                     />
-                ) : (
-                  <CheckoutForm
-                    eventId={eventId}
-                    showDateId={activeShowDate?.id || null}
-                    selectedSeats={selectedSeats}
-                    totalPrice={totalPrice}
-                    onBack={handleBackToSeats}
-                  />
+                  ) : (
+                    <CheckoutForm
+                      eventId={eventId}
+                      showDateId={activeShowDate?.id || null}
+                      selectedSeats={selectedSeats}
+                      totalPrice={totalPrice}
+                      onBack={handleBackToSeats}
+                    />
+                  )
                 )}
               </div>
             </section>

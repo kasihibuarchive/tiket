@@ -22,10 +22,20 @@ export async function POST(request: NextRequest) {
     const {
       eventId, showDateId, customerName, customerEmail, customerWa, seatCodes, sessionId,
       promoCodeId, merchandise, paymentMethod,
+      festivalPackage,
     } = body
 
-    if (!eventId || !customerName || !customerEmail || !customerWa || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0) {
+    const isFestivalCheckout = !!festivalPackage
+
+    // Validation: festival mode needs festivalPackage; regular mode needs seatCodes
+    if (!eventId || !customerName || !customerEmail || !customerWa) {
       return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
+    }
+    if (!isFestivalCheckout && (!seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0)) {
+      return NextResponse.json({ error: 'Pilih kursi terlebih dahulu' }, { status: 400 })
+    }
+    if (isFestivalCheckout && (!festivalPackage.quantity || festivalPackage.quantity < 1)) {
+      return NextResponse.json({ error: 'Jumlah tiket festival tidak valid' }, { status: 400 })
     }
 
     if (!sessionId) {
@@ -34,37 +44,133 @@ export async function POST(request: NextRequest) {
 
     const checkoutId = CHECKOUT_PREFIX + sessionId
 
-    // Validate seats — if showDateId is provided, filter by it
-    const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
-    if (showDateId) {
-      seatWhere.eventShowDateId = showDateId
-    }
-    const seats = await db.seat.findMany({ where: seatWhere })
-    if (seats.length !== seatCodes.length) return NextResponse.json({ error: 'Kursi tidak ditemukan' }, { status: 404 })
-
-    const invalidSeats = seats.filter((s) => s.status === 'SOLD')
-    if (invalidSeats.length > 0) {
-      return NextResponse.json({ error: 'Kursi ' + invalidSeats.map((s) => s.seatCode).join(', ') + ' sudah terjual' }, { status: 409 })
-    }
-
-    const notOurs = seats.filter((s) => s.status === 'LOCKED_TEMPORARY' && s.lockedBy !== checkoutId)
-    if (notOurs.length > 0) {
-      return NextResponse.json({ error: 'Kursi ' + notOurs.map((s) => s.seatCode).join(', ') + ' sedang dipilih orang lain.' }, { status: 409 })
-    }
-
-    // Re-lock seats
-    const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
-    await db.seat.updateMany({
-      where: { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId },
-      data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
+    // Get event with all needed fields
+    const event = await db.event.findUnique({
+      where: { id: eventId },
+      select: {
+        adminFee: true,
+        isPublished: true,
+        eventMode: true,
+        seatType: true,
+      },
     })
-
-    // Get event for admin fee + publish check
-    const event = await db.event.findUnique({ where: { id: eventId }, select: { adminFee: true, isPublished: true } })
 
     // Block checkout for unpublished events
     if (!event?.isPublished) {
       return NextResponse.json({ error: 'Penjualan tiket untuk event ini sudah ditutup.' }, { status: 403 })
+    }
+
+    // Festival Mode: validate package + auto-pick GA seats from each applicable day
+    let festivalAutoSeats: { id: string; seatCode: string; eventShowDateId: string; priceCategoryId: string }[] = []
+    let festivalTicketCount = 0
+    let festivalSeatCodes: string[] = []
+    let festivalPriceCategoryId: string | null = null
+
+    if (isFestivalCheckout) {
+      const pkg = festivalPackage
+      const qty = parseInt(pkg.quantity, 10)
+      if (!Number.isFinite(qty) || qty < 1) {
+        return NextResponse.json({ error: 'Jumlah tiket tidak valid' }, { status: 400 })
+      }
+      festivalTicketCount = qty
+
+      // Validate price category
+      const priceCat = await db.priceCategory.findUnique({ where: { id: pkg.priceCategoryId } })
+      if (!priceCat || priceCat.eventId !== eventId) {
+        return NextResponse.json({ error: 'Kategori harga tidak valid' }, { status: 400 })
+      }
+      festivalPriceCategoryId = priceCat.id
+
+      // Resolve applicable day IDs
+      let applicableDayIds: string[] = pkg.applicableDayIds || []
+      if (priceCat.packageType === 'FULL') {
+        // FULL = all days
+        const allDates = await db.eventShowDate.findMany({ where: { eventId }, orderBy: { date: 'asc' } })
+        applicableDayIds = allDates.map(d => d.id)
+      } else if (priceCat.applicableDayIds) {
+        try { applicableDayIds = JSON.parse(priceCat.applicableDayIds) } catch { /* ignore */ }
+      }
+
+      if (applicableDayIds.length === 0) {
+        return NextResponse.json({ error: 'Paket festival tidak memiliki hari yang berlaku. Hubungi admin.' }, { status: 400 })
+      }
+
+      // For each applicable day, pick `qty` available GA seats matching the price category zone
+      // (zone name = price category name in our auto-built GA config)
+      const uniqueSeatCodes = new Set<string>()
+      const allPickedSeats: { id: string; seatCode: string; eventShowDateId: string; priceCategoryId: string }[] = []
+
+      for (const dayId of applicableDayIds) {
+        // Find available GA seats for this day + price category
+        const availableSeats = await db.seat.findMany({
+          where: {
+            eventId,
+            eventShowDateId: dayId,
+            priceCategoryId: priceCat.id,
+            status: 'AVAILABLE',
+          },
+          orderBy: { seatCode: 'asc' },
+          take: qty,
+        })
+
+        if (availableSeats.length < qty) {
+          const dayLabel = await db.eventShowDate.findUnique({ where: { id: dayId } })
+          const dateStr = dayLabel
+            ? new Date(dayLabel.date).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })
+            : dayId
+          return NextResponse.json({
+            error: `Tiket untuk hari ${dateStr} hanya tersisa ${availableSeats.length} (Anda pesan ${qty}). Kurangi jumlah atau pilih paket lain.`,
+          }, { status: 409 })
+        }
+
+        for (const s of availableSeats) {
+          allPickedSeats.push({
+            id: s.id,
+            seatCode: s.seatCode,
+            eventShowDateId: s.eventShowDateId!,
+            priceCategoryId: s.priceCategoryId!,
+          })
+          // Make seat code unique across days (since same seatCode can exist on multiple days)
+          uniqueSeatCodes.add(`${s.seatCode}@${dayId}`)
+        }
+      }
+
+      // Lock all picked seats (across all days) under this checkout session
+      const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+      await db.seat.updateMany({
+        where: { id: { in: allPickedSeats.map(s => s.id) } },
+        data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
+      })
+
+      festivalAutoSeats = allPickedSeats
+      // For backward compat with seatCodes JSON column — store as flat array with day prefix
+      // e.g., ["VIP-1@day1abc", "VIP-1@day2def", ...] so we can map back when scanning
+      festivalSeatCodes = allPickedSeats.map(s => `${s.seatCode}@${s.eventShowDateId}`)
+    } else {
+      // REGULAR Mode: validate seats as before
+      const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+      if (showDateId) {
+        seatWhere.eventShowDateId = showDateId
+      }
+      const seats = await db.seat.findMany({ where: seatWhere })
+      if (seats.length !== seatCodes.length) return NextResponse.json({ error: 'Kursi tidak ditemukan' }, { status: 404 })
+
+      const invalidSeats = seats.filter((s) => s.status === 'SOLD')
+      if (invalidSeats.length > 0) {
+        return NextResponse.json({ error: 'Kursi ' + invalidSeats.map((s) => s.seatCode).join(', ') + ' sudah terjual' }, { status: 409 })
+      }
+
+      const notOurs = seats.filter((s) => s.status === 'LOCKED_TEMPORARY' && s.lockedBy !== checkoutId)
+      if (notOurs.length > 0) {
+        return NextResponse.json({ error: 'Kursi ' + notOurs.map((s) => s.seatCode).join(', ') + ' sedang dipilih orang lain.' }, { status: 409 })
+      }
+
+      // Re-lock seats
+      const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+      await db.seat.updateMany({
+        where: { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId },
+        data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
+      })
     }
 
     // Resolve payment method — accept Tripay channel codes or legacy QRIS/NON_QRIS
@@ -73,22 +179,48 @@ export async function POST(request: NextRequest) {
       resolvedMethod = LEGACY_METHOD_MAP[resolvedMethod]
     }
 
-    // Calculate seat prices (use same showDateId filter as validation above)
+    // Calculate seat prices & items
     const priceCats = await db.priceCategory.findMany({ where: { eventId } })
-    const seatPrices = await db.seat.findMany({ where: seatWhere, select: { seatCode: true, priceCategoryId: true } })
 
     let seatTotal = 0
     const items: any[] = []
-    for (const s of seatPrices) {
-      const cat = priceCats.find((p) => p.id === s.priceCategoryId)
-      if (!cat) return NextResponse.json({ error: 'Harga kursi belum diatur' }, { status: 400 })
-      seatTotal += cat.price
-      items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket', priceCategoryId: s.priceCategoryId })
+
+    if (isFestivalCheckout) {
+      // Festival Mode: each ticket = 1 festival package (covers all applicable days)
+      // We charge `quantity` × package price (not per-day seats)
+      const pkg = festivalPackage
+      const qty = festivalTicketCount
+      const pkgPrice = pkg.unitPrice
+      seatTotal = pkgPrice * qty
+
+      items.push({
+        id: `FESTIVAL-${pkg.priceCategoryId}`,
+        price: pkgPrice,
+        quantity: qty,
+        name: `${pkg.packageName} (Festival Pass — ${pkg.applicableDayIds?.length || 0} hari)`,
+        category: 'Tiket Festival',
+        priceCategoryId: pkg.priceCategoryId,
+      })
+    } else {
+      // REGULAR Mode: use seat prices as before
+      const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+      if (showDateId) {
+        seatWhere.eventShowDateId = showDateId
+      }
+      const seatPrices = await db.seat.findMany({ where: seatWhere, select: { seatCode: true, priceCategoryId: true } })
+
+      for (const s of seatPrices) {
+        const cat = priceCats.find((p) => p.id === s.priceCategoryId)
+        if (!cat) return NextResponse.json({ error: 'Harga kursi belum diatur' }, { status: 400 })
+        seatTotal += cat.price
+        items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket', priceCategoryId: s.priceCategoryId })
+      }
     }
 
-    // Admin fee — flat per ticket
+    // Admin fee — flat per ticket (festival uses festivalTicketCount)
     const adminFeePerTicket = event?.adminFee || 0
-    const adminFeeTotal = adminFeePerTicket * seatCodes.length
+    const effectiveTicketCount = isFestivalCheckout ? festivalTicketCount : seatCodes.length
+    const adminFeeTotal = adminFeePerTicket * effectiveTicketCount
 
     if (adminFeeTotal > 0) {
       items.push({ id: 'ADMIN-FEE', price: adminFeeTotal, quantity: 1, name: 'Biaya Admin', category: 'Biaya' })
@@ -116,14 +248,17 @@ export async function POST(request: NextRequest) {
         if (nowJakarta >= fromJakarta && nowJakarta <= untilJakarta) {
           const hasMerch = merchandise && Array.isArray(merchandise) && merchandise.length > 0
 
-          if (seatCodes.length < (promoCodeData.minTickets || 0)) {
+          // Use effectiveTicketCount so festival mode (where seatCodes is empty) still validates correctly
+          const ticketCountForPromo = isFestivalCheckout ? festivalTicketCount : seatCodes.length
+
+          if (ticketCountForPromo < (promoCodeData.minTickets || 0)) {
             return NextResponse.json({ error: `Promo ini berlaku untuk pembelian minimal ${promoCodeData.minTickets} tiket` }, { status: 400 })
           }
           if (!hasMerch && (promoCodeData.minMerchItems || 0) > 0) {
             return NextResponse.json({ error: `Promo ini berlaku jika membeli minimal ${promoCodeData.minMerchItems} merchandise` }, { status: 400 })
           }
 
-          if (promoTarget === 'BUNDLING' && !(seatCodes.length > 0 && hasMerch)) {
+          if (promoTarget === 'BUNDLING' && !(ticketCountForPromo > 0 && hasMerch)) {
             return NextResponse.json({ error: 'Promo bundling hanya berlaku jika membeli tiket + merchandise' }, { status: 400 })
           }
           if (promoTarget === 'MERCH' && !hasMerch) {
@@ -133,22 +268,37 @@ export async function POST(request: NextRequest) {
           // --- Zone restriction validation ---
           // applicableZoneNames: JSON array of zone/category names
           // Matches: priceCategory.name (Numbered Seating) or zoneName (General Admission)
+          // Festival Mode: package name (which is also zone name in GA config)
           if (promoCodeData.applicableZoneNames) {
             try {
               const allowedZones: string[] = JSON.parse(promoCodeData.applicableZoneNames)
               if (Array.isArray(allowedZones) && allowedZones.length > 0) {
-                // Get zone names from the seats being purchased
-                const buyerZoneNames = seats
-                  .map((s) => s.zoneName)
-                  .filter(Boolean) as string[]
-                // Also get priceCategory names for numbered seating
-                const buyerCategoryNames = seatPrices
-                  .map((s) => {
-                    const cat = priceCats.find((p) => p.id === s.priceCategoryId)
-                    return cat?.name
+                let allBuyerZones: string[] = []
+
+                if (isFestivalCheckout) {
+                  // Festival: use package name (= price category name = zone name)
+                  const festivalCat = priceCats.find(p => p.id === festivalPriceCategoryId)
+                  if (festivalCat?.name) allBuyerZones.push(festivalCat.name)
+                } else {
+                  // Regular: get zone names from seats + price category names
+                  const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+                  if (showDateId) seatWhere.eventShowDateId = showDateId
+                  const seatsForZones = await db.seat.findMany({
+                    where: seatWhere,
+                    select: { seatCode: true, zoneName: true, priceCategoryId: true },
                   })
-                  .filter(Boolean) as string[]
-                const allBuyerZones = [...new Set([...buyerZoneNames, ...buyerCategoryNames])]
+                  const buyerZoneNames = seatsForZones
+                    .map((s) => s.zoneName)
+                    .filter(Boolean) as string[]
+                  const buyerCategoryNames = seatsForZones
+                    .map((s) => {
+                      const cat = priceCats.find((p) => p.id === s.priceCategoryId)
+                      return cat?.name
+                    })
+                    .filter(Boolean) as string[]
+                  allBuyerZones = [...new Set([...buyerZoneNames, ...buyerCategoryNames])]
+                }
+
                 const matchingZones = allBuyerZones.filter((name) => allowedZones.includes(name))
                 if (matchingZones.length === 0) {
                   return NextResponse.json({ error: `Promo ini hanya berlaku untuk zona: ${allowedZones.join(', ')}` }, { status: 400 })
@@ -216,21 +366,22 @@ export async function POST(request: NextRequest) {
     if (promoCodeData) {
       const isPerItem = promoCodeData.isPerItem === true
       const ticketSubtotal = seatTotal + adminFeeTotal
+      // Use effectiveTicketCount for festival mode (where seatCodes is empty)
+      const ticketCount = isFestivalCheckout ? festivalTicketCount : seatCodes.length
 
-      // --- NEW: Bundling discount calculation ---
-      // If bundleSize > 0 and bundleDiscount > 0, use bundling logic
+      // --- Bundling discount calculation ---
       if (promoCodeData.bundleSize > 0 && promoCodeData.bundleDiscount > 0) {
-        const bundleCount = Math.floor(seatCodes.length / promoCodeData.bundleSize)
+        const bundleCount = Math.floor(ticketCount / promoCodeData.bundleSize)
         if (bundleCount > 0) {
           discountAmount = bundleCount * promoCodeData.bundleDiscount
         }
       } else if (promoTarget === 'TICKET') {
-        if (isPerItem) {
+        if (isPerItem && ticketCount > 0) {
           const perItemDiscount =
             promoCodeData.discountType === 'PERCENT'
-              ? Math.round((ticketSubtotal / seatCodes.length) * promoCodeData.discountValue / 100)
-              : Math.min(promoCodeData.discountValue, ticketSubtotal / seatCodes.length)
-          discountAmount = perItemDiscount * seatCodes.length
+              ? Math.round((ticketSubtotal / ticketCount) * promoCodeData.discountValue / 100)
+              : Math.min(promoCodeData.discountValue, ticketSubtotal / ticketCount)
+          discountAmount = perItemDiscount * ticketCount
         } else {
           discountAmount =
             promoCodeData.discountType === 'PERCENT'
@@ -252,10 +403,8 @@ export async function POST(request: NextRequest) {
               : Math.min(promoCodeData.discountValue, merchTotalCalc)
         }
       } else if (promoTarget === 'ALL' || promoTarget === 'BUNDLING') {
-        // ALL: discount on everything (tickets + admin fee + merch)
-        // BUNDLING: same as ALL but requires both tickets + merch (validated above)
         const targetSubtotal = ticketSubtotal + merchTotalCalc
-        const totalItems = seatCodes.length + (merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0)
+        const totalItems = ticketCount + (merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0)
 
         if (isPerItem && totalItems > 0) {
           const perItemDiscount =
@@ -408,6 +557,9 @@ export async function POST(request: NextRequest) {
     console.log('[checkout] Tripay success — reference:', reference, 'checkout_url:', !!paymentUrl, 'pay_code:', !!pay_code)
 
     // Save transaction to DB
+    // Festival Mode: use festival seat codes (with day prefix) so each day's seat is tracked
+    const finalSeatCodes = isFestivalCheckout ? festivalSeatCodes : seatCodes
+
     await db.transaction.create({
       data: {
         transactionId: tid,
@@ -416,7 +568,7 @@ export async function POST(request: NextRequest) {
         customerName,
         customerEmail,
         customerWa,
-        seatCodes: JSON.stringify(seatCodes),
+        seatCodes: JSON.stringify(finalSeatCodes),
         totalAmount,
         paymentStatus: 'PENDING',
         adminFeeApplied: adminFeeTotal,

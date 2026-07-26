@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { getTripayConfig } from '@/lib/tripay'
 import { sendETicketEmail } from '@/lib/email'
+import { markSeatsForTransaction, buildQrText } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 
 export async function POST(request: NextRequest) {
@@ -72,13 +73,16 @@ export async function POST(request: NextRequest) {
       })
 
       // Mark seats as SOLD — clear lockedBy too
-      await db.seat.updateMany({
-        where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
-        data: { status: 'SOLD', lockedUntil: null, lockedBy: null },
-      })
+      // (handles both REGULAR and FESTIVAL seat code formats automatically)
+      await markSeatsForTransaction(
+        transaction.eventId,
+        transaction.seatCodes,
+        'SOLD',
+        { lockedUntil: null, lockedBy: null }
+      )
 
-      // Generate QR code
-      const qrText = 'NAMA: ' + transaction.customerName + ' | KURSI: ' + transaction.seatCodes + ' | KODE TRX: ' + transaction.transactionId
+      // Generate QR code — content includes festival package info if applicable
+      const qrText = await buildQrText(transaction)
       const qrDataUrl = await QRCode.toDataURL(qrText)
       await db.transaction.update({
         where: { transactionId: transaction.transactionId },
@@ -140,11 +144,13 @@ export async function POST(request: NextRequest) {
         data: { paymentStatus: 'EXPIRED', expiredAt: new Date(), midtransId: reference },
       })
 
-      // Release seats
-      await db.seat.updateMany({
-        where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
-        data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
-      })
+      // Release seats (handles both REGULAR and FESTIVAL formats)
+      await markSeatsForTransaction(
+        transaction.eventId,
+        transaction.seatCodes,
+        'AVAILABLE',
+        { lockedUntil: null, lockedBy: null }
+      )
 
       // Roll back promo code usage
       if (transaction.promoCodeId) {
@@ -166,10 +172,12 @@ export async function POST(request: NextRequest) {
         data: { paymentStatus: 'FAILED', expiredAt: new Date(), midtransId: reference },
       })
 
-      await db.seat.updateMany({
-        where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
-        data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
-      })
+      await markSeatsForTransaction(
+        transaction.eventId,
+        transaction.seatCodes,
+        'AVAILABLE',
+        { lockedUntil: null, lockedBy: null }
+      )
 
       // Roll back promo code usage
       if (transaction.promoCodeId) {

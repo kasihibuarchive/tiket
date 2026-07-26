@@ -36,6 +36,11 @@ export async function GET(
           reviewsData: true,
           hideSeatAvailability: true,
           hideSoldCount: true,
+          // Festival Mode fields
+          eventMode: true,
+          multiDayPassEnabled: true,
+          scanCooldownMinutes: true,
+          cooldownEnabled: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -52,6 +57,7 @@ export async function GET(
       const [priceCategories, showDates, seatStats, reviewStats] = await Promise.all([
         db.priceCategory.findMany({
           where: { eventId: id },
+          // Include festival package fields
         }),
         db.eventShowDate.findMany({
           where: { eventId: id },

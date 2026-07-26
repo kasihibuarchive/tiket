@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTripayTransactionDetail } from '@/lib/tripay'
+import { markSeatsForTransaction, buildQrText } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 
 export async function GET(
@@ -63,14 +64,16 @@ export async function GET(
                 },
               })
 
-              // Mark seats as SOLD
-              await db.seat.updateMany({
-                where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
-                data: { status: 'SOLD', lockedUntil: null, lockedBy: null },
-              })
+              // Mark seats as SOLD (handles both REGULAR and FESTIVAL formats)
+              await markSeatsForTransaction(
+                transaction.eventId,
+                transaction.seatCodes,
+                'SOLD',
+                { lockedUntil: null, lockedBy: null }
+              )
 
-              // Generate QR code
-              const qrText = 'NAMA: ' + transaction.customerName + ' | KURSI: ' + transaction.seatCodes + ' | KODE TRX: ' + transaction.transactionId
+              // Generate QR code — content includes festival info if applicable
+              const qrText = await buildQrText(transaction)
               const qrDataUrl = await QRCode.toDataURL(qrText)
               await db.transaction.update({
                 where: { transactionId },
@@ -129,10 +132,12 @@ export async function GET(
                 data: { paymentStatus: newStatus, expiredAt: new Date() },
               })
 
-              await db.seat.updateMany({
-                where: { eventId: transaction.eventId, seatCode: { in: seatCodes } },
-                data: { status: 'AVAILABLE', lockedUntil: null, lockedBy: null },
-              })
+              await markSeatsForTransaction(
+                transaction.eventId,
+                transaction.seatCodes,
+                'AVAILABLE',
+                { lockedUntil: null, lockedBy: null }
+              )
 
               const updated = await db.transaction.findUnique({
                 where: { transactionId },
