@@ -37,7 +37,14 @@ interface EventData {
   location: string
   isPublished: boolean
   isCompleted?: boolean
-  priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>
+  priceCategories: Array<{
+    id: string
+    name: string
+    price: number
+    colorCode: string
+    packageType?: string | null
+    applicableDayIds?: string[] | null
+  }>
   seatSummary?: { total: number; available: number; sold: number }
   seatMapId: string | null
   seatMapInfo?: { name: string; seatType: string } | null
@@ -48,12 +55,33 @@ interface EventData {
   adminFee?: number
   seatType?: string | null
   reviewStats?: { total: number; average: number }
+  // Festival Mode
+  eventMode?: string
+  multiDayPassEnabled?: boolean
+  scanCooldownMinutes?: number
+  cooldownEnabled?: boolean
 }
 
 interface SeatMapOption {
   id: string
   name: string
   seatType: string
+}
+
+interface PriceCategoryForm {
+  name: string
+  price: number
+  colorCode: string
+  packageType?: string | null   // "SINGLE" | "MULTI" | "FULL" | null
+  applicableDayIds?: string[]  // Array of showDate temp IDs (frontend only)
+}
+
+interface ShowDateForm {
+  id?: string         // existing DB id (when editing)
+  date: string
+  openGate: string
+  label: string
+  tempId?: string     // frontend-only temp ID for matching price categories
 }
 
 interface EventFormData {
@@ -68,8 +96,12 @@ interface EventFormData {
   isPublished: boolean
   adminFee: number
   seatType: string
-  priceCategories: Array<{ name: string; price: number; colorCode: string }>
-  showDates: Array<{ date: string; openGate: string; label: string }>
+  priceCategories: PriceCategoryForm[]
+  showDates: ShowDateForm[]
+  // Festival Mode
+  eventMode: string  // "REGULAR" | "FESTIVAL"
+  scanCooldownMinutes: number
+  cooldownEnabled: boolean
 }
 
 const emptyForm: EventFormData = {
@@ -89,7 +121,10 @@ const emptyForm: EventFormData = {
     { name: 'Regular', price: 75000, colorCode: '#8B8680' },
     { name: 'Student', price: 35000, colorCode: '#7BA7A5' },
   ],
-  showDates: [{ date: '', openGate: '', label: '' }],
+  showDates: [{ date: '', openGate: '', label: '', tempId: 'd1' }],
+  eventMode: 'REGULAR',
+  scanCooldownMinutes: 30,
+  cooldownEnabled: true,
 }
 
 export default function AdminEventsPage() {
@@ -158,6 +193,26 @@ export default function AdminEventsPage() {
 
   function openEditDialog(event: EventData) {
     setEditingId(event.id)
+    // Build showDates with tempId for matching price categories
+    const showDates: ShowDateForm[] = (event.showDates && event.showDates.length > 0)
+      ? event.showDates.map((sd, idx) => ({
+          id: sd.id,
+          date: new Date(sd.date).toISOString().slice(0, 16),
+          openGate: sd.openGate ? new Date(sd.openGate).toISOString().slice(0, 16) : '',
+          label: sd.label || '',
+          tempId: `d${idx + 1}`,
+        }))
+      : [
+          { date: new Date(event.showDate).toISOString().slice(0, 16), openGate: '', label: '', tempId: 'd1' },
+        ]
+
+    // Map price categories — convert DB applicableDayIds (array of showDate DB IDs) to tempIds for frontend editing
+    // Use Record (plain object) instead of Map — avoids conflict with lucide-react's `Map` icon import
+    const showDateIdToTempId: Record<string, string> = {}
+    showDates.forEach(sd => {
+      if (sd.id && sd.tempId) showDateIdToTempId[sd.id] = sd.tempId
+    })
+
     setFormData({
       title: event.title,
       category: event.category,
@@ -174,20 +229,19 @@ export default function AdminEventsPage() {
         name: pc.name,
         price: pc.price,
         colorCode: pc.colorCode,
+        packageType: pc.packageType || null,
+        applicableDayIds: (pc.applicableDayIds || []).map((id: string) => showDateIdToTempId[id] || id),
       })),
-      showDates: (event.showDates && event.showDates.length > 0)
-        ? event.showDates.map((sd) => ({
-            id: sd.id,
-            date: new Date(sd.date).toISOString().slice(0, 16),
-            openGate: sd.openGate ? new Date(sd.openGate).toISOString().slice(0, 16) : '',
-            label: sd.label || '',
-          }))
-        : [{ date: new Date(event.showDate).toISOString().slice(0, 16), openGate: '', label: '' }],
+      showDates,
+      // Festival Mode
+      eventMode: event.eventMode || 'REGULAR',
+      scanCooldownMinutes: event.scanCooldownMinutes ?? 30,
+      cooldownEnabled: event.cooldownEnabled ?? true,
     })
     setIsDialogOpen(true)
   }
 
-  function updatePriceCategory(index: number, field: string, value: string | number) {
+  function updatePriceCategory(index: number, field: string, value: string | number | string[] | null) {
     setFormData((prev) => {
       const updated = [...prev.priceCategories]
       updated[index] = { ...updated[index], [field]: value }
@@ -198,7 +252,14 @@ export default function AdminEventsPage() {
   function addPriceCategory() {
     setFormData((prev) => ({
       ...prev,
-      priceCategories: [...prev.priceCategories, { name: '', price: 0, colorCode: '#8B8680' }],
+      priceCategories: [...prev.priceCategories, {
+        name: '',
+        price: 0,
+        colorCode: '#8B8680',
+        // Festival defaults — inherit from previous category if exists
+        packageType: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].packageType : null,
+        applicableDayIds: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].applicableDayIds : [],
+      }],
     }))
   }
 
@@ -209,33 +270,89 @@ export default function AdminEventsPage() {
     }))
   }
 
-    function addShowDate() {
-      setFormData((prev) => ({
-        ...prev,
-        showDates: [...prev.showDates, { date: '', openGate: '', label: `Hari ${prev.showDates.length + 1}` }],
-      }))
-    }
+  function addShowDate() {
+    setFormData((prev) => ({
+      ...prev,
+      showDates: [...prev.showDates, {
+        date: '',
+        openGate: '',
+        label: `Hari ${prev.showDates.length + 1}`,
+        tempId: `d${prev.showDates.length + 1}`,
+      }],
+    }))
+  }
 
-    function removeShowDate(index: number) {
-      setFormData((prev) => ({
+  function removeShowDate(index: number) {
+    setFormData((prev) => {
+      const removed = prev.showDates[index]
+      const removedTempId = removed.tempId
+      // Also remove this tempId from any price categories that reference it
+      const updatedPriceCats = prev.priceCategories.map(pc => ({
+        ...pc,
+        applicableDayIds: (pc.applicableDayIds || []).filter(id => id !== removedTempId),
+      }))
+      return {
         ...prev,
         showDates: prev.showDates.filter((_, i) => i !== index),
-      }))
-    }
+        priceCategories: updatedPriceCats,
+      }
+    })
+  }
 
-    function updateShowDate(index: number, field: string, value: string) {
-      setFormData((prev) => {
-        const updated = [...prev.showDates]
-        updated[index] = { ...updated[index], [field]: value }
-        return { ...prev, showDates: updated }
-      })
-    }
+  function updateShowDate(index: number, field: string, value: string) {
+    setFormData((prev) => {
+      const updated = [...prev.showDates]
+      updated[index] = { ...updated[index], [field]: value }
+      return { ...prev, showDates: updated }
+    })
+  }
 
   async function handleSave() {
     setIsSaving(true)
     try {
       const url = editingId ? `/api/admin/events/${editingId}` : '/api/admin/events'
       const method = editingId ? 'PUT' : 'POST'
+
+      const isFestival = formData.eventMode === 'FESTIVAL'
+
+      // Build a map of showDate tempId → existing DB id (for editing existing events)
+      // For new showDates (no DB id), they'll be saved first then matched to price categories in a second pass
+      // Use Record (plain object) — avoids conflict with lucide-react's `Map` icon import
+      const showDateTempToDbId: Record<string, string> = {}
+      formData.showDates.forEach(sd => {
+        if (sd.id && sd.tempId) showDateTempToDbId[sd.tempId] = sd.id
+      })
+
+      // Festival Mode: filter out empty price categories and serialize applicableDayIds
+      const serializedPriceCategories = formData.priceCategories
+        .filter(pc => pc.name.trim())
+        .map(pc => {
+          if (!isFestival) {
+            // Regular event: no packageType / applicableDayIds
+            const { packageType, applicableDayIds, ...rest } = pc
+            void packageType; void applicableDayIds
+            return rest
+          }
+          // Festival Mode
+          const pkgType = pc.packageType || 'SINGLE'
+          // FULL = all days (null), SINGLE/MULTI = specific days
+          if (pkgType === 'FULL') {
+            const { packageType: _pt, applicableDayIds: _ad, ...rest } = pc
+            void _pt; void _ad
+            return { ...rest, packageType: 'FULL', applicableDayIds: null }
+          }
+          // SINGLE or MULTI: convert tempIds to DB IDs where possible (fallback to tempId for new showDates)
+          const dayIds = (pc.applicableDayIds || []).map(tempId =>
+            showDateTempToDbId[tempId] || tempId
+          )
+          return {
+            name: pc.name,
+            price: pc.price,
+            colorCode: pc.colorCode,
+            packageType: pkgType,
+            applicableDayIds: JSON.stringify(dayIds),
+          }
+        })
 
       const payload = {
         ...formData,
@@ -246,7 +363,16 @@ export default function AdminEventsPage() {
         openGate: formData.showDates[0]?.openGate
           ? new Date(formData.showDates[0].openGate).toISOString()
           : null,
-        showDates: formData.showDates.filter((sd) => sd.date),
+        showDates: formData.showDates
+          .filter((sd) => sd.date)
+          .map(sd => ({ id: sd.id, date: sd.date, openGate: sd.openGate, label: sd.label })),
+        priceCategories: serializedPriceCategories,
+        // Festival Mode
+        eventMode: formData.eventMode,
+        scanCooldownMinutes: formData.scanCooldownMinutes,
+        cooldownEnabled: formData.cooldownEnabled,
+        // Force seatType = GA when FESTIVAL
+        seatType: isFestival ? 'GENERAL_ADMISSION' : formData.seatType,
       }
 
       const res = await fetch(url, {
@@ -256,6 +382,61 @@ export default function AdminEventsPage() {
       })
 
       if (res.ok) {
+        // For FESTIVAL events with new showDates, we need a second pass to update applicableDayIds
+        // with real DB IDs (since new showDates only got their IDs after the first save)
+        if (isFestival && editingId) {
+          // Refetch event to get actual DB IDs for showDates
+          const refetchRes = await fetch(`/api/admin/events/${editingId}`)
+          if (refetchRes.ok) {
+            const refetchData = await refetchRes.json()
+            const updatedShowDates = refetchData.event.showDates || []
+            // Build new tempId → DB ID map using position in array (since order is preserved by date asc)
+            const newTempToDbMap: Record<string, string> = {}
+            const sortedShowDates = [...formData.showDates].filter(sd => sd.date)
+              .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+            updatedShowDates.forEach((dbSd: { id: string }, idx: number) => {
+              if (sortedShowDates[idx]?.tempId) {
+                newTempToDbMap[sortedShowDates[idx].tempId!] = dbSd.id
+              }
+            })
+            // Check if any price category has applicableDayIds that need updating
+            const needsUpdate = formData.priceCategories.some(pc =>
+              pc.packageType && pc.packageType !== 'FULL' &&
+              (pc.applicableDayIds || []).some(tempId => !showDateTempToDbId[tempId])
+            )
+            if (needsUpdate) {
+              const updatedPriceCats = formData.priceCategories
+                .filter(pc => pc.name.trim())
+                .map(pc => {
+                  if (!pc.packageType || pc.packageType === 'FULL') {
+                    return {
+                      name: pc.name,
+                      price: pc.price,
+                      colorCode: pc.colorCode,
+                      packageType: pc.packageType || null,
+                      applicableDayIds: null,
+                    }
+                  }
+                  const dayIds = (pc.applicableDayIds || []).map(tempId =>
+                    newTempToDbMap[tempId] || showDateTempToDbId[tempId] || tempId
+                  )
+                  return {
+                    name: pc.name,
+                    price: pc.price,
+                    colorCode: pc.colorCode,
+                    packageType: pc.packageType,
+                    applicableDayIds: JSON.stringify(dayIds),
+                  }
+                })
+              // Send second update to fix applicableDayIds
+              await fetch(`/api/admin/events/${editingId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ priceCategories: updatedPriceCats }),
+              })
+            }
+          }
+        }
         setIsDialogOpen(false)
         fetchEvents()
       } else {
@@ -522,7 +703,14 @@ export default function AdminEventsPage() {
                       <Link href={`/events/${event.id}`} className="font-medium text-charcoal hover:text-gold transition-colors">
                         {event.title}
                       </Link>
-                      <p className="text-xs text-muted-foreground">{event.location}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-xs text-muted-foreground">{event.location}</p>
+                        {event.eventMode === 'FESTIVAL' && (
+                          <Badge variant="secondary" className="text-[9px] bg-gold/15 text-gold border-gold/30 px-1.5 py-0 h-4">
+                            🎪 Festival
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {event.seatMapInfo ? (
@@ -709,6 +897,106 @@ export default function AdminEventsPage() {
               />
             </div>
 
+            {/* ── FESTIVAL MODE SELECTOR ── */}
+            <div className="space-y-2">
+              <Label className="text-sm font-medium">Mode Event</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setFormData({
+                    ...formData,
+                    eventMode: 'REGULAR',
+                    // Reset festival fields when switching to REGULAR
+                    seatType: formData.seatType === 'GENERAL_ADMISSION' ? 'NUMBERED' : formData.seatType,
+                  })}
+                  className={`text-left p-3 rounded-lg border-2 transition-all ${
+                    formData.eventMode === 'REGULAR'
+                      ? 'border-gold bg-gold/5'
+                      : 'border-border/50 hover:border-gold/30'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-base">🎭</span>
+                    <span className="text-sm font-semibold text-charcoal">Regular</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">Single show. Numbered/GA seating. Untuk pertunjukan teater biasa.</p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData({
+                    ...formData,
+                    eventMode: 'FESTIVAL',
+                    // Force GA when FESTIVAL
+                    seatType: 'GENERAL_ADMISSION',
+                  })}
+                  className={`text-left p-3 rounded-lg border-2 transition-all ${
+                    formData.eventMode === 'FESTIVAL'
+                      ? 'border-gold bg-gold/5'
+                      : 'border-border/50 hover:border-gold/30'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-base">🎪</span>
+                    <span className="text-sm font-semibold text-charcoal">Festival</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">Multi-day pass (1/2/4 hari). GA only. Scan cooldown anti-share tiket.</p>
+                </button>
+              </div>
+            </div>
+
+            {/* ── FESTIVAL SETTINGS (only show when FESTIVAL) ── */}
+            {formData.eventMode === 'FESTIVAL' && (
+              <div className="rounded-lg border-2 border-gold/30 bg-gold/5 p-4 space-y-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-semibold text-charcoal">🎪 Pengaturan Festival</span>
+                  <Badge variant="secondary" className="text-[10px] bg-gold/20 text-gold border-gold/30">Festival Mode</Badge>
+                </div>
+
+                {/* Cooldown Toggle */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-charcoal">Aktifkan Cooldown Scan</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Setelah scan valid, tiket di-lock sementara untuk cegah share tiket antar penonton
+                    </p>
+                  </div>
+                  <Switch
+                    checked={formData.cooldownEnabled}
+                    onCheckedChange={(checked) => setFormData({ ...formData, cooldownEnabled: checked })}
+                  />
+                </div>
+
+                {/* Cooldown Minutes */}
+                {formData.cooldownEnabled && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Durasi Cooldown (menit)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={240}
+                      value={formData.scanCooldownMinutes}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        scanCooldownMinutes: Math.max(1, Number(e.target.value) || 30),
+                      })}
+                      className="h-9 text-sm max-w-[140px]"
+                    />
+                    <p className="text-[11px] text-muted-foreground">
+                      Default 30 menit. Usher bisa reset manual kapan saja. Contoh: 30 menit cukup untuk cegah share, tapi tetap fleksibel untuk re-entry antar pertunjukan.
+                    </p>
+                  </div>
+                )}
+
+                <div className="text-[11px] text-muted-foreground bg-white/50 rounded p-2 border border-gold/20">
+                  💡 <span className="font-medium">Tips setup Festival:</span><br />
+                  • Tambah minimal 2 hari pertunjukan (gunakan tombol "Tambah Hari")<br />
+                  • Bikin price category per paket: 1-Day, 2-Day, Full Pass<br />
+                  • Setiap paket pilih hari mana saja yang berlaku<br />
+                  • Seating otomatis di-lock ke General Admission (GA)
+                </div>
+              </div>
+            )}
+
             {/* Category & Location */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -731,19 +1019,27 @@ export default function AdminEventsPage() {
 
             {/* Seat Type */}
             <div className="space-y-2">
-              <Label className="text-sm font-medium">Tipe Kursi</Label>
+              <Label className="text-sm font-medium flex items-center gap-2">
+                Tipe Kursi
+                {formData.eventMode === 'FESTIVAL' && (
+                  <Badge variant="secondary" className="text-[10px] bg-amber-100 text-amber-700 border-amber-200">
+                    🔒 Locked to GA (Festival Mode)
+                  </Badge>
+                )}
+              </Label>
               <Select
                 value={formData.seatType}
                 onValueChange={(val) => setFormData({ ...formData, seatType: val })}
+                disabled={formData.eventMode === 'FESTIVAL'}
               >
-                <SelectTrigger className="bg-white">
+                <SelectTrigger className={`bg-white ${formData.eventMode === 'FESTIVAL' ? 'opacity-60 cursor-not-allowed' : ''}`}>
                   <SelectValue placeholder="Pilih tipe kursi" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="NUMBERED">
+                  <SelectItem value="NUMBERED" disabled={formData.eventMode === 'FESTIVAL'}>
                     <div className="flex items-center gap-2">
                       <LayoutGrid className="w-3.5 h-3.5" />
-                      <span>Kursi Nomor (Numbered)</span>
+                      <span>Kursi Nomor (Numbered) {formData.eventMode === 'FESTIVAL' && '— Tidak tersedia di Festival Mode'}</span>
                     </div>
                   </SelectItem>
                   <SelectItem value="GENERAL_ADMISSION">
@@ -755,9 +1051,11 @@ export default function AdminEventsPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                {formData.seatType === 'GENERAL_ADMISSION'
-                  ? 'GA: Pengunjung memilih zona, bukan kursi individu. Upload layout gambar & definisi zona di halaman Seat Editor.'
-                  : 'Kursi Nomor: Pengunjung memilih kursi individual dari seat map.'}
+                {formData.eventMode === 'FESTIVAL'
+                  ? '🔒 Festival Mode hanya support General Admission. Numbered seating tidak tersedia untuk event multi-day pass.'
+                  : formData.seatType === 'GENERAL_ADMISSION'
+                    ? 'GA: Pengunjung memilih zona, bukan kursi individu. Upload layout gambar & definisi zona di halaman Seat Editor.'
+                    : 'Kursi Nomor: Pengunjung memilih kursi individual dari seat map.'}
               </p>
             </div>
 
@@ -871,50 +1169,160 @@ export default function AdminEventsPage() {
             {/* Price Categories */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label className="text-sm font-medium">Kategori Harga</Label>
+                <Label className="text-sm font-medium">
+                  Kategori Harga
+                  {formData.eventMode === 'FESTIVAL' && (
+                    <Badge variant="secondary" className="ml-2 text-[10px] bg-gold/20 text-gold border-gold/30">
+                      Paket Festival
+                    </Badge>
+                  )}
+                </Label>
                 <Button variant="outline" size="sm" onClick={addPriceCategory}>
                   <Plus className="w-3 h-3 mr-1" />
                   Tambah
                 </Button>
               </div>
 
+              {formData.eventMode === 'FESTIVAL' && (
+                <div className="text-[11px] text-muted-foreground bg-gold/5 border border-gold/20 rounded p-2">
+                  🎪 <span className="font-medium">Paket Festival:</span> Setiap kategori = 1 paket tiket.
+                  Pilih <span className="font-medium">Single</span> untuk 1 hari, <span className="font-medium">Multi</span> untuk beberapa hari (e.g., 2-day pass Hari 1+2),
+                  atau <span className="font-medium">Full Pass</span> untuk akses semua hari.
+                </div>
+              )}
+
               {formData.priceCategories.map((pc, index) => (
-                <div key={index} className="flex items-end gap-2">
-                  <div className="flex-1">
-                    <Label className="text-xs text-muted-foreground">Nama</Label>
-                    <Input
-                      value={pc.name}
-                      onChange={(e) => updatePriceCategory(index, 'name', e.target.value)}
-                      placeholder="VIP"
-                      className="h-9 text-sm"
-                    />
+                <div key={index} className="rounded-lg border border-border/60 p-3 space-y-2 bg-muted/20">
+                  <div className="flex items-end gap-2">
+                    <div className="flex-1">
+                      <Label className="text-xs text-muted-foreground">Nama</Label>
+                      <Input
+                        value={pc.name}
+                        onChange={(e) => updatePriceCategory(index, 'name', e.target.value)}
+                        placeholder={formData.eventMode === 'FESTIVAL' ? "Contoh: Day 1, 2-Day Pass, Full 4-Day" : "VIP"}
+                        className="h-9 text-sm"
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <Label className="text-xs text-muted-foreground">Harga (Rp)</Label>
+                      <Input
+                        type="number"
+                        value={pc.price}
+                        onChange={(e) => updatePriceCategory(index, 'price', Number(e.target.value))}
+                        className="h-9 text-sm"
+                      />
+                    </div>
+                    <div className="w-16">
+                      <Label className="text-xs text-muted-foreground">Warna</Label>
+                      <Input
+                        type="color"
+                        value={pc.colorCode}
+                        onChange={(e) => updatePriceCategory(index, 'colorCode', e.target.value)}
+                        className="h-9 p-1"
+                      />
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 text-danger"
+                      onClick={() => removePriceCategory(index)}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
                   </div>
-                  <div className="flex-1">
-                    <Label className="text-xs text-muted-foreground">Harga (Rp)</Label>
-                    <Input
-                      type="number"
-                      value={pc.price}
-                      onChange={(e) => updatePriceCategory(index, 'price', Number(e.target.value))}
-                      className="h-9 text-sm"
-                    />
-                  </div>
-                  <div className="w-16">
-                    <Label className="text-xs text-muted-foreground">Warna</Label>
-                    <Input
-                      type="color"
-                      value={pc.colorCode}
-                      onChange={(e) => updatePriceCategory(index, 'colorCode', e.target.value)}
-                      className="h-9 p-1"
-                    />
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 text-danger"
-                    onClick={() => removePriceCategory(index)}
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </Button>
+
+                  {/* Festival Mode: Package Type + Applicable Days */}
+                  {formData.eventMode === 'FESTIVAL' && (
+                    <div className="space-y-2 pt-2 border-t border-border/40">
+                      <div>
+                        <Label className="text-xs text-muted-foreground mb-1.5 block">Tipe Paket</Label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => updatePriceCategory(index, 'packageType', 'SINGLE')}
+                            className={`text-[11px] px-2 py-1.5 rounded border transition-all ${
+                              (pc.packageType || 'SINGLE') === 'SINGLE'
+                                ? 'bg-gold/20 border-gold text-charcoal font-medium'
+                                : 'bg-white border-border/50 text-muted-foreground hover:border-gold/30'
+                            }`}
+                          >
+                            Single Day
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updatePriceCategory(index, 'packageType', 'MULTI')}
+                            className={`text-[11px] px-2 py-1.5 rounded border transition-all ${
+                              pc.packageType === 'MULTI'
+                                ? 'bg-gold/20 border-gold text-charcoal font-medium'
+                                : 'bg-white border-border/50 text-muted-foreground hover:border-gold/30'
+                            }`}
+                          >
+                            Multi-Day
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => updatePriceCategory(index, 'packageType', 'FULL')}
+                            className={`text-[11px] px-2 py-1.5 rounded border transition-all ${
+                              pc.packageType === 'FULL'
+                                ? 'bg-emerald-100 border-emerald-400 text-emerald-700 font-medium'
+                                : 'bg-white border-border/50 text-muted-foreground hover:border-emerald-300'
+                            }`}
+                          >
+                            Full Pass
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Applicable Days — only for SINGLE and MULTI */}
+                      {pc.packageType !== 'FULL' && (
+                        <div>
+                          <Label className="text-xs text-muted-foreground mb-1.5 block">
+                            Hari yang Berlaku {(pc.packageType || 'SINGLE') === 'SINGLE' ? '(pilih 1)' : '(pilih yang sesuai)'}
+                          </Label>
+                          {formData.showDates.length === 0 ? (
+                            <p className="text-[11px] text-muted-foreground italic">Tambahkan jadwal hari pertunjukan dulu di atas ⤴</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {formData.showDates.map((sd, sdIdx) => {
+                                const tempId = sd.tempId || `d${sdIdx + 1}`
+                                const isSelected = (pc.applicableDayIds || []).includes(tempId)
+                                const dayLabel = sd.label || `Hari ${sdIdx + 1}`
+                                const dateLabel = sd.date ? new Date(sd.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '(no date)'
+                                return (
+                                  <button
+                                    key={tempId}
+                                    type="button"
+                                    onClick={() => {
+                                      const current = pc.applicableDayIds || []
+                                      if (isSelected) {
+                                        updatePriceCategory(index, 'applicableDayIds', current.filter(id => id !== tempId))
+                                      } else {
+                                        updatePriceCategory(index, 'applicableDayIds', [...current, tempId])
+                                      }
+                                    }}
+                                    className={`text-[11px] px-2.5 py-1 rounded-full border transition-all ${
+                                      isSelected
+                                        ? 'bg-gold border-gold text-white font-medium'
+                                        : 'bg-white border-border/50 text-muted-foreground hover:border-gold/40'
+                                    }`}
+                                  >
+                                    {dayLabel} · {dateLabel}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Full Pass Info */}
+                      {pc.packageType === 'FULL' && (
+                        <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+                          ✓ Full Pass — berlaku untuk semua hari pertunjukan ({formData.showDates.length} hari)
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

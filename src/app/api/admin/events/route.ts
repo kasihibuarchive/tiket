@@ -12,6 +12,9 @@ export async function GET() {
           id: true, title: true, category: true, showDate: true,
           location: true, posterUrl: true, isPublished: true, isCompleted: true,
           adminFee: true, seatMapId: true, seatType: true,
+          // Festival Mode fields
+          eventMode: true, multiDayPassEnabled: true,
+          scanCooldownMinutes: true, cooldownEnabled: true,
           createdAt: true, updatedAt: true,
         },
       })
@@ -100,6 +103,10 @@ export async function POST(request: NextRequest) {
       showDates,
       teaserVideoUrl,
       seatType,
+      // Festival Mode fields
+      eventMode,
+      scanCooldownMinutes,
+      cooldownEnabled,
     } = body
 
     if (!title || !showDate || !location || !synopsis) {
@@ -125,6 +132,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Festival Mode: force GA seating
+    const isFestival = eventMode === 'FESTIVAL'
+    const effectiveSeatType = isFestival ? 'GENERAL_ADMISSION' : (seatType || 'NUMBERED')
+
     // Create event first, then create price categories and show dates separately — NO include in create
     const event = await db.event.create({
       data: {
@@ -138,18 +149,31 @@ export async function POST(request: NextRequest) {
         synopsis,
         isPublished: isPublished || false,
         adminFee: adminFee || 0,
-        seatType: seatType || null,
+        seatType: effectiveSeatType,
+        // Festival Mode settings
+        eventMode: isFestival ? 'FESTIVAL' : 'REGULAR',
+        multiDayPassEnabled: isFestival,
+        scanCooldownMinutes: typeof scanCooldownMinutes === 'number' ? scanCooldownMinutes : 30,
+        cooldownEnabled: typeof cooldownEnabled === 'boolean' ? cooldownEnabled : true,
       },
     })
 
     if (priceCategories && Array.isArray(priceCategories)) {
       await db.priceCategory.createMany({
         data: priceCategories.map(
-          (pc: { name: string; price: number; colorCode: string }) => ({
+          (pc: {
+            name: string;
+            price: number;
+            colorCode: string;
+            packageType?: string | null;
+            applicableDayIds?: string | null;
+          }) => ({
             eventId: event.id,
             name: pc.name,
             price: pc.price,
             colorCode: pc.colorCode,
+            packageType: pc.packageType || null,
+            applicableDayIds: pc.applicableDayIds || null,
           })
         ),
       })

@@ -13,7 +13,10 @@ export async function GET(
     const [event, priceCategories, seats, transactions, showDates] = await withDbRetry(() =>
       Promise.all([
         db.event.findUnique({ where: { id } }),
-        db.priceCategory.findMany({ where: { eventId: id } }),
+        db.priceCategory.findMany({
+          where: { eventId: id },
+          // Include festival fields for package categories
+        }),
         db.seat.findMany({ where: { eventId: id } }),
         db.transaction.findMany({
           where: { eventId: id },
@@ -38,7 +41,19 @@ export async function GET(
     })
 
     return NextResponse.json({
-      event: { ...event, priceCategories, seats: seatsWithCat, transactions, showDates },
+      event: {
+        ...event,
+        priceCategories: priceCategories.map(pc => ({
+          ...pc,
+          // Parse applicableDayIds from JSON string to array for frontend
+          applicableDayIds: pc.applicableDayIds
+            ? (() => { try { return JSON.parse(pc.applicableDayIds) } catch { return null } })()
+            : null,
+        })),
+        seats: seatsWithCat,
+        transactions,
+        showDates,
+      },
     })
   } catch (error) {
     console.error('Error fetching admin event:', error)
@@ -79,12 +94,22 @@ export async function PUT(
       reviewsData,
       hideSeatAvailability,
       hideSoldCount,
+      // Festival Mode fields
+      eventMode,
+      scanCooldownMinutes,
+      cooldownEnabled,
     } = body
 
     const event = await db.event.findUnique({ where: { id } })
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
+
+    // Festival Mode: force GA seating
+    const isFestival = eventMode === 'FESTIVAL'
+    const effectiveSeatType = isFestival
+      ? 'GENERAL_ADMISSION'
+      : (seatType !== undefined ? seatType : event.seatType)
 
     // Determine effective showDate (earliest from showDates, or provided showDate)
     let effectiveShowDate = showDate ? new Date(showDate) : event.showDate
@@ -118,11 +143,18 @@ export async function PUT(
         adminFeeNonQris: adminFeeNonQris !== undefined ? adminFeeNonQris : event.adminFeeNonQris,
         layoutImage: layoutImage !== undefined ? layoutImage : event.layoutImage,
         gaZoneConfig: gaZoneConfig !== undefined ? gaZoneConfig : event.gaZoneConfig,
-        seatType: seatType !== undefined ? seatType : event.seatType,
+        seatType: effectiveSeatType,
         castData: castData !== undefined ? castData : event.castData,
         reviewsData: reviewsData !== undefined ? reviewsData : event.reviewsData,
         hideSeatAvailability: hideSeatAvailability !== undefined ? hideSeatAvailability : event.hideSeatAvailability,
         hideSoldCount: hideSoldCount !== undefined ? hideSoldCount : event.hideSoldCount,
+        // Festival Mode settings (only update if provided)
+        ...(eventMode !== undefined ? {
+          eventMode: isFestival ? 'FESTIVAL' : 'REGULAR',
+          multiDayPassEnabled: isFestival,
+        } : {}),
+        ...(scanCooldownMinutes !== undefined ? { scanCooldownMinutes } : {}),
+        ...(cooldownEnabled !== undefined ? { cooldownEnabled } : {}),
       },
     })
 
@@ -136,16 +168,34 @@ export async function PUT(
       )
 
       // 1. Update existing categories (matched by name, preserve ID)
-      for (const pc of priceCategories as Array<{ name: string; price: number; colorCode: string }>) {
+      for (const pc of priceCategories as Array<{
+        name: string;
+        price: number;
+        colorCode: string;
+        packageType?: string | null;
+        applicableDayIds?: string | null;
+      }>) {
         const existing = existingByName.get(pc.name.toLowerCase())
+        // Build update data conditionally — only include festival fields if provided
+        const updateData: any = { price: pc.price, colorCode: pc.colorCode }
+        if (pc.packageType !== undefined) updateData.packageType = pc.packageType || null
+        if (pc.applicableDayIds !== undefined) updateData.applicableDayIds = pc.applicableDayIds || null
+
         if (existing) {
           await db.priceCategory.update({
             where: { id: existing.id },
-            data: { price: pc.price, colorCode: pc.colorCode },
+            data: updateData,
           })
         } else {
           await db.priceCategory.create({
-            data: { eventId: id, name: pc.name, price: pc.price, colorCode: pc.colorCode },
+            data: {
+              eventId: id,
+              name: pc.name,
+              price: pc.price,
+              colorCode: pc.colorCode,
+              packageType: pc.packageType || null,
+              applicableDayIds: pc.applicableDayIds || null,
+            },
           })
         }
       }
