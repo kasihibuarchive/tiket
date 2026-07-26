@@ -82,10 +82,13 @@ export function FestivalPackagePicker({
   const [selectedPkgId, setSelectedPkgId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState(1)
 
-  // Reset quantity when switching packages
-  useEffect(() => {
-    setQuantity(1)
-  }, [selectedPkgId])
+  // Wrapper to switch packages — resets quantity to 1 atomically
+  function selectPackage(pkgId: string) {
+    if (selectedPkgId !== pkgId) {
+      setSelectedPkgId(pkgId)
+      setQuantity(1)
+    }
+  }
 
   const selectedPkg = packages.find(p => p.id === selectedPkgId) || null
 
@@ -193,7 +196,7 @@ export function FestivalPackagePicker({
                   : 'border-border hover:border-gold/40 hover:shadow-md',
                 isSoldOut && 'opacity-60 cursor-not-allowed'
               )}
-              onClick={() => !isSoldOut && setSelectedPkgId(pkg.id)}
+              onClick={() => !isSoldOut && selectPackage(pkg.id)}
             >
               {/* Color stripe top */}
               <div className="h-1.5" style={{ backgroundColor: pkg.colorCode }} />

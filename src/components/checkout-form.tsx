@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription
 } from '@/components/ui/dialog'
-import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store, ChevronRight, CheckCircle2, FileText } from 'lucide-react'
+import { Loader2, ArrowLeft, CreditCard, User, Mail, Phone, ShoppingBag, Percent, X, Minus, Plus, Tag, Smartphone, Landmark, Wallet, QrCode, Store, ChevronRight, CheckCircle2, FileText, Ticket } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { savePendingTrx } from '@/lib/pending-trx'
 import { getSessionId } from '@/lib/session-id'

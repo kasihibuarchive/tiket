@@ -14,6 +14,7 @@ import {
   XCircle,
   Ticket,
   Calendar,
+  CalendarDays,
   MapPin,
   User,
   QrCode,
@@ -24,7 +25,26 @@ import {
   Ban,
   Clock,
   AlertTriangle,
+  Crown,
+  Star,
+  Sparkles,
 } from 'lucide-react'
+
+interface FestivalShowDate {
+  id: string
+  date: string
+  label: string | null
+  isScanned: boolean
+}
+
+interface FestivalInfo {
+  packageName: string
+  packageType: string | null  // SINGLE | MULTI | FULL
+  applicableShowDates: FestivalShowDate[]
+  scannedDayIds: string[]
+  lastScanAt: string | null
+  lastScanShowDateId: string | null
+}
 
 interface TransactionData {
   transactionId: string
@@ -50,6 +70,7 @@ interface TransactionData {
 
 interface VerifyResponse {
   transaction: TransactionData
+  festival?: FestivalInfo | null
   justPaid?: boolean
 }
 
@@ -58,6 +79,7 @@ export default function VerifyPage() {
   const transactionId = params.transactionId as string
 
   const [transaction, setTransaction] = useState<TransactionData | null>(null)
+  const [festival, setFestival] = useState<FestivalInfo | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [pollCount, setPollCount] = useState(0)
@@ -81,6 +103,7 @@ export default function VerifyPage() {
       }
       const data: VerifyResponse = await res.json()
       setTransaction(data.transaction)
+      setFestival(data.festival || null)
       return data
     } catch (err) {
       setError('Gagal memuat data transaksi')
@@ -266,8 +289,27 @@ export default function VerifyPage() {
   const isExpired = transaction?.paymentStatus === 'EXPIRED'
   const isFailed = transaction?.paymentStatus === 'FAILED'
   const isCancelled = transaction?.paymentStatus === 'CANCELLED'
-  const seatCodes = transaction?.seatCodes ? JSON.parse(transaction.seatCodes) : []
+  const rawSeatCodes = transaction?.seatCodes ? JSON.parse(transaction.seatCodes) : []
+  const isFestivalTicket = rawSeatCodes.some((code: string) => code.includes('@'))
+  // For festival: show unique seat codes per day count (informational)
+  // For regular: show all seat codes
+  const seatCodes = isFestivalTicket
+    ? [...new Set(rawSeatCodes.map((code: string) => code.split('@')[0]))]
+    : rawSeatCodes
+  const festivalTicketCount = isFestivalTicket
+    ? Math.floor(rawSeatCodes.length / (festival?.applicableShowDates.length || 1))
+    : 0
   const merchItems = transaction?.merchandiseData ? JSON.parse(transaction.merchandiseData) : []
+
+  // Festival package badge
+  const packageIcon = festival?.packageType === 'FULL' ? Crown
+    : festival?.packageType === 'MULTI' ? Star
+    : Ticket
+  const packageLabel = festival?.packageType === 'FULL' ? 'Full Pass'
+    : festival?.packageType === 'MULTI' ? 'Multi-Day Pass'
+    : festival?.packageType === 'SINGLE' ? 'Single Day'
+    : 'Festival Pass'
+  const PackageIcon = packageIcon
 
   // Format countdown
   const formatCountdown = (seconds: number) => {
@@ -411,17 +453,93 @@ export default function VerifyPage() {
                 </div>
               </div>
 
-              {/* Seats */}
-              <div className="bg-warm-white rounded-lg p-4 text-center">
-                <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Nomor Kursi</p>
-                <div className="flex flex-wrap justify-center gap-2">
-                  {seatCodes.map((code: string) => (
-                    <Badge key={code} variant="secondary" className="bg-charcoal text-gold text-sm px-3 py-1 font-mono">
-                      {code}
-                    </Badge>
-                  ))}
+              {/* Seats / Festival Pass */}
+              {isFestivalTicket && festival ? (
+                <>
+                  {/* Festival Pass Card */}
+                  <div className="bg-gradient-to-br from-gold/5 to-charcoal/5 rounded-lg p-4 border border-gold/20">
+                    <div className="flex items-center gap-2 mb-3">
+                      <PackageIcon className="w-4 h-4 text-gold" />
+                      <p className="text-xs text-gold-dark uppercase tracking-widest font-medium">
+                        Festival Pass
+                      </p>
+                    </div>
+                    <p className="text-base font-serif font-bold text-charcoal">
+                      {festival.packageName}
+                    </p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="secondary" className="text-[10px]">{packageLabel}</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {festivalTicketCount} tiket × {festival.applicableShowDates.length} hari
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Applicable Days List */}
+                  <div className="bg-warm-white rounded-lg p-4">
+                    <p className="text-xs text-muted-foreground uppercase tracking-widest mb-3 text-center flex items-center justify-center gap-1.5">
+                      <CalendarDays className="w-3 h-3" />
+                      Hari Pertunjukan
+                    </p>
+                    <div className="space-y-2">
+                      {festival.applicableShowDates.map((d) => {
+                        const date = new Date(d.date)
+                        const weekday = date.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' })
+                        const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' })
+                        const time = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })
+                        return (
+                          <div
+                            key={d.id}
+                            className={`flex items-center justify-between p-2 rounded-md text-sm transition-colors ${
+                              d.isScanned
+                                ? 'bg-success/10 border border-success/20'
+                                : 'bg-white border border-border/40'
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                                d.isScanned
+                                  ? 'bg-success/20 text-success'
+                                  : 'bg-gold/10 text-gold-dark'
+                              }`}>
+                                {weekday}
+                              </div>
+                              <div>
+                                <p className="text-charcoal font-medium leading-tight">
+                                  {dayMonth} · {time}
+                                </p>
+                                {d.label && (
+                                  <p className="text-[10px] text-muted-foreground">{d.label}</p>
+                                )}
+                              </div>
+                            </div>
+                            {d.isScanned && (
+                              <Badge className="bg-success/15 text-success border-success/30 text-[9px]">
+                                <CheckCircle2 className="w-2.5 h-2.5 mr-0.5" />
+                                Sudah Scan
+                              </Badge>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/70 text-center mt-3">
+                      1 QR berlaku untuk semua hari di atas · Tunjukkan QR di pintu masuk setiap hari
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <div className="bg-warm-white rounded-lg p-4 text-center">
+                  <p className="text-xs text-muted-foreground uppercase tracking-widest mb-2">Nomor Kursi</p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {seatCodes.map((code: string) => (
+                      <Badge key={code} variant="secondary" className="bg-charcoal text-gold text-sm px-3 py-1 font-mono">
+                        {code}
+                      </Badge>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Merchandise */}
               {merchItems.length > 0 && (
@@ -458,6 +576,15 @@ export default function VerifyPage() {
                   <p className="text-[10px] text-muted-foreground/50 mt-2">
                     Transaction ID: {transaction.transactionId}
                   </p>
+                  {isFestivalTicket && (
+                    <div className="mt-3 mx-auto max-w-xs bg-blue-50 border border-blue-200 rounded-lg p-3 text-[11px] text-blue-900 flex items-start gap-2">
+                      <Sparkles className="w-3 h-3 shrink-0 mt-0.5 text-blue-600" />
+                      <p className="text-left">
+                        Tunjukkan <strong>QR yang sama</strong> di pintu masuk setiap hari pertunjukan.
+                        Cooldown {festival?.lastScanAt ? 'aktif setelah scan berhasil' : '30 menit setelah scan'} untuk mencegah berbagi tiket.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
