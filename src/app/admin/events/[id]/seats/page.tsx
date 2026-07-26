@@ -316,8 +316,9 @@ function GaZoneManagementPanel({
       return
     }
     const confirmMsg = `Sync zona dari ${priceCategories.length} kategori harga?\n\n` +
-      `Zona yang ada akan diperbarui (capacity & price mengikuti kategori).\n` +
-      `Zona yang sudah ada tapi tidak ada di kategori akan tetap dipertahankan.\n\n` +
+      `• Zona yang sudah ada: harga & warna diperbarui, KAPASITAS DIPERTAHANKAN sesuai adjust lo\n` +
+      `• Zona baru: dibuat dengan kapasitas default 100 (bisa di-adjust setelah sync)\n` +
+      `• Zona yang gak match kategori mana pun: tetap dipertahankan\n\n` +
       `Kategori:\n${priceCategories.map(pc => `• ${pc.name} — Rp ${pc.price.toLocaleString('id-ID')}`).join('\n')}`
     if (!confirm(confirmMsg)) return
 
@@ -574,16 +575,59 @@ function GaZoneManagementPanel({
                     />
                     <div className="flex-1 min-w-0">
                       <span className="font-medium text-sm text-charcoal">{zone.name}</span>
-                      <span className="text-xs text-muted-foreground ml-2">
-                        {zone.capacity} kursi
-                      </span>
                       {zone.priceCategoryName && (
                         <Badge variant="secondary" className="text-[10px] ml-2">
                           {zone.priceCategoryName}
                         </Badge>
                       )}
                     </div>
-                    <span className="text-xs font-medium text-charcoal">
+
+                    {/* Inline capacity editor — adjustable after sync */}
+                    <div className="flex items-center gap-1.5" title="Adjust kapasitas zona ini">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const updated = [...gaZonesDef]
+                          const newCap = Math.max(1, (zone.capacity || 1) - 10)
+                          updated[idx] = { ...updated[idx], capacity: newCap }
+                          setGaZonesDef(updated)
+                        }}
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-charcoal"
+                        title="Kurangi 10"
+                      >
+                        <MinusCircle className="w-3.5 h-3.5" />
+                      </Button>
+                      <input
+                        type="number"
+                        min={1}
+                        value={zone.capacity}
+                        onChange={(e) => {
+                          const updated = [...gaZonesDef]
+                          const val = Math.max(1, parseInt(e.target.value) || 1)
+                          updated[idx] = { ...updated[idx], capacity: val }
+                          setGaZonesDef(updated)
+                        }}
+                        className="w-16 h-7 px-2 text-xs text-center rounded border border-border/50 bg-white focus:outline-none focus:ring-1 focus:ring-gold/30 focus:border-gold/50"
+                      />
+                      <span className="text-xs text-muted-foreground mr-1">kursi</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          const updated = [...gaZonesDef]
+                          const newCap = (zone.capacity || 0) + 10
+                          updated[idx] = { ...updated[idx], capacity: newCap }
+                          setGaZonesDef(updated)
+                        }}
+                        className="h-7 w-7 p-0 text-muted-foreground hover:text-charcoal"
+                        title="Tambah 10"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+
+                    <span className="text-xs font-medium text-charcoal min-w-[80px] text-right">
                       Rp {zone.price.toLocaleString('id-ID')}
                     </span>
                     <Button
@@ -611,8 +655,11 @@ function GaZoneManagementPanel({
                   </div>
                 </div>
               ))}
-              <div className="text-xs text-muted-foreground pt-1">
-                Total Kapasitas: <span className="font-semibold text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi
+              <div className="text-xs text-muted-foreground pt-1 flex items-center gap-2">
+                <span>
+                  Total Kapasitas: <span className="font-semibold text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi
+                </span>
+                <span className="text-[10px] text-emerald-600">✓ Bisa di-adjust kapan saja sebelum klik "Simpan Zona"</span>
               </div>
             </div>
           )}
