@@ -33,6 +33,7 @@ import {
 interface FestivalShowDate {
   id: string
   date: string
+  openGate: string | null
   label: string | null
   isScanned: boolean
 }
@@ -44,6 +45,12 @@ interface FestivalInfo {
   scannedDayIds: string[]
   lastScanAt: string | null
   lastScanShowDateId: string | null
+}
+
+interface RegularShowDate {
+  date: string | null
+  openGate: string | null
+  label: string | null
 }
 
 interface TransactionData {
@@ -71,6 +78,7 @@ interface TransactionData {
 interface VerifyResponse {
   transaction: TransactionData
   festival?: FestivalInfo | null
+  regularShowDate?: RegularShowDate | null
   justPaid?: boolean
 }
 
@@ -80,6 +88,7 @@ export default function VerifyPage() {
 
   const [transaction, setTransaction] = useState<TransactionData | null>(null)
   const [festival, setFestival] = useState<FestivalInfo | null>(null)
+  const [regularShowDate, setRegularShowDate] = useState<RegularShowDate | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [pollCount, setPollCount] = useState(0)
@@ -104,6 +113,7 @@ export default function VerifyPage() {
       const data: VerifyResponse = await res.json()
       setTransaction(data.transaction)
       setFestival(data.festival || null)
+      setRegularShowDate(data.regularShowDate || null)
       return data
     } catch (err) {
       setError('Gagal memuat data transaksi')
@@ -440,8 +450,23 @@ export default function VerifyPage() {
                 <div>
                   <p className="text-xs text-muted-foreground">Tanggal Pertunjukan</p>
                   <p className="text-sm font-medium text-charcoal">
-                    {formatEventDateTime(transaction.event.showDate)}
+                    {regularShowDate?.date
+                      ? formatEventDateTime(regularShowDate.date)
+                      : formatEventDateTime(transaction.event.showDate)}
                   </p>
+                  {regularShowDate?.openGate && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-gold" />
+                      Buka Pintu: {' '}
+                      <span className="font-medium text-charcoal">
+                        {new Date(regularShowDate.openGate).toLocaleTimeString('id-ID', {
+                          hour: '2-digit', minute: '2-digit',
+                          timeZone: 'Asia/Jakarta',
+                        })}
+                      </span>
+                      {' '}WIB
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -487,6 +512,9 @@ export default function VerifyPage() {
                         const weekday = date.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' })
                         const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' })
                         const time = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })
+                        const gateTime = d.openGate
+                          ? new Date(d.openGate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })
+                          : null
                         return (
                           <div
                             key={d.id}
@@ -508,9 +536,17 @@ export default function VerifyPage() {
                                 <p className="text-charcoal font-medium leading-tight">
                                   {dayMonth} · {time}
                                 </p>
-                                {d.label && (
-                                  <p className="text-[10px] text-muted-foreground">{d.label}</p>
-                                )}
+                                <div className="flex items-center gap-2 mt-0.5">
+                                  {d.label && (
+                                    <p className="text-[10px] text-muted-foreground">{d.label}</p>
+                                  )}
+                                  {gateTime && (
+                                    <p className="text-[10px] text-muted-foreground flex items-center gap-0.5">
+                                      <Clock className="w-2.5 h-2.5 text-gold" />
+                                      Buka Pintu: <span className="font-medium text-charcoal">{gateTime}</span>
+                                    </p>
+                                  )}
+                                </div>
                               </div>
                             </div>
                             {d.isScanned && (

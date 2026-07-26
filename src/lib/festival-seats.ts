@@ -1,5 +1,143 @@
 import { db } from '@/lib/db'
 
+// ───────────────────────────────────────────────────────────────────
+// Email / PDF payload types
+// ───────────────────────────────────────────────────────────────────
+
+export interface FestivalDayInfo {
+  date: string        // ISO date string
+  openGate: string | null  // ISO open gate time, or null
+  label: string | null
+}
+
+export interface EmailTicketPayload {
+  customerName: string
+  customerEmail: string
+  eventName: string
+  showDate: string         // Formatted for display (e.g., "Sabtu, 5 Juli 2025, 19:00")
+  openGate: string | null  // Formatted for display (e.g., "18:00"), or null
+  location: string
+  seatCodes: string[]
+  transactionId: string
+  totalAmount: number
+  qrCodeDataUrl: string
+  // For festival passes: list of all applicable days (each with its own openGate)
+  festivalDays?: FestivalDayInfo[]
+  template?: {
+    greeting: string
+    rules: string
+    notes: string
+    footer: string
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Helper: format a Date for email/PDF display
+// ───────────────────────────────────────────────────────────────────
+
+const JAKARTA_TZ = 'Asia/Jakarta'
+
+function formatShowDateDisplay(iso: string | Date): string {
+  return new Date(iso).toLocaleDateString('id-ID', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+    timeZone: JAKARTA_TZ,
+  })
+}
+
+function formatOpenGateDisplay(iso: string | Date | null): string | null {
+  if (!iso) return null
+  return new Date(iso).toLocaleTimeString('id-ID', {
+    hour: '2-digit', minute: '2-digit',
+    timeZone: JAKARTA_TZ,
+  })
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Helper: Build the email/PDF payload from a transaction ID.
+// Resolves showDate + openGate from EventShowDate (REGULAR) or all
+// applicable days (FESTIVAL). Falls back to event-level fields.
+// ───────────────────────────────────────────────────────────────────
+
+export async function buildEmailTicketPayload(
+  tx: {
+    transactionId: string
+    customerName: string
+    customerEmail: string
+    seatCodes: string
+    totalAmount: number
+    eventId: string
+    showDateId?: string | null
+  },
+  event: { title: string; location: string; showDate: Date; openGate: Date | null },
+  qrCodeDataUrl: string,
+  emailTemplate?: { greeting: string; rules: string; notes: string; footer: string } | null
+): Promise<EmailTicketPayload> {
+  let seatCodes: string[] = []
+  try { seatCodes = JSON.parse(tx.seatCodes) } catch { /* ignore */ }
+  const isFestivalFormat = seatCodes.some((c) => c.includes('@'))
+
+  let showDateDisplay: string
+  let openGateDisplay: string | null = null
+  let festivalDays: FestivalDayInfo[] | undefined
+
+  if (isFestivalFormat) {
+    // FESTIVAL — show all applicable days
+    const applicableDayIds = [...new Set(seatCodes.map((c) => c.split('@')[1]))]
+    const showDates = await db.eventShowDate.findMany({
+      where: { id: { in: applicableDayIds } },
+      orderBy: { date: 'asc' },
+    })
+
+    festivalDays = showDates.map((d) => ({
+      date: d.date.toISOString(),
+      openGate: d.openGate ? d.openGate.toISOString() : null,
+      label: d.label,
+    }))
+
+    // Use the earliest show date as the "primary" showDate shown in the email header
+    const earliest = showDates[0]?.date || event.showDate
+    showDateDisplay = formatShowDateDisplay(earliest)
+    // For festival passes, openGate is per-day — show null at top level (PDF/email
+    // will render per-day open gates inside the festival section)
+    openGateDisplay = null
+  } else {
+    // REGULAR — use the transaction's showDateId if available, else event-level
+    let sd: { date: Date; openGate: Date | null } | null = null
+    if (tx.showDateId) {
+      sd = await db.eventShowDate.findUnique({
+        where: { id: tx.showDateId },
+        select: { date: true, openGate: true },
+      })
+    }
+    if (!sd) {
+      sd = { date: event.showDate, openGate: event.openGate }
+    }
+    showDateDisplay = formatShowDateDisplay(sd.date)
+    openGateDisplay = formatOpenGateDisplay(sd.openGate)
+  }
+
+  return {
+    customerName: tx.customerName,
+    customerEmail: tx.customerEmail,
+    eventName: event.title,
+    showDate: showDateDisplay,
+    openGate: openGateDisplay,
+    location: event.location,
+    seatCodes,
+    transactionId: tx.transactionId,
+    totalAmount: tx.totalAmount,
+    qrCodeDataUrl,
+    festivalDays,
+    template: emailTemplate ? {
+      greeting: emailTemplate.greeting,
+      rules: emailTemplate.rules,
+      notes: emailTemplate.notes,
+      footer: emailTemplate.footer,
+    } : undefined,
+  }
+}
+
 /**
  * Festival Mode: seatCodes are stored as `seatCode@dayId` format.
  * This helper parses them and marks the actual seats (matched by seatCode + eventShowDateId) as SOLD/AVAILABLE.

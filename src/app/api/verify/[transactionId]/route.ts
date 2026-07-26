@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTripayTransactionDetail } from '@/lib/tripay'
-import { markSeatsForTransaction, buildQrText } from '@/lib/festival-seats'
+import { markSeatsForTransaction, buildQrText, buildEmailTicketPayload } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 
 export async function GET(
@@ -35,6 +35,7 @@ export async function GET(
         lastScanAt: true,
         lastScanShowDateId: true,
         checkInTime: true,
+        showDateId: true,
       },
     })
 
@@ -46,6 +47,37 @@ export async function GET(
     let seatCodes: string[] = []
     try { seatCodes = JSON.parse(transaction.seatCodes) } catch { /* ignore */ }
     const isFestivalFormat = seatCodes.some((c) => c.includes('@'))
+
+    // ── For REGULAR (non-festival) tickets: resolve the actual show date + open gate ──
+    // transaction.showDateId points to the EventShowDate the customer bought.
+    // Fall back to event.showDate / event.openGate if no showDateId (legacy events).
+    let regularShowDate: { date: string | null; openGate: string | null; label: string | null } | null = null
+    if (!isFestivalFormat) {
+      let sd: { date: Date; openGate: Date | null; label: string | null } | null = null
+      if (transaction.showDateId) {
+        sd = await db.eventShowDate.findUnique({
+          where: { id: transaction.showDateId },
+          select: { date: true, openGate: true, label: true },
+        })
+      }
+      if (!sd) {
+        // Fall back to event-level fields
+        const ev = await db.event.findUnique({
+          where: { id: transaction.eventId },
+          select: { showDate: true, openGate: true },
+        })
+        if (ev) {
+          sd = { date: ev.showDate, openGate: ev.openGate, label: null }
+        }
+      }
+      if (sd) {
+        regularShowDate = {
+          date: sd.date ? sd.date.toISOString() : null,
+          openGate: sd.openGate ? sd.openGate.toISOString() : null,
+          label: sd.label,
+        }
+      }
+    }
 
     // Resolve festival package metadata (package name, applicable days, scanned days)
     let festivalInfo: any = null
@@ -93,6 +125,7 @@ export async function GET(
         applicableShowDates: showDates.map((d) => ({
           id: d.id,
           date: d.date,
+          openGate: d.openGate,
           label: d.label,
           isScanned: scannedDayIds.includes(d.id),
         })),
@@ -151,27 +184,39 @@ export async function GET(
               const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
 
               if (event) {
-                const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
-                  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
-                  timeZone: 'Asia/Jakarta',
-                })
-
                 const { sendETicketEmail } = await import('@/lib/email')
                 console.log('[verify] Sending e-ticket email to:', transaction.customerEmail, 'for order:', transactionId)
-                sendETicketEmail({
-                  customerName: transaction.customerName,
-                  customerEmail: transaction.customerEmail,
-                  eventName: event.title,
-                  showDate,
-                  location: event.location,
-                  seatCodes,
-                  transactionId: transaction.transactionId,
-                  totalAmount: transaction.totalAmount,
-                  qrCodeDataUrl: qrDataUrl,
-                  template: emailTemplate ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer } : undefined,
-                }).then(() => {
-                  console.log('[verify] E-ticket email sent successfully to:', transaction.customerEmail)
-                }).catch((err: any) => console.error('[verify] Email error:', err))
+
+                // Build the email payload — resolves per-day open gates for festival passes,
+                // or the correct showDateId's open gate for regular tickets.
+                buildEmailTicketPayload(
+                  {
+                    transactionId: transaction.transactionId,
+                    customerName: transaction.customerName,
+                    customerEmail: transaction.customerEmail,
+                    seatCodes: transaction.seatCodes,
+                    totalAmount: transaction.totalAmount,
+                    eventId: transaction.eventId,
+                    showDateId: transaction.showDateId,
+                  },
+                  {
+                    title: event.title,
+                    location: event.location,
+                    showDate: event.showDate,
+                    openGate: event.openGate,
+                  },
+                  qrDataUrl,
+                  emailTemplate ? {
+                    greeting: emailTemplate.greeting,
+                    rules: emailTemplate.rules,
+                    notes: emailTemplate.notes,
+                    footer: emailTemplate.footer,
+                  } : null
+                ).then((emailPayload) => sendETicketEmail(emailPayload))
+                  .then(() => {
+                    console.log('[verify] E-ticket email sent successfully to:', transaction.customerEmail)
+                  })
+                  .catch((err: any) => console.error('[verify] Email error:', err))
               }
 
               // Refetch updated transaction
@@ -190,6 +235,7 @@ export async function GET(
               return NextResponse.json({
                 transaction: { ...updated!, event: eventData! },
                 festival: festivalInfo,
+                regularShowDate,
                 justPaid: true,
               })
             }
@@ -223,6 +269,7 @@ export async function GET(
               return NextResponse.json({
                 transaction: { ...updated!, event: eventData! },
                 festival: festivalInfo,
+                regularShowDate,
               })
             }
 
@@ -231,6 +278,7 @@ export async function GET(
             return NextResponse.json({
               transaction: { ...transaction, event: eventData! },
               festival: festivalInfo,
+              regularShowDate,
             })
           }
         }
@@ -245,6 +293,7 @@ export async function GET(
     return NextResponse.json({
       transaction: { ...transaction, event: eventData! },
       festival: festivalInfo,
+      regularShowDate,
     })
   } catch (error) {
     console.error('Error verifying transaction:', error)

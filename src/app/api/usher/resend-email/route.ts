@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sendETicketEmail } from '@/lib/email'
+import { buildEmailTicketPayload } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 import { logActivity } from '@/lib/activity-log'
 
@@ -73,38 +74,35 @@ export async function POST(request: NextRequest) {
     // Get email template
     const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
 
-    // Format date
-    const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      timeZone: 'Asia/Jakarta',
-    })
-
     // Send email (synchronous — wait for result)
     try {
-      await sendETicketEmail({
-        customerName: transaction.customerName,
-        customerEmail: transaction.customerEmail,
-        eventName: event.title,
-        showDate,
-        location: event.location,
-        seatCodes,
-        transactionId: transaction.transactionId,
-        totalAmount: transaction.totalAmount,
-        qrCodeDataUrl: qrDataUrl,
-        template: emailTemplate
+      const emailPayload = await buildEmailTicketPayload(
+        {
+          transactionId: transaction.transactionId,
+          customerName: transaction.customerName,
+          customerEmail: transaction.customerEmail,
+          seatCodes: transaction.seatCodes,
+          totalAmount: transaction.totalAmount,
+          eventId: transaction.eventId,
+          showDateId: transaction.showDateId,
+        },
+        {
+          title: event.title,
+          location: event.location,
+          showDate: event.showDate,
+          openGate: event.openGate,
+        },
+        qrDataUrl,
+        emailTemplate
           ? {
               greeting: emailTemplate.greeting,
               rules: emailTemplate.rules,
               notes: emailTemplate.notes,
               footer: emailTemplate.footer,
             }
-          : undefined,
-      })
+          : null
+      )
+      await sendETicketEmail(emailPayload)
 
       // Track successful delivery (safe even if email columns don't exist yet)
       await db.transaction.update({

@@ -1,4 +1,5 @@
 import { jsPDF } from 'jspdf'
+import type { EmailTicketPayload, FestivalDayInfo } from '@/lib/festival-seats'
 
 // Color palette
 const CHARCOAL = '#1a1a2e'
@@ -7,18 +8,37 @@ const CREAM = '#f9f7f4'
 const DARK_CHARCOAL = '#0f0f1e'
 const LIGHT_GOLD = '#e8d48b'
 
-interface TicketPdfData {
-  customerName: string
-  eventName: string
-  showDate: string
-  location: string
-  seatCodes: string[]
-  transactionId: string
-  totalAmount: number
-  qrCodeDataUrl: string
+// ── Helpers ────────────────────────────────────────────────────────
+
+const JAKARTA_TZ = 'Asia/Jakarta'
+
+function formatDateForPdf(iso: string | Date): string {
+  // "Sabtu, 5 Juli 2025"
+  return new Date(iso).toLocaleDateString('id-ID', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+    timeZone: JAKARTA_TZ,
+  })
 }
 
-export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
+function formatTimeForPdf(iso: string | Date): string {
+  // "19:00"
+  return new Date(iso).toLocaleTimeString('id-ID', {
+    hour: '2-digit', minute: '2-digit',
+    timeZone: JAKARTA_TZ,
+  })
+}
+
+function formatDayShortForPdf(iso: string | Date): string {
+  // "Sab, 5 Jul"
+  return new Date(iso).toLocaleDateString('id-ID', {
+    weekday: 'short', day: 'numeric', month: 'short',
+    timeZone: JAKARTA_TZ,
+  })
+}
+
+// ── Main generator ─────────────────────────────────────────────────
+
+export async function generateTicketPdf(data: EmailTicketPayload): Promise<Buffer> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
   const pageW = doc.internal.pageSize.getWidth()
   const pageH = doc.internal.pageSize.getHeight()
@@ -42,8 +62,6 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
   doc.setFontSize(9)
   doc.setTextColor(LIGHT_GOLD)
   doc.text('E-TIKET RESMI  |  OFFICIAL E-TICKET', pageW / 2, 30, { align: 'center' })
-
-
 
   // ── Event Title ──────────────────────────────────────────
   const yStart = 62
@@ -78,21 +96,75 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
   doc.setTextColor(CHARCOAL)
   doc.text(data.showDate, pageW / 2, detailY + 7, { align: 'center' })
 
+  // Open gate (regular tickets only — festival passes render per-day below)
+  let nextY = detailY + 16
+  if (data.openGate && !data.festivalDays) {
+    doc.setFontSize(8)
+    doc.setTextColor('#999999')
+    doc.text('BUKA PINTU / OPEN GATE', pageW / 2, nextY, { align: 'center' })
+    doc.setFontSize(11)
+    doc.setTextColor(GOLD)
+    doc.text(data.openGate + ' WIB', pageW / 2, nextY + 7, { align: 'center' })
+    nextY += 16
+  }
+
   // Location
   doc.setFontSize(8)
   doc.setTextColor('#999999')
-  doc.text('LOKASI', pageW / 2, detailY + 16, { align: 'center' })
+  doc.text('LOKASI', pageW / 2, nextY, { align: 'center' })
   doc.setFontSize(11)
   doc.setTextColor(CHARCOAL)
-  doc.text(data.location, pageW / 2, detailY + 23, { align: 'center' })
+  doc.text(data.location, pageW / 2, nextY + 7, { align: 'center' })
+  nextY += 16
+
+  // ── Festival: list each applicable day with open gate ──
+  if (data.festivalDays && data.festivalDays.length > 0) {
+    const festivalY = nextY + 2
+
+    doc.setFontSize(8)
+    doc.setTextColor(GOLD)
+    doc.text('HARI PERTUNJUKAN / SHOW DAYS', pageW / 2, festivalY, { align: 'center' })
+
+    // Each day: a row with date + time + (optional) open gate
+    const rowH = 7
+    const listTopY = festivalY + 4
+    const listW = pageW - 60
+    const listX = 30
+
+    // Background card
+    const cardH = data.festivalDays.length * rowH + 8
+    doc.setFillColor(CREAM)
+    doc.roundedRect(listX, listTopY, listW, cardH, 2, 2, 'F')
+
+    doc.setFontSize(9)
+    data.festivalDays.forEach((d: FestivalDayInfo, idx: number) => {
+      const rowY = listTopY + 6 + idx * rowH
+      const dateStr = formatDayShortForPdf(d.date)
+      const timeStr = formatTimeForPdf(d.date)
+      const gateStr = d.openGate ? formatTimeForPdf(d.openGate) : null
+      const labelStr = d.label ? ` · ${d.label}` : ''
+
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(CHARCOAL)
+      doc.text(`${dateStr} · ${timeStr}${labelStr}`, listX + 4, rowY)
+
+      if (gateStr) {
+        doc.setFont('helvetica', 'normal')
+        doc.setTextColor(GOLD)
+        doc.text(`Buka Pintu: ${gateStr}`, listX + listW - 4, rowY, { align: 'right' })
+      }
+    })
+
+    nextY = listTopY + cardH + 6
+  }
 
   // ── Seat Codes (prominent) ───────────────────────────────
-  const seatY = detailY + 36
+  const seatY = nextY + 4
 
   // Background card for seats
-  const cardPad = 12
-  const seatLabelH = 8
-  const seatCodeH = 18
+  const cardPad = 10
+  const seatLabelH = 7
+  const seatCodeH = data.festivalDays ? 14 : 18  // smaller font if festival (longer text)
   const cardTotalH = seatLabelH + seatCodeH + cardPad * 2
   const cardW = pageW - 40
   const cardX = 20
@@ -102,16 +174,26 @@ export async function generateTicketPdf(data: TicketPdfData): Promise<Buffer> {
 
   doc.setFontSize(7)
   doc.setTextColor(GOLD)
-  doc.text('NOMOR KURSI  /  SEAT NUMBERS', pageW / 2, seatY + cardPad + 4, { align: 'center' })
+  doc.text(
+    data.festivalDays ? 'FESTIVAL PASS / KODE TRANSAKSI' : 'NOMOR KURSI  /  SEAT NUMBERS',
+    pageW / 2, seatY + cardPad + 4, { align: 'center' }
+  )
 
   doc.setFont('helvetica', 'bold')
-  doc.setFontSize(28)
+  doc.setFontSize(data.festivalDays ? 14 : 28)
   doc.setTextColor('#ffffff')
-  doc.text(data.seatCodes.join('    '), pageW / 2, seatY + cardPad + seatLabelH + 12, { align: 'center' })
+
+  if (data.festivalDays) {
+    // For festival passes: show deduplicated seat codes (strip the @dayId suffix)
+    const uniqueSeats = [...new Set(data.seatCodes.map((c) => c.split('@')[0]))]
+    doc.text(uniqueSeats.join('    '), pageW / 2, seatY + cardPad + seatLabelH + 10, { align: 'center' })
+  } else {
+    doc.text(data.seatCodes.join('    '), pageW / 2, seatY + cardPad + seatLabelH + 12, { align: 'center' })
+  }
 
   // ── QR Code ──────────────────────────────────────────────
-  const qrY = seatY + cardTotalH + 12
-  const qrSize = 40
+  const qrY = seatY + cardTotalH + 10
+  const qrSize = 38
   const qrX = pageW / 2 - qrSize / 2
 
   // Add QR code image (base64 data URL)

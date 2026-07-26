@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTripayTransactionDetail } from '@/lib/tripay'
+import { buildEmailTicketPayload } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 
 /**
@@ -101,25 +102,29 @@ export async function GET(
       try {
         const { sendETicketEmail } = await import('@/lib/email')
         const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
-        const showDate = new Date(transaction.event.showDate).toLocaleDateString('id-ID', {
-          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-          hour: '2-digit', minute: '2-digit',
-          timeZone: 'Asia/Jakarta',
-        })
-        sendETicketEmail({
-          customerName: transaction.customerName,
-          customerEmail: transaction.customerEmail,
-          eventName: transaction.event.title,
-          showDate,
-          location: transaction.event.location,
-          seatCodes,
-          transactionId: transaction.transactionId,
-          totalAmount: transaction.totalAmount,
-          qrCodeDataUrl: qrDataUrl,
-          template: emailTemplate
+
+        buildEmailTicketPayload(
+          {
+            transactionId: transaction.transactionId,
+            customerName: transaction.customerName,
+            customerEmail: transaction.customerEmail,
+            seatCodes: transaction.seatCodes,
+            totalAmount: transaction.totalAmount,
+            eventId: transaction.eventId,
+            showDateId: transaction.showDateId,
+          },
+          {
+            title: transaction.event.title,
+            location: transaction.event.location,
+            showDate: transaction.event.showDate,
+            openGate: transaction.event.openGate,
+          },
+          qrDataUrl,
+          emailTemplate
             ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer }
-            : undefined,
-        }).catch((e) => console.error('Email send failed:', e))
+            : null
+        ).then((emailPayload) => sendETicketEmail(emailPayload))
+          .catch((e) => console.error('Email send failed:', e))
       } catch (e) {
         console.error('Email setup failed:', e)
       }

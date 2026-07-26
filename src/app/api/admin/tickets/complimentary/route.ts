@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { sendETicketEmail } from '@/lib/email'
+import { buildEmailTicketPayload } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 
 function generateCompTransactionId(): string {
@@ -224,37 +225,34 @@ export async function POST(request: NextRequest) {
       // Fetch active email template
       const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
 
-      // Send e-ticket email (awaited — fire-and-forget fails on Vercel serverless)
-      const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZone: 'Asia/Jakarta',
-      })
-
       try {
-        await sendETicketEmail({
-          customerName: guestName,
-          customerEmail: guestEmail,
-          eventName: event.title,
-          showDate,
-          location: event.location,
-          seatCodes,
-          transactionId,
-          totalAmount: 0,
-          qrCodeDataUrl: qrDataUrl,
-          template: emailTemplate
-          ? {
-              greeting: emailTemplate.greeting,
-              rules: emailTemplate.rules,
-              notes: emailTemplate.notes,
-              footer: emailTemplate.footer,
-            }
-          : undefined,
-        })
+        // Build payload — resolves open gate from showDateId (REGULAR) or per-day (FESTIVAL)
+        const emailPayload = await buildEmailTicketPayload(
+          {
+            transactionId,
+            customerName: guestName,
+            customerEmail: guestEmail,
+            seatCodes: JSON.stringify(seatCodes),
+            totalAmount: 0,
+            eventId: event.id,
+            showDateId: showDateId || null,
+          },
+          {
+            title: event.title,
+            location: event.location,
+            showDate: event.showDate,
+            openGate: event.openGate,
+          },
+          qrDataUrl,
+          emailTemplate ? {
+            greeting: emailTemplate.greeting,
+            rules: emailTemplate.rules,
+            notes: emailTemplate.notes,
+            footer: emailTemplate.footer,
+          } : null
+        )
+
+        await sendETicketEmail(emailPayload)
         console.log('[comp-ticket] ✅ E-ticket email sent to:', guestEmail)
         await db.transaction.update({
           where: { transactionId },

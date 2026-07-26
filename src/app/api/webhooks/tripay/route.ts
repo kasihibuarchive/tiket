@@ -3,7 +3,7 @@ import crypto from 'crypto'
 import { db } from '@/lib/db'
 import { getTripayConfig } from '@/lib/tripay'
 import { sendETicketEmail } from '@/lib/email'
-import { markSeatsForTransaction, buildQrText } from '@/lib/festival-seats'
+import { markSeatsForTransaction, buildQrText, buildEmailTicketPayload } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 
 export async function POST(request: NextRequest) {
@@ -94,24 +94,36 @@ export async function POST(request: NextRequest) {
       const emailTemplate = await db.emailTemplate.findFirst({ where: { isActive: true } })
 
       if (event) {
-        const showDate = new Date(event.showDate).toLocaleDateString('id-ID', {
-          weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
-          timeZone: 'Asia/Jakarta',
-        })
         console.log('[tripay-webhook] Sending e-ticket email to:', transaction.customerEmail, 'for order:', merchant_ref)
         try {
-          await sendETicketEmail({
-            customerName: transaction.customerName,
-            customerEmail: transaction.customerEmail,
-            eventName: event.title,
-            showDate,
-            location: event.location,
-            seatCodes,
-            transactionId: transaction.transactionId,
-            totalAmount: transaction.totalAmount,
-            qrCodeDataUrl: qrDataUrl,
-            template: emailTemplate ? { greeting: emailTemplate.greeting, rules: emailTemplate.rules, notes: emailTemplate.notes, footer: emailTemplate.footer } : undefined,
-          })
+          // Build the email payload — resolves per-day open gates for festival passes,
+          // or the correct showDateId's open gate for regular tickets.
+          const emailPayload = await buildEmailTicketPayload(
+            {
+              transactionId: transaction.transactionId,
+              customerName: transaction.customerName,
+              customerEmail: transaction.customerEmail,
+              seatCodes: transaction.seatCodes,
+              totalAmount: transaction.totalAmount,
+              eventId: transaction.eventId,
+              showDateId: transaction.showDateId,
+            },
+            {
+              title: event.title,
+              location: event.location,
+              showDate: event.showDate,
+              openGate: event.openGate,
+            },
+            qrDataUrl,
+            emailTemplate ? {
+              greeting: emailTemplate.greeting,
+              rules: emailTemplate.rules,
+              notes: emailTemplate.notes,
+              footer: emailTemplate.footer,
+            } : null
+          )
+
+          await sendETicketEmail(emailPayload)
           console.log('[tripay-webhook] ✅ E-ticket email sent successfully to:', transaction.customerEmail)
           await db.transaction.update({
             where: { transactionId: transaction.transactionId },
