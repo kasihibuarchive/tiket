@@ -96,6 +96,12 @@ model Event {
   hideSeatAvailability Boolean @default(false) // Hide seat availability bar (progress bar + "X/Y tersedia")
   hideSoldCount        Boolean @default(false) // Hide sold count ("X terjual")
 
+  // ── FESTIVAL MODE SETTINGS ──
+  eventMode              String  @default("REGULAR") // "REGULAR" | "FESTIVAL"
+  multiDayPassEnabled    Boolean @default(false) // Auto-true when FESTIVAL; enables 1-day/2-day/4-day packages
+  scanCooldownMinutes    Int     @default(30)    // Cooldown after successful scan (FESTIVAL only)
+  cooldownEnabled        Boolean @default(true)  // Toggle cooldown on/off per event
+
   // Relations
   reviews         Review[]
   shortLinks      ShortLink[]
@@ -130,6 +136,10 @@ model PriceCategory {
   name      String  // e.g., VIP, Regular, Student
   price     Float
   colorCode String  // hex color code for seat display
+
+  // ── FESTIVAL MODE: Multi-Day Package Settings ──
+  packageType       String?  // "SINGLE" | "MULTI" | "FULL" — null for REGULAR events
+  applicableDayIds  String?  // JSON array of EventShowDate IDs that this category grants access to. Null = all days (FULL or REGULAR)
 
   // Relations
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
@@ -216,10 +226,19 @@ model Transaction {
   emailError       String?       // Last email error message (e.g. "Inbox over quota")
   lastEmailSentAt  DateTime?     // When email was last sent/attempted
 
+  // ── FESTIVAL MODE: Scan & Cooldown Tracking ──
+  lastScanAt            DateTime?  // Last successful scan time (for cooldown calculation)
+  lastScanShowDateId    String?    // Which day was last scanned (for multi-day validation)
+  manualValidityOverride String?   // null | "FORCE_VALID" | "FORCE_INVALID"
+  overrideNote          String?    // Reason for override
+  overrideBy            String?    // Usher/Admin ID who set override
+  overrideAt            DateTime?  // When override was set
+
   // Relations
   event          Event          @relation(fields: [eventId], references: [id])
   eventShowDate  EventShowDate? @relation(fields: [showDateId], references: [id])
   promoCode      PromoCode?     @relation(fields: [promoCodeId], references: [id])
+  ticketScans    TicketScan[]
 
   @@index([transactionId])
   @@index([paymentStatus])
@@ -425,4 +444,27 @@ model ShortLink {
 
   @@index([slug])
   @@index([eventId])
+}
+
+// =====================
+// TICKET SCAN MODEL (Festival Mode — Scan History & Cooldown Tracking)
+// =====================
+model TicketScan {
+  id            String   @id @default(cuid())
+  transactionId String   // FK to Transaction.id (internal)
+  showDateId    String?  // Which show date was attempted to scan
+  scanTime      DateTime @default(now())
+  usherId       String   // Admin ID of the usher who scanned
+  usherName     String?  // Denormalized usher name for quick display
+  isValid       Boolean  // Whether scan resulted in valid entry
+  scanType      String   // "ENTRY" | "RE_ENTRY" | "BLOCKED_COOLDOWN" | "BLOCKED_WRONG_DAY" | "BLOCKED_OVERRIDE" | "FORCE_VALID" | "FORCE_INVALID" | "RESET_COOLDOWN"
+  reason        String   // Human-readable explanation
+
+  // Relations
+  transaction Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([transactionId])
+  @@index([showDateId])
+  @@index([scanTime])
+  @@index([usherId])
 }
