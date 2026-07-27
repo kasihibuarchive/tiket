@@ -1,0 +1,1361 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect } from 'react'
+     4→import { useParams, useRouter } from 'next/navigation'
+     5→import Link from 'next/link'
+     6→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     7→import { Button } from '@/components/ui/button'
+     8→import { Input } from '@/components/ui/input'
+     9→import { Label } from '@/components/ui/label'
+    10→import { Textarea } from '@/components/ui/textarea'
+    11→import { Badge } from '@/components/ui/badge'
+    12→import { Separator } from '@/components/ui/separator'
+    13→import { cn } from '@/lib/utils'
+    14→import { toDatetimeLocalValue, formatEventDate, formatEventTime } from '@/lib/date'
+    15→import {
+    16→  Loader2, Save, ArrowLeft, Users, Star, Plus, Trash2, Edit, X, Check, MessageSquareQuote,
+    17→  Link2, Copy, ExternalLink, MousePointerClick, Clock,
+    18→} from 'lucide-react'
+    19→
+    20→// ─── Types ────────────────────────────────────────────────────────
+    21→
+    22→interface GuestReview {
+    23→  id: string
+    24→  authorName: string
+    25→  rating: number
+    26→  comment: string
+    27→  createdAt: string
+    28→}
+    29→
+    30→// ─── Guest Reviews Card (reads from Review model via API) ────────────
+    31→
+    32→function GuestReviewsCard({ eventId, isCompleted }: { eventId: string; isCompleted: boolean }) {
+    33→  const [reviews, setReviews] = useState<GuestReview[]>([])
+    34→  const [stats, setStats] = useState<{ average: number; total: number } | null>(null)
+    35→  const [isLoading, setIsLoading] = useState(isCompleted)
+    36→
+    37→  useEffect(() => {
+    38→    if (!isCompleted) return
+    39→    fetch(`/api/events/${eventId}/reviews`)
+    40→      .then((res) => res.ok ? res.json() : { reviews: [], stats: null })
+    41→      .then((data) => {
+    42→        setReviews(data.reviews || [])
+    43→        setStats(data.stats || null)
+    44→      })
+    45→      .catch(() => {})
+    46→      .finally(() => setIsLoading(false))
+    47→  }, [eventId, isCompleted])
+    48→
+    49→  async function handleDeleteReview(reviewId: string) {
+    50→    if (!confirm('Hapus review ini?')) return
+    51→    try {
+    52→      const res = await fetch(`/api/admin/reviews/${reviewId}`, { method: 'DELETE' })
+    53→      if (res.ok) {
+    54→        setReviews(reviews.filter((r) => r.id !== reviewId))
+    55→      }
+    56→    } catch (err) {
+    57→      console.error('Delete review error:', err)
+    58→    }
+    59→  }
+    60→
+    61→  if (!isCompleted) return null
+    62→
+    63→  return (
+    64→    <Card className="border-border/50">
+    65→      <CardHeader className="pb-3">
+    66→        <div className="flex items-center justify-between">
+    67→          <div className="flex items-center gap-2">
+    68→            <MessageSquareQuote className="w-5 h-5 text-gold" />
+    69→            <CardTitle className="font-serif text-lg text-charcoal">Guest Reviews</CardTitle>
+    70→            <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+    71→              {reviews.length} review
+    72→            </Badge>
+    73→          </div>
+    74→          {stats && stats.total > 0 && (
+    75→            <div className="flex items-center gap-1">
+    76→              <Star className="w-4 h-4 text-gold fill-gold" />
+    77→              <span className="text-sm font-semibold text-charcoal">{stats.average}</span>
+    78→              <span className="text-xs text-muted-foreground">/5</span>
+    79→            </div>
+    80→          )}
+    81→        </div>
+    82→      </CardHeader>
+    83→      <CardContent>
+    84→        {isLoading ? (
+    85→          <div className="flex justify-center py-6">
+    86→            <Loader2 className="w-5 h-5 text-gold animate-spin" />
+    87→          </div>
+    88→        ) : reviews.length === 0 ? (
+    89→          <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+    90→            <MessageSquareQuote className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+    91→            <p className="text-sm text-muted-foreground">Belum ada review dari guest</p>
+    92→          </div>
+    93→        ) : (
+    94→          <div className="space-y-2 max-h-96 overflow-y-auto">
+    95→            {reviews.map((review) => (
+    96→              <div
+    97→                key={review.id}
+    98→                className="rounded-lg border border-border/60 p-3 bg-white"
+    99→              >
+   100→                <div className="flex items-center justify-between">
+   101→                  <div className="flex items-center gap-2">
+   102→                    <span className="text-sm font-medium text-charcoal">{review.authorName}</span>
+   103→                    <div className="flex items-center gap-0.5">
+   104→                      {[1, 2, 3, 4, 5].map((star) => (
+   105→                        <Star
+   106→                          key={star}
+   107→                          className={cn(
+   108→                            'w-3 h-3',
+   109→                            star <= review.rating ? 'fill-gold text-gold' : 'fill-none text-muted-foreground/30'
+   110→                          )}
+   111→                        />
+   112→                      ))}
+   113→                    </div>
+   114→                  </div>
+   115→                  <div className="flex items-center gap-2">
+   116→                    <span className="text-xs text-muted-foreground/50">
+   117→                      {new Date(review.createdAt).toLocaleDateString('id-ID', {
+   118→                        day: 'numeric', month: 'short', year: 'numeric',
+   119→                      })}
+   120→                    </span>
+   121→                    <Button
+   122→                      variant="ghost"
+   123→                      size="icon"
+   124→                      className="h-6 w-6 text-red-400 hover:text-red-600 hover:bg-red-50"
+   125→                      onClick={() => handleDeleteReview(review.id)}
+   126→                    >
+   127→                      <Trash2 className="w-3 h-3" />
+   128→                    </Button>
+   129→                  </div>
+   130→                </div>
+   131→                {review.comment && (
+   132→                  <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+   133→                    &ldquo;{review.comment}&rdquo;
+   134→                  </p>
+   135→                )}
+   136→              </div>
+   137→            ))}
+   138→          </div>
+   139→        )}
+   140→      </CardContent>
+   141→    </Card>
+   142→  )
+   143→}
+   144→
+   145→interface CastMember {
+   146→  name: string
+   147→  role: string
+   148→  imageUrl: string
+   149→}
+   150→
+   151→interface Review {
+   152→  authorName: string
+   153→  rating: number
+   154→  comment: string
+   155→  createdAt: string
+   156→}
+   157→
+   158→interface ShowDateData {
+   159→  id: string
+   160→  date: string
+   161→  openGate: string | null
+   162→  label: string | null
+   163→}
+   164→
+   165→interface PriceCategoryData {
+   166→  id: string
+   167→  name: string
+   168→  price: number
+   169→  colorCode: string
+   170→}
+   171→
+   172→interface EventData {
+   173→  id: string
+   174→  title: string
+   175→  category: string
+   176→  showDate: string
+   177→  openGate: string | null
+   178→  location: string
+   179→  posterUrl: string | null
+   180→  synopsis: string
+   181→  teaserVideoUrl: string | null
+   182→  isPublished: boolean
+   183→  isCompleted?: boolean
+   184→  adminFee: number
+   185→  adminFeeQris: number
+   186→  adminFeeNonQris: number
+   187→  seatType: string | null
+   188→  castData: string | null
+   189→  reviewsData: string | null
+   190→  hideSeatAvailability?: boolean
+   191→  hideSoldCount?: boolean
+   192→  priceCategories: PriceCategoryData[]
+   193→  showDates: ShowDateData[]
+   194→}
+   195→
+   196→// ─── Helper: safe JSON parse ──────────────────────────────────────
+   197→
+   198→function safeParseArray<T>(raw: string | null | undefined, fallback: T[]): T[] {
+   199→  if (!raw) return fallback
+   200→  try {
+   201→    const parsed = JSON.parse(raw)
+   202→    return Array.isArray(parsed) ? parsed : fallback
+   203→  } catch {
+   204→    return fallback
+   205→  }
+   206→}
+   207→
+   208→// ─── Star Rating Component ────────────────────────────────────────
+   209→
+   210→function StarRating({
+   211→  value,
+   212→  onChange,
+   213→  readonly = false,
+   214→  size = 'sm',
+   215→}: {
+   216→  value: number
+   217→  onChange?: (v: number) => void
+   218→  readonly?: boolean
+   219→  size?: 'sm' | 'md'
+   220→}) {
+   221→  const iconSize = size === 'md' ? 'w-5 h-5' : 'w-4 h-4'
+   222→  return (
+   223→    <div className="flex items-center gap-0.5">
+   224→      {[1, 2, 3, 4, 5].map((star) => (
+   225→        <button
+   226→          key={star}
+   227→          type="button"
+   228→          disabled={readonly}
+   229→          onClick={() => onChange?.(star)}
+   230→          className={cn(
+   231→            'transition-colors',
+   232→            readonly ? 'cursor-default' : 'cursor-pointer hover:scale-110'
+   233→          )}
+   234→        >
+   235→          <Star
+   236→            className={cn(
+   237→              iconSize,
+   238→              star <= value
+   239→                ? 'fill-gold text-gold'
+   240→                : 'fill-none text-muted-foreground/30'
+   241→            )}
+   242→          />
+   243→        </button>
+   244→      ))}
+   245→    </div>
+   246→  )
+   247→}
+   248→
+   249→// ─── Short Links Card ──────────────────────────────────────────────
+   250→
+   251→interface ShortLinkData {
+   252→  id: string
+   253→  slug: string
+   254→  clickCount: number
+   255→  isActive: boolean
+   256→  createdAt: string
+   257→  event: { id: string; title: string }
+   258→}
+   259→
+   260→function ShortLinksCard({ eventId }: { eventId: string }) {
+   261→  const [shortLinks, setShortLinks] = useState<ShortLinkData[]>([])
+   262→  const [isLoading, setIsLoading] = useState(true)
+   263→  const [newSlug, setNewSlug] = useState('')
+   264→  const [isCreating, setIsCreating] = useState(false)
+   265→  const [error, setError] = useState<string | null>(null)
+   266→  const [copiedSlug, setCopiedSlug] = useState<string | null>(null)
+   267→
+   268→  useEffect(() => {
+   269→    fetchShortLinks()
+   270→  }, [eventId])
+   271→
+   272→  async function fetchShortLinks() {
+   273→    try {
+   274→      const res = await fetch(`/api/admin/short-links?eventId=${eventId}`)
+   275→      if (res.ok) {
+   276→        const data = await res.json()
+   277→        setShortLinks(data.shortLinks || [])
+   278→      }
+   279→    } catch (err) {
+   280→      console.error('Fetch short links error:', err)
+   281→    } finally {
+   282→      setIsLoading(false)
+   283→    }
+   284→  }
+   285→
+   286→  async function handleCreate() {
+   287→    if (!newSlug.trim()) return
+   288→    setIsCreating(true)
+   289→    setError(null)
+   290→    try {
+   291→      const res = await fetch('/api/admin/short-links', {
+   292→        method: 'POST',
+   293→        headers: { 'Content-Type': 'application/json' },
+   294→        body: JSON.stringify({ slug: newSlug.trim(), eventId }),
+   295→      })
+   296→      if (res.ok) {
+   297→        setNewSlug('')
+   298→        fetchShortLinks()
+   299→      } else {
+   300→        const data = await res.json()
+   301→        setError(data.error || 'Gagal membuat short link')
+   302→      }
+   303→    } catch {
+   304→      setError('Terjadi kesalahan')
+   305→    } finally {
+   306→      setIsCreating(false)
+   307→    }
+   308→  }
+   309→
+   310→  async function handleDelete(id: string, slug: string) {
+   311→    if (!confirm(`Hapus short link "${slug}"?`)) return
+   312→    try {
+   313→      const res = await fetch(`/api/admin/short-links/${id}`, { method: 'DELETE' })
+   314→      if (res.ok) {
+   315→        setShortLinks(shortLinks.filter((sl) => sl.id !== id))
+   316→      }
+   317→    } catch (err) {
+   318→      console.error('Delete short link error:', err)
+   319→    }
+   320→  }
+   321→
+   322→  function handleCopy(slug: string) {
+   323→    const url = `${window.location.origin}/${slug}`
+   324→    navigator.clipboard.writeText(url)
+   325→    setCopiedSlug(slug)
+   326→    setTimeout(() => setCopiedSlug(null), 2000)
+   327→  }
+   328→
+   329→  return (
+   330→    <Card className="border-border/50">
+   331→      <CardHeader className="pb-3">
+   332→        <div className="flex items-center gap-2">
+   333→          <Link2 className="w-5 h-5 text-gold" />
+   334→          <CardTitle className="font-serif text-lg text-charcoal">Short Links</CardTitle>
+   335→          <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+   336→            {shortLinks.length} link
+   337→          </Badge>
+   338→        </div>
+   339→      </CardHeader>
+   340→      <CardContent className="space-y-4">
+   341→        {/* Create new short link */}
+   342→        <div className="border border-dashed border-border/60 rounded-lg p-4">
+   343→          <p className="text-xs font-medium text-muted-foreground mb-3">Buat Short Link Baru</p>
+   344→          <div className="flex items-center gap-2">
+   345→            <div className="flex items-center bg-muted/50 border border-border/60 rounded-md px-3 h-9 text-sm text-muted-foreground shrink-0">
+   346→              teateran.site/
+   347→            </div>
+   348→            <Input
+   349→              value={newSlug}
+   350→              onChange={(e) => {
+   351→                setNewSlug(e.target.value.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 30))
+   352→                setError(null)
+   353→              }}
+   354→              placeholder="tajoc"
+   355→              className="h-9"
+   356→              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+   357→            />
+   358→            <Button
+   359→              onClick={handleCreate}
+   360→              disabled={isCreating || !newSlug.trim()}
+   361→              size="sm"
+   362→              className="bg-gold hover:bg-gold/90 text-charcoal shrink-0"
+   363→            >
+   364→              {isCreating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5 mr-1" />}
+   365→              Buat
+   366→            </Button>
+   367→          </div>
+   368→          {error && <p className="text-xs text-red-500 mt-2">{error}</p>}
+   369→          <p className="text-xs text-muted-foreground/60 mt-2">
+   370→            Hanya huruf, angka, strip (-), underscore (_). 2-30 karakter. Sekali pakai per event.
+   371→          </p>
+   372→        </div>
+   373→
+   374→        {/* List of existing short links */}
+   375→        {isLoading ? (
+   376→          <div className="flex justify-center py-4">
+   377→            <Loader2 className="w-5 h-5 text-gold animate-spin" />
+   378→          </div>
+   379→        ) : shortLinks.length === 0 ? (
+   380→          <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+   381→            <Link2 className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+   382→            <p className="text-sm text-muted-foreground">Belum ada short link</p>
+   383→            <p className="text-xs text-muted-foreground/60">Buat short link di atas untuk mempermudah berbagi</p>
+   384→          </div>
+   385→        ) : (
+   386→          <div className="space-y-2 max-h-64 overflow-y-auto">
+   387→            {shortLinks.map((sl) => (
+   388→              <div
+   389→                key={sl.id}
+   390→                className="rounded-lg border border-border/60 p-3 bg-white flex items-center gap-3"
+   391→              >
+   392→                <div className="flex-1 min-w-0">
+   393→                  <div className="flex items-center gap-2">
+   394→                    <span className="text-sm font-medium text-charcoal">/{sl.slug}</span>
+   395→                    <Badge variant="secondary" className="text-[10px] bg-gold/10 text-gold-dark px-1.5 py-0">
+   396→                      <MousePointerClick className="w-2.5 h-2.5 mr-0.5" />
+   397→                      {sl.clickCount}
+   398→                    </Badge>
+   399→                  </div>
+   400→                  <p className="text-xs text-muted-foreground/60 mt-0.5">
+   401→                    teateran.site/{sl.slug}
+   402→                  </p>
+   403→                </div>
+   404→                <div className="flex items-center gap-1 shrink-0">
+   405→                  <Button
+   406→                    variant="ghost"
+   407→                    size="icon"
+   408→                    className="h-7 w-7 text-muted-foreground hover:text-charcoal"
+   409→                    onClick={() => handleCopy(sl.slug)}
+   410→                    title="Copy link"
+   411→                  >
+   412→                    {copiedSlug === sl.slug ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+   413→                  </Button>
+   414→                  <a
+   415→                    href={`/${sl.slug}`}
+   416→                    target="_blank"
+   417→                    rel="noopener noreferrer"
+   418→                    className="h-7 w-7 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-charcoal hover:bg-accent"
+   419→                    title="Buka link"
+   420→                  >
+   421→                    <ExternalLink className="w-3.5 h-3.5" />
+   422→                  </a>
+   423→                  <Button
+   424→                    variant="ghost"
+   425→                    size="icon"
+   426→                    className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50"
+   427→                    onClick={() => handleDelete(sl.id, sl.slug)}
+   428→                    title="Hapus"
+   429→                  >
+   430→                    <Trash2 className="w-3.5 h-3.5" />
+   431→                  </Button>
+   432→                </div>
+   433→              </div>
+   434→            ))}
+   435→          </div>
+   436→        )}
+   437→      </CardContent>
+   438→    </Card>
+   439→  )
+   440→}
+   441→
+   442→// ─── Main Page Component ──────────────────────────────────────────
+   443→
+   444→export default function AdminEventEditPage() {
+   445→  const params = useParams()
+   446→  const router = useRouter()
+   447→  const eventId = params.id as string
+   448→
+   449→  const [isLoading, setIsLoading] = useState(true)
+   450→  const [isSaving, setIsSaving] = useState(false)
+   451→  const [error, setError] = useState<string | null>(null)
+   452→  const [event, setEvent] = useState<EventData | null>(null)
+   453→
+   454→  // Form fields
+   455→  const [title, setTitle] = useState('')
+   456→  const [category, setCategory] = useState('Teater')
+   457→  const [location, setLocation] = useState('')
+   458→  const [posterUrl, setPosterUrl] = useState('')
+   459→  const [teaserVideoUrl, setTeaserVideoUrl] = useState('')
+   460→  const [synopsis, setSynopsis] = useState('')
+   461→  const [adminFee, setAdminFee] = useState(0)
+   462→  const [isPublished, setIsPublished] = useState(false)
+   463→  const [isCompleted, setIsCompleted] = useState(false)
+   464→  const [hideSeatAvailability, setHideSeatAvailability] = useState(false)
+   465→  const [hideSoldCount, setHideSoldCount] = useState(false)
+   466→
+   467→  // Show dates (editable open gate only — date & label are read-only after publish)
+   468→  const [showDates, setShowDates] = useState<ShowDateData[]>([])
+   469→
+   470→  // Cast & Crew
+   471→  const [cast, setCast] = useState<CastMember[]>([])
+   472→  const [editingCastIdx, setEditingCastIdx] = useState<number | null>(null)
+   473→  const [newCast, setNewCast] = useState<CastMember>({ name: '', role: '', imageUrl: '' })
+   474→
+   475→  // Reviews
+   476→  const [reviews, setReviews] = useState<Review[]>([])
+   477→  const [editingReviewIdx, setEditingReviewIdx] = useState<number | null>(null)
+   478→  const [newReview, setNewReview] = useState<Review>({
+   479→    authorName: '',
+   480→    rating: 5,
+   481→    comment: '',
+   482→    createdAt: new Date().toISOString().slice(0, 10),
+   483→  })
+   484→
+   485→  // ─── Fetch event data ──────────────────────────────────────────
+   486→  useEffect(() => {
+   487→    async function fetchEvent() {
+   488→      try {
+   489→        const res = await fetch(`/api/admin/events/${eventId}`)
+   490→        if (!res.ok) {
+   491→          setError('Event tidak ditemukan')
+   492→          return
+   493→        }
+   494→        const data = await res.json()
+   495→        const ev: EventData = data.event
+   496→
+   497→        setEvent(ev)
+   498→        setTitle(ev.title)
+   499→        setCategory(ev.category)
+   500→        setLocation(ev.location)
+   501→        setPosterUrl(ev.posterUrl || '')
+   502→        setTeaserVideoUrl(ev.teaserVideoUrl || '')
+   503→        setSynopsis(ev.synopsis || '')
+   504→        setAdminFee(ev.adminFee || 0)
+   505→        setIsPublished(ev.isPublished)
+   506→        setIsCompleted(ev.isCompleted || false)
+   507→        setHideSeatAvailability(ev.hideSeatAvailability || false)
+   508→        setHideSoldCount(ev.hideSoldCount || false)
+   509→        // Convert openGate from ISO → datetime-local value (no UTC shift)
+   510→        // so the editable input shows the correct wall-clock WIB time.
+   511→        setShowDates(
+   512→          (ev.showDates || []).map((sd) => ({
+   513→            ...sd,
+   514→            openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : null,
+   515→          }))
+   516→        )
+   517→
+   518→        // Parse cast & reviews
+   519→        setCast(safeParseArray<CastMember>(ev.castData, []))
+   520→        setReviews(safeParseArray<Review>(ev.reviewsData, []))
+   521→      } catch (err) {
+   522→        console.error('Failed to fetch event:', err)
+   523→        setError('Gagal memuat data event')
+   524→      } finally {
+   525→        setIsLoading(false)
+   526→      }
+   527→    }
+   528→    fetchEvent()
+   529→  }, [eventId])
+   530→
+   531→  // ─── Open Gate handler ───────────────────────────────────────
+   532→  // Only the openGate time is editable. The show date itself and label
+   533→  // are preserved as-is (seats already generated + event published).
+   534→  function updateShowDateOpenGate(idx: number, openGateLocal: string) {
+   535→    const updated = [...showDates]
+   536→    updated[idx] = { ...updated[idx], openGate: openGateLocal }
+   537→    setShowDates(updated)
+   538→  }
+   539→
+   540→  // ─── Save handler ──────────────────────────────────────────────
+   541→  async function handleSave() {
+   542→    setIsSaving(true)
+   543→    try {
+   544→      // Build showDates payload — preserve id, date, label; convert openGate
+   545→      // datetime-local value to ISO string (interpreted as wall-clock WIB).
+   546→      const showDatesPayload = showDates.map((sd) => ({
+   547→        id: sd.id,
+   548→        date: sd.date,
+   549→        label: sd.label,
+   550→        openGate: sd.openGate ? new Date(sd.openGate).toISOString() : null,
+   551→      }))
+   552→
+   553→      const res = await fetch(`/api/admin/events/${eventId}`, {
+   554→        method: 'PUT',
+   555→        headers: { 'Content-Type': 'application/json' },
+   556→        body: JSON.stringify({
+   557→          title,
+   558→          category,
+   559→          location,
+   560→          posterUrl: posterUrl || null,
+   561→          teaserVideoUrl: teaserVideoUrl || null,
+   562→          synopsis,
+   563→          adminFee,
+   564→          isPublished,
+   565→          isCompleted,
+   566→          hideSeatAvailability,
+   567→          hideSoldCount,
+   568→          castData: JSON.stringify(cast),
+   569→          reviewsData: JSON.stringify(reviews),
+   570→          showDates: showDatesPayload,
+   571→        }),
+   572→      })
+   573→
+   574→      if (!res.ok) {
+   575→        const data = await res.json()
+   576→        alert(data.error || 'Gagal menyimpan perubahan')
+   577→        return
+   578→      }
+   579→
+   580→      const data = await res.json()
+   581→      setEvent(data.event)
+   582→      // Refresh showDates from server response — re-convert openGate to
+   583→      // datetime-local value so the input stays in sync after save.
+   584→      if (data.event?.showDates) {
+   585→        setShowDates(
+   586→          data.event.showDates.map((sd: ShowDateData) => ({
+   587→            ...sd,
+   588→            openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : null,
+   589→          }))
+   590→        )
+   591→      }
+   592→      alert('Perubahan berhasil disimpan!')
+   593→    } catch (err) {
+   594→      console.error('Save error:', err)
+   595→      alert('Terjadi kesalahan saat menyimpan')
+   596→    } finally {
+   597→      setIsSaving(false)
+   598→    }
+   599→  }
+   600→
+   601→  // ─── Cast handlers ─────────────────────────────────────────────
+   602→  function addCastMember() {
+   603→    if (!newCast.name.trim()) {
+   604→      alert('Nama cast wajib diisi')
+   605→      return
+   606→    }
+   607→    setCast([...cast, { ...newCast }])
+   608→    setNewCast({ name: '', role: '', imageUrl: '' })
+   609→  }
+   610→
+   611→  function removeCastMember(idx: number) {
+   612→    setCast(cast.filter((_, i) => i !== idx))
+   613→    if (editingCastIdx === idx) setEditingCastIdx(null)
+   614→  }
+   615→
+   616→  function updateCastMember(idx: number, field: keyof CastMember, value: string) {
+   617→    const updated = [...cast]
+   618→    updated[idx] = { ...updated[idx], [field]: value }
+   619→    setCast(updated)
+   620→  }
+   621→
+   622→  function saveCastEdit(idx: number) {
+   623→    if (!cast[idx].name.trim()) {
+   624→      alert('Nama cast wajib diisi')
+   625→      return
+   626→    }
+   627→    setEditingCastIdx(null)
+   628→  }
+   629→
+   630→  // ─── Review handlers ───────────────────────────────────────────
+   631→  function addReview() {
+   632→    if (!newReview.authorName.trim()) {
+   633→      alert('Nama penulis wajib diisi')
+   634→      return
+   635→    }
+   636→    if (!newReview.comment.trim()) {
+   637→      alert('Komentar wajib diisi')
+   638→      return
+   639→    }
+   640→    setReviews([...reviews, { ...newReview, createdAt: newReview.createdAt || new Date().toISOString().slice(0, 10) }])
+   641→    setNewReview({ authorName: '', rating: 5, comment: '', createdAt: new Date().toISOString().slice(0, 10) })
+   642→  }
+   643→
+   644→  function removeReview(idx: number) {
+   645→    setReviews(reviews.filter((_, i) => i !== idx))
+   646→    if (editingReviewIdx === idx) setEditingReviewIdx(null)
+   647→  }
+   648→
+   649→  function updateReview(idx: number, field: keyof Review, value: string | number) {
+   650→    const updated = [...reviews]
+   651→    updated[idx] = { ...updated[idx], [field]: value }
+   652→    setReviews(updated)
+   653→  }
+   654→
+   655→  function saveReviewEdit(idx: number) {
+   656→    if (!reviews[idx].authorName.trim()) {
+   657→      alert('Nama penulis wajib diisi')
+   658→      return
+   659→    }
+   660→    setEditingReviewIdx(null)
+   661→  }
+   662→
+   663→  // ─── Render ────────────────────────────────────────────────────
+   664→
+   665→  if (isLoading) {
+   666→    return (
+   667→      <div className="flex items-center justify-center py-24">
+   668→        <Loader2 className="w-8 h-8 text-gold animate-spin" />
+   669→      </div>
+   670→    )
+   671→  }
+   672→
+   673→  if (error || !event) {
+   674→    return (
+   675→      <div className="text-center py-24">
+   676→        <p className="text-destructive text-sm font-medium">{error || 'Event tidak ditemukan'}</p>
+   677→        <Button asChild variant="outline" size="sm" className="mt-4">
+   678→          <Link href="/admin/events">Kembali ke Events</Link>
+   679→        </Button>
+   680→      </div>
+   681→    )
+   682→  }
+   683→
+   684→  return (
+   685→    <div className="space-y-6 max-w-4xl">
+   686→      {/* Header */}
+   687→      <div className="flex items-center justify-between">
+   688→        <div className="flex items-center gap-3">
+   689→          <Button variant="ghost" size="icon" asChild className="h-8 w-8">
+   690→            <Link href="/admin/events">
+   691→              <ArrowLeft className="w-4 h-4" />
+   692→            </Link>
+   693→          </Button>
+   694→          <div>
+   695→            <h1 className="font-serif text-2xl font-bold text-charcoal">Edit Event</h1>
+   696→            <p className="text-sm text-muted-foreground mt-0.5">{event.title}</p>
+   697→          </div>
+   698→        </div>
+   699→        <div className="flex items-center gap-2">
+   700→          <Badge
+   701→            variant="secondary"
+   702→            className={cn(
+   703→              'text-xs',
+   704→              isPublished ? 'bg-emerald-50 text-emerald-700' : 'bg-muted text-muted-foreground'
+   705→            )}
+   706→          >
+   707→            {isPublished ? 'Published' : 'Draft'}
+   708→          </Badge>
+   709→          <Button
+   710→            onClick={handleSave}
+   711→            disabled={isSaving}
+   712→            className="bg-charcoal hover:bg-charcoal/90 text-gold"
+   713→          >
+   714→            {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+   715→            Simpan
+   716→          </Button>
+   717→        </div>
+   718→      </div>
+   719→
+   720→      {/* ─── Basic Info Card ────────────────────────────────────── */}
+   721→      <Card className="border-border/50">
+   722→        <CardHeader className="pb-3">
+   723→          <CardTitle className="font-serif text-lg text-charcoal">Informasi Dasar</CardTitle>
+   724→        </CardHeader>
+   725→        <CardContent className="space-y-4">
+   726→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   727→            <div className="space-y-2">
+   728→              <Label className="text-sm font-medium">Judul Event</Label>
+   729→              <Input
+   730→                value={title}
+   731→                onChange={(e) => setTitle(e.target.value)}
+   732→                placeholder="Judul event"
+   733→              />
+   734→            </div>
+   735→            <div className="space-y-2">
+   736→              <Label className="text-sm font-medium">Kategori</Label>
+   737→              <Input
+   738→                value={category}
+   739→                onChange={(e) => setCategory(e.target.value)}
+   740→                placeholder="Teater"
+   741→              />
+   742→            </div>
+   743→          </div>
+   744→
+   745→          <div className="space-y-2">
+   746→            <Label className="text-sm font-medium">Lokasi</Label>
+   747→            <Input
+   748→              value={location}
+   749→              onChange={(e) => setLocation(e.target.value)}
+   750→              placeholder="Teateran, Yogyakarta"
+   751→            />
+   752→          </div>
+   753→
+   754→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   755→            <div className="space-y-2">
+   756→              <Label className="text-sm font-medium">URL Poster</Label>
+   757→              <Input
+   758→                value={posterUrl}
+   759→                onChange={(e) => setPosterUrl(e.target.value)}
+   760→                placeholder="https://example.com/poster.jpg"
+   761→              />
+   762→            </div>
+   763→            <div className="space-y-2">
+   764→              <Label className="text-sm font-medium">URL Video Teaser</Label>
+   765→              <Input
+   766→                value={teaserVideoUrl}
+   767→                onChange={(e) => setTeaserVideoUrl(e.target.value)}
+   768→                placeholder="https://youtube.com/watch?v=..."
+   769→              />
+   770→            </div>
+   771→          </div>
+   772→
+   773→          <div className="space-y-2">
+   774→            <Label className="text-sm font-medium">Sinopsis</Label>
+   775→            <Textarea
+   776→              value={synopsis}
+   777→              onChange={(e) => setSynopsis(e.target.value)}
+   778→              placeholder="Deskripsi singkat pertunjukan..."
+   779→              rows={4}
+   780→            />
+   781→          </div>
+   782→
+   783→          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   784→            <div className="space-y-2">
+   785→              <Label className="text-sm font-medium">Biaya Admin per Tiket (Rp)</Label>
+   786→              <Input
+   787→                type="number"
+   788→                value={adminFee}
+   789→                onChange={(e) => setAdminFee(Number(e.target.value) || 0)}
+   790→                placeholder="0"
+   791→              />
+   792→            </div>
+   793→            <div className="space-y-2">
+   794→              <Label className="text-sm font-medium">Status Publikasi</Label>
+   795→              <div className="flex items-center gap-3 h-9">
+   796→                <button
+   797→                  type="button"
+   798→                  onClick={() => setIsPublished(!isPublished)}
+   799→                  className={cn(
+   800→                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+   801→                    isPublished ? 'bg-emerald-500' : 'bg-muted'
+   802→                  )}
+   803→                >
+   804→                  <span
+   805→                    className={cn(
+   806→                      'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+   807→                      isPublished ? 'translate-x-6' : 'translate-x-1'
+   808→                    )}
+   809→                  />
+   810→                </button>
+   811→                <span className="text-sm text-muted-foreground">
+   812→                  {isPublished ? 'Published' : 'Draft'}
+   813→                </span>
+   814→              </div>
+   815→            </div>
+   816→            <div className="space-y-2">
+   817→              <Label className="text-sm font-medium">Status Pementasan</Label>
+   818→              <div className="flex items-center gap-3 h-9">
+   819→                <button
+   820→                  type="button"
+   821→                  onClick={() => setIsCompleted(!isCompleted)}
+   822→                  className={cn(
+   823→                    'relative inline-flex h-6 w-11 items-center rounded-full transition-colors',
+   824→                    isCompleted ? 'bg-emerald-600' : 'bg-muted'
+   825→                  )}
+   826→                >
+   827→                  <span
+   828→                    className={cn(
+   829→                      'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+   830→                      isCompleted ? 'translate-x-6' : 'translate-x-1'
+   831→                    )}
+   832→                  />
+   833→                </button>
+   834→                <span className="text-sm text-muted-foreground">
+   835→                  {isCompleted ? 'Selesai (Guest bisa review)' : 'Aktif (Bisa beli tiket)'}
+   836→                </span>
+   837→              </div>
+   838→              {isCompleted && (
+   839→                <p className="text-xs text-emerald-600 font-medium">
+   840→                  Pementasan selesai — tiket tidak bisa dibeli, guest bisa memberikan review.
+   841→                </p>
+   842→              )}
+   843→            </div>
+   844→          </div>
+   845→        </CardContent>
+   846→      </Card>
+   847→
+   848→      {/* ─── Schedule & Open Gate Card ───────────────────────────── */}
+   849→      <Card className="border-border/50">
+   850→        <CardHeader className="pb-3">
+   851→          <div className="flex items-center gap-2">
+   852→            <Clock className="w-5 h-5 text-gold" />
+   853→            <CardTitle className="font-serif text-lg text-charcoal">Jadwal &amp; Open Gate</CardTitle>
+   854→          </div>
+   855→          <p className="text-xs text-muted-foreground">
+   856→            Tanggal &amp; jam tayang sudah terkunci (kursi ter-generate). Yang bisa diubah hanya jam <strong>Open Gate</strong> (pintu dibuka). Semua waktu dalam WIB.
+   857→          </p>
+   858→        </CardHeader>
+   859→        <CardContent className="space-y-3">
+   860→          {showDates.length === 0 ? (
+   861→            <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+   862→              <Clock className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+   863→              <p className="text-sm text-muted-foreground">Belum ada jadwal pertunjukan</p>
+   864→              <p className="text-xs text-muted-foreground/60">Jadwal diatur saat pembuatan event.</p>
+   865→            </div>
+   866→          ) : (
+   867→            showDates.map((sd, idx) => (
+   868→              <div
+   869→                key={sd.id || idx}
+   870→                className="rounded-lg border border-border/60 p-3 bg-white space-y-2"
+   871→              >
+   872→                <div className="flex items-center justify-between gap-2 flex-wrap">
+   873→                  <div className="flex items-center gap-2 min-w-0">
+   874→                    <Badge variant="secondary" className="text-[10px] bg-gold/10 text-gold-dark px-1.5 py-0 shrink-0">
+   875→                      Hari {idx + 1}
+   876→                    </Badge>
+   877→                    {sd.label && (
+   878→                      <span className="text-xs font-medium text-charcoal truncate">· {sd.label}</span>
+   879→                    )}
+   880→                  </div>
+   881→                  <div className="text-xs text-muted-foreground">
+   882→                    <span className="font-medium text-charcoal">Tayang:</span>{' '}
+   883→                    {formatEventDate(sd.date)} · {formatEventTime(sd.date)}
+   884→                  </div>
+   885→                </div>
+   886→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-end">
+   887→                  <div className="space-y-1">
+   888→                    <Label className="text-xs text-muted-foreground">Open Gate (WIB)</Label>
+   889→                    <Input
+   890→                      type="datetime-local"
+   891→                      value={sd.openGate || ''}
+   892→                      onChange={(e) => updateShowDateOpenGate(idx, e.target.value)}
+   893→                      className="h-9 text-sm"
+   894→                    />
+   895→                  </div>
+   896→                  <p className="text-xs text-muted-foreground/70 sm:pb-2">
+   897→                    {sd.openGate
+   898→                      ? <>Pintu dibuka <strong>{formatEventTime(sd.openGate)}</strong></>
+   899→                      : 'Belum diatur — pintu mengikuti jam tayang.'}
+   900→                  </p>
+   901→                </div>
+   902→              </div>
+   903→            ))
+   904→          )}
+   905→        </CardContent>
+   906→      </Card>
+   907→
+   908→      {/* ─── Visibility Settings Card ────────────────────────────── */}
+   909→      <Card className="border-border/50">
+   910→        <CardHeader className="pb-3">
+   911→          <CardTitle className="font-serif text-lg text-charcoal">Pengaturan Visibilitas</CardTitle>
+   912→          <p className="text-xs text-muted-foreground">Atur informasi apa saja yang terlihat oleh pembeli di halaman event.</p>
+   913→        </CardHeader>
+   914→        <CardContent className="space-y-4">
+   915→          <div className="flex items-center justify-between rounded-lg border p-4">
+   916→            <div className="space-y-0.5">
+   917→              <Label className="text-sm font-medium">Sembunyikan Ketersediaan Kursi</Label>
+   918→              <p className="text-xs text-muted-foreground">Sembunyikan progress bar, jumlah kursi tersedia (misal: “45/100”, “70% tersedia”), kapasitas & tiket tersedia per zona (GA)</p>
+   919→            </div>
+   920→            <button
+   921→              type="button"
+   922→              onClick={() => setHideSeatAvailability(!hideSeatAvailability)}
+   923→              className={cn(
+   924→                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4',
+   925→                hideSeatAvailability ? 'bg-amber-500' : 'bg-muted'
+   926→              )}
+   927→            >
+   928→              <span
+   929→                className={cn(
+   930→                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+   931→                  hideSeatAvailability ? 'translate-x-6' : 'translate-x-1'
+   932→                )}
+   933→              />
+   934→            </button>
+   935→          </div>
+   936→          <div className="flex items-center justify-between rounded-lg border p-4">
+   937→            <div className="space-y-0.5">
+   938→              <Label className="text-sm font-medium">Sembunyikan Jumlah Terjual</Label>
+   939→              <p className="text-xs text-muted-foreground">Sembunyikan teks jumlah tiket terjual (misal: “55 terjual”)</p>
+   940→            </div>
+   941→            <button
+   942→              type="button"
+   943→              onClick={() => setHideSoldCount(!hideSoldCount)}
+   944→              className={cn(
+   945→                'relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 ml-4',
+   946→                hideSoldCount ? 'bg-amber-500' : 'bg-muted'
+   947→              )}
+   948→            >
+   949→              <span
+   950→                className={cn(
+   951→                  'inline-block h-4 w-4 transform rounded-full bg-white transition-transform',
+   952→                  hideSoldCount ? 'translate-x-6' : 'translate-x-1'
+   953→                )}
+   954→              />
+   955→            </button>
+   956→          </div>
+   957→        </CardContent>
+   958→      </Card>
+   959→
+   960→      {/* ─── Cast & Crew Card ───────────────────────────────────── */}
+   961→      <Card className="border-border/50">
+   962→        <CardHeader className="pb-3">
+   963→          <div className="flex items-center justify-between">
+   964→            <div className="flex items-center gap-2">
+   965→              <Users className="w-5 h-5 text-gold" />
+   966→              <CardTitle className="font-serif text-lg text-charcoal">Cast & Crew</CardTitle>
+   967→              <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+   968→                {cast.length} anggota
+   969→              </Badge>
+   970→            </div>
+   971→          </div>
+   972→        </CardHeader>
+   973→        <CardContent className="space-y-4">
+   974→          {/* Existing cast members */}
+   975→          {cast.length > 0 && (
+   976→            <div className="space-y-2 max-h-96 overflow-y-auto">
+   977→              {cast.map((member, idx) => (
+   978→                <div
+   979→                  key={idx}
+   980→                  className="rounded-lg border border-border/60 p-3 bg-white"
+   981→                >
+   982→                  {editingCastIdx === idx ? (
+   983→                    // ── Edit mode ──
+   984→                    <div className="space-y-2">
+   985→                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+   986→                        <div>
+   987→                          <Label className="text-xs text-muted-foreground">Nama</Label>
+   988→                          <Input
+   989→                            value={member.name}
+   990→                            onChange={(e) => updateCastMember(idx, 'name', e.target.value)}
+   991→                            className="h-8 text-sm"
+   992→                            placeholder="Nama lengkap"
+   993→                          />
+   994→                        </div>
+   995→                        <div>
+   996→                          <Label className="text-xs text-muted-foreground">Peran</Label>
+   997→                          <Input
+   998→                            value={member.role}
+   999→                            onChange={(e) => updateCastMember(idx, 'role', e.target.value)}
+  1000→                            className="h-8 text-sm"
+  1001→                            placeholder="contoh: Hamlet"
+  1002→                          />
+  1003→                        </div>
+  1004→                        <div>
+  1005→                          <Label className="text-xs text-muted-foreground">URL Foto</Label>
+  1006→                          <Input
+  1007→                            value={member.imageUrl}
+  1008→                            onChange={(e) => updateCastMember(idx, 'imageUrl', e.target.value)}
+  1009→                            className="h-8 text-sm"
+  1010→                            placeholder="https://..."
+  1011→                          />
+  1012→                        </div>
+  1013→                      </div>
+  1014→                      <div className="flex items-center justify-end gap-2">
+  1015→                        <Button
+  1016→                          variant="ghost"
+  1017→                          size="sm"
+  1018→                          onClick={() => setEditingCastIdx(null)}
+  1019→                          className="h-7 text-xs"
+  1020→                        >
+  1021→                          <X className="w-3 h-3 mr-1" />
+  1022→                          Batal
+  1023→                        </Button>
+  1024→                        <Button
+  1025→                          size="sm"
+  1026→                          onClick={() => saveCastEdit(idx)}
+  1027→                          className="h-7 text-xs bg-gold hover:bg-gold/90 text-charcoal"
+  1028→                        >
+  1029→                          <Check className="w-3 h-3 mr-1" />
+  1030→                          Simpan
+  1031→                        </Button>
+  1032→                      </div>
+  1033→                    </div>
+  1034→                  ) : (
+  1035→                    // ── Display mode ──
+  1036→                    <div className="flex items-center gap-3">
+  1037→                      {member.imageUrl ? (
+  1038→                        <img
+  1039→                          src={member.imageUrl}
+  1040→                          alt={member.name}
+  1041→                          className="w-10 h-10 rounded-full object-cover border border-border/50 shrink-0"
+  1042→                        />
+  1043→                      ) : (
+  1044→                        <div className="w-10 h-10 rounded-full bg-gold/10 border border-gold/20 flex items-center justify-center shrink-0">
+  1045→                          <Users className="w-4 h-4 text-gold" />
+  1046→                        </div>
+  1047→                      )}
+  1048→                      <div className="flex-1 min-w-0">
+  1049→                        <p className="text-sm font-medium text-charcoal truncate">{member.name}</p>
+  1050→                        {member.role && (
+  1051→                          <p className="text-xs text-muted-foreground truncate">sebagai {member.role}</p>
+  1052→                        )}
+  1053→                      </div>
+  1054→                      <div className="flex items-center gap-1 shrink-0">
+  1055→                        <Button
+  1056→                          variant="ghost"
+  1057→                          size="icon"
+  1058→                          className="h-7 w-7 text-muted-foreground hover:text-charcoal"
+  1059→                          onClick={() => setEditingCastIdx(idx)}
+  1060→                        >
+  1061→                          <Edit className="w-3.5 h-3.5" />
+  1062→                        </Button>
+  1063→                        <Button
+  1064→                          variant="ghost"
+  1065→                          size="icon"
+  1066→                          className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50"
+  1067→                          onClick={() => removeCastMember(idx)}
+  1068→                        >
+  1069→                          <Trash2 className="w-3.5 h-3.5" />
+  1070→                        </Button>
+  1071→                      </div>
+  1072→                    </div>
+  1073→                  )}
+  1074→                </div>
+  1075→              ))}
+  1076→            </div>
+  1077→          )}
+  1078→
+  1079→          {cast.length === 0 && (
+  1080→            <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+  1081→              <Users className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+  1082→              <p className="text-sm text-muted-foreground">Belum ada cast & crew</p>
+  1083→              <p className="text-xs text-muted-foreground/60">Tambahkan anggota cast di bawah</p>
+  1084→            </div>
+  1085→          )}
+  1086→
+  1087→          {/* Add new cast member form */}
+  1088→          <div className="border border-dashed border-border/60 rounded-lg p-4">
+  1089→            <p className="text-xs font-medium text-muted-foreground mb-3">Tambah Cast / Crew Baru</p>
+  1090→            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+  1091→              <div>
+  1092→                <Label className="text-xs text-muted-foreground">Nama *</Label>
+  1093→                <Input
+  1094→                  value={newCast.name}
+  1095→                  onChange={(e) => setNewCast({ ...newCast, name: e.target.value })}
+  1096→                  className="h-8 text-sm"
+  1097→                  placeholder="Nama lengkap"
+  1098→                />
+  1099→              </div>
+  1100→              <div>
+  1101→                <Label className="text-xs text-muted-foreground">Peran</Label>
+  1102→                <Input
+  1103→                  value={newCast.role}
+  1104→                  onChange={(e) => setNewCast({ ...newCast, role: e.target.value })}
+  1105→                  className="h-8 text-sm"
+  1106→                  placeholder="contoh: Hamlet, Director"
+  1107→                />
+  1108→              </div>
+  1109→              <div>
+  1110→                <Label className="text-xs text-muted-foreground">URL Foto</Label>
+  1111→                <Input
+  1112→                  value={newCast.imageUrl}
+  1113→                  onChange={(e) => setNewCast({ ...newCast, imageUrl: e.target.value })}
+  1114→                  className="h-8 text-sm"
+  1115→                  placeholder="https://..."
+  1116→                />
+  1117→              </div>
+  1118→            </div>
+  1119→            <div className="mt-3 flex justify-end">
+  1120→              <Button
+  1121→                variant="outline"
+  1122→                size="sm"
+  1123→                onClick={addCastMember}
+  1124→                disabled={!newCast.name.trim()}
+  1125→                className="text-xs"
+  1126→              >
+  1127→                <Plus className="w-3.5 h-3.5 mr-1.5" />
+  1128→                Tambah Cast
+  1129→              </Button>
+  1130→            </div>
+  1131→          </div>
+  1132→        </CardContent>
+  1133→      </Card>
+  1134→
+  1135→      {/* ─── Reviews / Testimonials Card ─────────────────────────── */}
+  1136→      <Card className="border-border/50">
+  1137→        <CardHeader className="pb-3">
+  1138→          <div className="flex items-center justify-between">
+  1139→            <div className="flex items-center gap-2">
+  1140→              <Star className="w-5 h-5 text-gold" />
+  1141→              <CardTitle className="font-serif text-lg text-charcoal">Reviews & Testimonials</CardTitle>
+  1142→              <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+  1143→                {reviews.length} review
+  1144→              </Badge>
+  1145→            </div>
+  1146→          </div>
+  1147→        </CardHeader>
+  1148→        <CardContent className="space-y-4">
+  1149→          {/* Existing reviews */}
+  1150→          {reviews.length > 0 && (
+  1151→            <div className="space-y-2 max-h-96 overflow-y-auto">
+  1152→              {reviews.map((review, idx) => (
+  1153→                <div
+  1154→                  key={idx}
+  1155→                  className="rounded-lg border border-border/60 p-3 bg-white"
+  1156→                >
+  1157→                  {editingReviewIdx === idx ? (
+  1158→                    // ── Edit mode ──
+  1159→                    <div className="space-y-2">
+  1160→                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+  1161→                        <div>
+  1162→                          <Label className="text-xs text-muted-foreground">Nama Penulis *</Label>
+  1163→                          <Input
+  1164→                            value={review.authorName}
+  1165→                            onChange={(e) => updateReview(idx, 'authorName', e.target.value)}
+  1166→                            className="h-8 text-sm"
+  1167→                            placeholder="Nama penulis"
+  1168→                          />
+  1169→                        </div>
+  1170→                        <div>
+  1171→                          <Label className="text-xs text-muted-foreground">Rating</Label>
+  1172→                          <div className="h-8 flex items-center">
+  1173→                            <StarRating
+  1174→                              value={review.rating}
+  1175→                              onChange={(v) => updateReview(idx, 'rating', v)}
+  1176→                            />
+  1177→                          </div>
+  1178→                        </div>
+  1179→                      </div>
+  1180→                      <div>
+  1181→                        <Label className="text-xs text-muted-foreground">Komentar</Label>
+  1182→                        <Textarea
+  1183→                          value={review.comment}
+  1184→                          onChange={(e) => updateReview(idx, 'comment', e.target.value)}
+  1185→                          className="text-sm min-h-[60px]"
+  1186→                          placeholder="Tulis komentar..."
+  1187→                        />
+  1188→                      </div>
+  1189→                      <div className="w-48">
+  1190→                        <Label className="text-xs text-muted-foreground">Tanggal</Label>
+  1191→                        <Input
+  1192→                          type="date"
+  1193→                          value={review.createdAt ? review.createdAt.slice(0, 10) : ''}
+  1194→                          onChange={(e) => updateReview(idx, 'createdAt', e.target.value)}
+  1195→                          className="h-8 text-sm"
+  1196→                        />
+  1197→                      </div>
+  1198→                      <div className="flex items-center justify-end gap-2">
+  1199→                        <Button
+  1200→                          variant="ghost"
+  1201→                          size="sm"
+  1202→                          onClick={() => setEditingReviewIdx(null)}
+  1203→                          className="h-7 text-xs"
+  1204→                        >
+  1205→                          <X className="w-3 h-3 mr-1" />
+  1206→                          Batal
+  1207→                        </Button>
+  1208→                        <Button
+  1209→                          size="sm"
+  1210→                          onClick={() => saveReviewEdit(idx)}
+  1211→                          className="h-7 text-xs bg-gold hover:bg-gold/90 text-charcoal"
+  1212→                        >
+  1213→                          <Check className="w-3 h-3 mr-1" />
+  1214→                          Simpan
+  1215→                        </Button>
+  1216→                      </div>
+  1217→                    </div>
+  1218→                  ) : (
+  1219→                    // ── Display mode ──
+  1220→                    <div>
+  1221→                      <div className="flex items-center justify-between">
+  1222→                        <div className="flex items-center gap-2">
+  1223→                          <span className="text-sm font-medium text-charcoal">{review.authorName}</span>
+  1224→                          <StarRating value={review.rating} readonly size="sm" />
+  1225→                        </div>
+  1226→                        <div className="flex items-center gap-1">
+  1227→                          <Button
+  1228→                            variant="ghost"
+  1229→                            size="icon"
+  1230→                            className="h-7 w-7 text-muted-foreground hover:text-charcoal"
+  1231→                            onClick={() => setEditingReviewIdx(idx)}
+  1232→                          >
+  1233→                            <Edit className="w-3.5 h-3.5" />
+  1234→                          </Button>
+  1235→                          <Button
+  1236→                            variant="ghost"
+  1237→                            size="icon"
+  1238→                            className="h-7 w-7 text-red-400 hover:text-red-600 hover:bg-red-50"
+  1239→                            onClick={() => removeReview(idx)}
+  1240→                          >
+  1241→                            <Trash2 className="w-3.5 h-3.5" />
+  1242→                          </Button>
+  1243→                        </div>
+  1244→                      </div>
+  1245→                      {review.comment && (
+  1246→                        <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+  1247→                          &ldquo;{review.comment}&rdquo;
+  1248→                        </p>
+  1249→                      )}
+  1250→                      {review.createdAt && (
+  1251→                        <p className="text-xs text-muted-foreground/50 mt-1">
+  1252→                          {new Date(review.createdAt).toLocaleDateString('id-ID', {
+  1253→                            day: 'numeric',
+  1254→                            month: 'long',
+  1255→                            year: 'numeric',
+  1256→                          })}
+  1257→                        </p>
+  1258→                      )}
+  1259→                    </div>
+  1260→                  )}
+  1261→                </div>
+  1262→              ))}
+  1263→            </div>
+  1264→          )}
+  1265→
+  1266→          {reviews.length === 0 && (
+  1267→            <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+  1268→              <Star className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+  1269→              <p className="text-sm text-muted-foreground">Belum ada review</p>
+  1270→              <p className="text-xs text-muted-foreground/60">Tambahkan review di bawah</p>
+  1271→            </div>
+  1272→          )}
+  1273→
+  1274→          {/* Add new review form */}
+  1275→          <div className="border border-dashed border-border/60 rounded-lg p-4">
+  1276→            <p className="text-xs font-medium text-muted-foreground mb-3">Tambah Review Baru</p>
+  1277→            <div className="space-y-3">
+  1278→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  1279→                <div>
+  1280→                  <Label className="text-xs text-muted-foreground">Nama Penulis *</Label>
+  1281→                  <Input
+  1282→                    value={newReview.authorName}
+  1283→                    onChange={(e) => setNewReview({ ...newReview, authorName: e.target.value })}
+  1284→                    className="h-8 text-sm"
+  1285→                    placeholder="Nama penulis review"
+  1286→                  />
+  1287→                </div>
+  1288→                <div>
+  1289→                  <Label className="text-xs text-muted-foreground">Rating</Label>
+  1290→                  <div className="h-8 flex items-center">
+  1291→                    <StarRating
+  1292→                      value={newReview.rating}
+  1293→                      onChange={(v) => setNewReview({ ...newReview, rating: v })}
+  1294→                      size="md"
+  1295→                    />
+  1296→                    <span className="ml-2 text-sm font-medium text-charcoal">{newReview.rating}/5</span>
+  1297→                  </div>
+  1298→                </div>
+  1299→              </div>
+  1300→              <div>
+  1301→                <Label className="text-xs text-muted-foreground">Komentar *</Label>
+  1302→                <Textarea
+  1303→                  value={newReview.comment}
+  1304→                  onChange={(e) => setNewReview({ ...newReview, comment: e.target.value })}
+  1305→                  className="text-sm min-h-[60px]"
+  1306→                  placeholder="Tulis komentar review..."
+  1307→                />
+  1308→              </div>
+  1309→              <div className="flex items-center justify-between">
+  1310→                <div className="w-48">
+  1311→                  <Label className="text-xs text-muted-foreground">Tanggal</Label>
+  1312→                  <Input
+  1313→                    type="date"
+  1314→                    value={newReview.createdAt}
+  1315→                    onChange={(e) => setNewReview({ ...newReview, createdAt: e.target.value })}
+  1316→                    className="h-8 text-sm"
+  1317→                  />
+  1318→                </div>
+  1319→                <Button
+  1320→                  variant="outline"
+  1321→                  size="sm"
+  1322→                  onClick={addReview}
+  1323→                  disabled={!newReview.authorName.trim() || !newReview.comment.trim()}
+  1324→                  className="text-xs"
+  1325→                >
+  1326→                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+  1327→                  Tambah Review
+  1328→                </Button>
+  1329→              </div>
+  1330→            </div>
+  1331→          </div>
+  1332→        </CardContent>
+  1333→      </Card>
+  1334→
+  1335→      {/* ─── Guest Reviews Card (from Review model) ──────────────────── */}
+  1336→      <GuestReviewsCard eventId={eventId} isCompleted={isCompleted} />
+  1337→
+  1338→      {/* ─── Short Links Card ─────────────────────────────────────── */}
+  1339→      <ShortLinksCard eventId={eventId} />
+  1340→
+  1341→      {/* ─── Bottom Actions ──────────────────────────────────────── */}
+  1342→      <div className="flex items-center justify-between pt-2 pb-8">
+  1343→        <Button variant="outline" asChild>
+  1344→          <Link href="/admin/events">
+  1345→            <ArrowLeft className="w-4 h-4 mr-2" />
+  1346→            Kembali ke Events
+  1347→          </Link>
+  1348→        </Button>
+  1349→        <Button
+  1350→          onClick={handleSave}
+  1351→          disabled={isSaving}
+  1352→          className="bg-charcoal hover:bg-charcoal/90 text-gold"
+  1353→        >
+  1354→          {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+  1355→          Simpan Semua Perubahan
+  1356→        </Button>
+  1357→      </div>
+  1358→    </div>
+  1359→  )
+  1360→}
+  1361→

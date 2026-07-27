@@ -1,0 +1,1670 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect } from 'react'
+     4→import Link from 'next/link'
+     5→import { useRouter } from 'next/navigation'
+     6→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     7→import { formatShortDate, toDatetimeLocalValue } from '@/lib/date'
+     8→import { Button } from '@/components/ui/button'
+     9→import { Input } from '@/components/ui/input'
+    10→import { Label } from '@/components/ui/label'
+    11→import { Textarea } from '@/components/ui/textarea'
+    12→import { Badge } from '@/components/ui/badge'
+    13→import { cn } from '@/lib/utils'
+    14→import { Separator } from '@/components/ui/separator'
+    15→import {
+    16→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose
+    17→} from '@/components/ui/dialog'
+    18→import {
+    19→  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+    20→} from '@/components/ui/alert-dialog'
+    21→import {
+    22→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    23→} from '@/components/ui/select'
+    24→import {
+    25→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow
+    26→} from '@/components/ui/table'
+    27→import {
+    28→  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users, RotateCcw, Star, Ticket
+    29→} from 'lucide-react'
+    30→import { Switch } from '@/components/ui/switch'
+    31→
+    32→interface EventData {
+    33→  id: string
+    34→  title: string
+    35→  category: string
+    36→  showDate: string
+    37→  location: string
+    38→  isPublished: boolean
+    39→  isCompleted?: boolean
+    40→  priceCategories: Array<{
+    41→    id: string
+    42→    name: string
+    43→    price: number
+    44→    colorCode: string
+    45→    packageType?: string | null
+    46→    applicableDayIds?: string[] | null
+    47→  }>
+    48→  seatSummary?: { total: number; available: number; sold: number }
+    49→  seatMapId: string | null
+    50→  seatMapInfo?: { name: string; seatType: string } | null
+    51→  showDates?: Array<{ id: string; date: string; openGate: string | null; label: string | null }>
+    52→  posterUrl?: string | null
+    53→  synopsis?: string
+    54→  teaserVideoUrl?: string | null
+    55→  adminFee?: number
+    56→  seatType?: string | null
+    57→  reviewStats?: { total: number; average: number }
+    58→  // Festival Mode
+    59→  eventMode?: string
+    60→  multiDayPassEnabled?: boolean
+    61→  scanCooldownMinutes?: number
+    62→  cooldownEnabled?: boolean
+    63→  // GA Zone Config (JSON string from DB) — used to pre-fill capacity in price category form
+    64→  gaZoneConfig?: string | null
+    65→}
+    66→
+    67→interface SeatMapOption {
+    68→  id: string
+    69→  name: string
+    70→  seatType: string
+    71→}
+    72→
+    73→interface PriceCategoryForm {
+    74→  name: string
+    75→  price: number
+    76→  colorCode: string
+    77→  capacity?: number            // GA only — auto-generates GA zone with this capacity
+    78→  packageType?: string | null   // "SINGLE" | "MULTI" | "FULL" | null
+    79→  applicableDayIds?: string[]  // Array of showDate temp IDs (frontend only)
+    80→}
+    81→
+    82→interface ShowDateForm {
+    83→  id?: string         // existing DB id (when editing)
+    84→  date: string
+    85→  openGate: string
+    86→  label: string
+    87→  tempId?: string     // frontend-only temp ID for matching price categories
+    88→}
+    89→
+    90→interface EventFormData {
+    91→  title: string
+    92→  category: string
+    93→  showDate: string
+    94→  openGate: string
+    95→  location: string
+    96→  posterUrl: string
+    97→  teaserVideoUrl: string
+    98→  synopsis: string
+    99→  isPublished: boolean
+   100→  adminFee: number
+   101→  seatType: string
+   102→  priceCategories: PriceCategoryForm[]
+   103→  showDates: ShowDateForm[]
+   104→  // Festival Mode
+   105→  eventMode: string  // "REGULAR" | "FESTIVAL"
+   106→  scanCooldownMinutes: number
+   107→  cooldownEnabled: boolean
+   108→  // GA Zone Config (raw JSON string from DB, used to preserve existing zone notes/capacity on edits)
+   109→  gaZoneConfig?: string | null
+   110→}
+   111→
+   112→const emptyForm: EventFormData = {
+   113→  title: '',
+   114→  category: 'Teater',
+   115→  showDate: '',
+   116→  openGate: '',
+   117→  location: '',
+   118→  posterUrl: '',
+   119→  teaserVideoUrl: '',
+   120→  synopsis: '',
+   121→  isPublished: false,
+   122→  adminFee: 0,
+   123→  seatType: 'NUMBERED',
+   124→  priceCategories: [
+   125→    { name: 'VIP', price: 150000, colorCode: '#C8A951', capacity: 100 },
+   126→    { name: 'Regular', price: 75000, colorCode: '#8B8680', capacity: 200 },
+   127→    { name: 'Student', price: 35000, colorCode: '#7BA7A5', capacity: 50 },
+   128→  ],
+   129→  showDates: [{ date: '', openGate: '', label: '', tempId: 'd1' }],
+   130→  eventMode: 'REGULAR',
+   131→  scanCooldownMinutes: 30,
+   132→  cooldownEnabled: true,
+   133→}
+   134→
+   135→export default function AdminEventsPage() {
+   136→  const router = useRouter()
+   137→  const [events, setEvents] = useState<EventData[]>([])
+   138→  const [isLoading, setIsLoading] = useState(true)
+   139→  const [fetchError, setFetchError] = useState<string | null>(null)
+   140→  const [isDialogOpen, setIsDialogOpen] = useState(false)
+   141→  const [editingId, setEditingId] = useState<string | null>(null)
+   142→  const [formData, setFormData] = useState<EventFormData>(emptyForm)
+   143→
+   144→  // Generate seats dialog state
+   145→  const [isGenDialogOpen, setIsGenDialogOpen] = useState(false)
+   146→  const [genEventId, setGenEventId] = useState<string | null>(null)
+   147→  const [genEventTitle, setGenEventTitle] = useState('')
+   148→  const [seatMaps, setSeatMaps] = useState<SeatMapOption[]>([])
+   149→  const [selectedSeatMapId, setSelectedSeatMapId] = useState('')
+   150→  const [isLoadingMaps, setIsLoadingMaps] = useState(false)
+   151→  const [isGeneratingSeats, setIsGeneratingSeats] = useState(false)
+   152→
+   153→  // Publish/unpublish confirmation dialog
+   154→  const [isPublishDialogOpen, setIsPublishDialogOpen] = useState(false)
+   155→  const [publishEvent, setPublishEvent] = useState<EventData | null>(null)
+   156→  const [isTogglingPublish, setIsTogglingPublish] = useState(false)
+   157→
+   158→  // Queue config dialog state
+   159→  const [isQueueDialogOpen, setIsQueueDialogOpen] = useState(false)
+   160→  const [queueEventId, setQueueEventId] = useState<string | null>(null)
+   161→  const [queueEventTitle, setQueueEventTitle] = useState('')
+   162→  const [queueEnabled, setQueueEnabled] = useState(false)
+   163→  const [queueMaxConcurrent, setQueueMaxConcurrent] = useState(50)
+   164→  const [queueStats, setQueueStats] = useState<{ activeUsers: number; waitingUsers: number; expiredUsers?: number } | null>(null)
+   165→  const [isSavingQueue, setIsSavingQueue] = useState(false)
+   166→  const [isLoadingQueue, setIsLoadingQueue] = useState(false)
+   167→
+   168→  useEffect(() => {
+   169→    fetchEvents()
+   170→  }, [])
+   171→
+   172→  async function fetchEvents() {
+   173→    setFetchError(null)
+   174→    try {
+   175→      const res = await fetch('/api/admin/events')
+   176→      if (res.ok) {
+   177→        const data = await res.json()
+   178→        setEvents(data.events || [])
+   179→      } else {
+   180→        const data = await res.json().catch(() => ({ error: 'Unknown error' }))
+   181→        setFetchError(data.error || `Error ${res.status}`)
+   182→        setEvents([])
+   183→      }
+   184→    } catch (err) {
+   185→      console.error('Failed to fetch events:', err)
+   186→      setFetchError('Gagal terhubung ke server. Coba refresh halaman.')
+   187→      setEvents([])
+   188→    } finally {
+   189→      setIsLoading(false)
+   190→    }
+   191→  }
+   192→
+   193→  function openCreateDialog() {
+   194→    setEditingId(null)
+   195→    setFormData(emptyForm)
+   196→    setIsDialogOpen(true)
+   197→  }
+   198→
+   199→  function openEditDialog(event: EventData) {
+   200→    setEditingId(event.id)
+   201→    // Build showDates with tempId for matching price categories
+   202→    const showDates: ShowDateForm[] = (event.showDates && event.showDates.length > 0)
+   203→      ? event.showDates.map((sd, idx) => ({
+   204→          id: sd.id,
+   205→          date: toDatetimeLocalValue(sd.date),
+   206→          openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : '',
+   207→          label: sd.label || '',
+   208→          tempId: `d${idx + 1}`,
+   209→        }))
+   210→      : [
+   211→          { date: toDatetimeLocalValue(event.showDate), openGate: '', label: '', tempId: 'd1' },
+   212→        ]
+   213→
+   214→    // Map price categories — convert DB applicableDayIds (array of showDate DB IDs) to tempIds for frontend editing
+   215→    // Use Record (plain object) instead of Map — avoids conflict with lucide-react's `Map` icon import
+   216→    const showDateIdToTempId: Record<string, string> = {}
+   217→    showDates.forEach(sd => {
+   218→      if (sd.id && sd.tempId) showDateIdToTempId[sd.id] = sd.tempId
+   219→    })
+   220→
+   221→    setFormData({
+   222→      title: event.title,
+   223→      category: event.category,
+   224→      showDate: toDatetimeLocalValue(event.showDate),
+   225→      openGate: event.showDates?.[0]?.openGate ? toDatetimeLocalValue(event.showDates[0].openGate) : '',
+   226→      location: event.location,
+   227→      posterUrl: event.posterUrl || '',
+   228→      teaserVideoUrl: event.teaserVideoUrl || '',
+   229→      synopsis: event.synopsis || '',
+   230→      isPublished: event.isPublished,
+   231→      adminFee: event.adminFee || 0,
+   232→      seatType: event.seatType || 'NUMBERED',
+   233→      priceCategories: event.priceCategories.map((pc) => {
+   234→        // Pre-fill capacity from existing gaZoneConfig (if zone with matching name exists)
+   235→        let existingCapacity = 100
+   236→        try {
+   237→          if (event.gaZoneConfig) {
+   238→            const zones = JSON.parse(event.gaZoneConfig) as Array<{ name?: string; priceCategoryName?: string; capacity?: number }>
+   239→            const match = zones.find(z => z.priceCategoryName === pc.name || z.name === pc.name)
+   240→            if (match?.capacity) existingCapacity = match.capacity
+   241→          }
+   242→        } catch { /* ignore */ }
+   243→        return {
+   244→          name: pc.name,
+   245→          price: pc.price,
+   246→          colorCode: pc.colorCode,
+   247→          capacity: existingCapacity,
+   248→          packageType: pc.packageType || null,
+   249→          applicableDayIds: (pc.applicableDayIds || []).map((id: string) => showDateIdToTempId[id] || id),
+   250→        }
+   251→      }),
+   252→      showDates,
+   253→      // Festival Mode
+   254→      eventMode: event.eventMode || 'REGULAR',
+   255→      scanCooldownMinutes: event.scanCooldownMinutes ?? 30,
+   256→      cooldownEnabled: event.cooldownEnabled ?? true,
+   257→      // GA Zone Config — preserve original so we can extract notes when re-syncing zones
+   258→      gaZoneConfig: event.gaZoneConfig || null,
+   259→    })
+   260→    setIsDialogOpen(true)
+   261→  }
+   262→
+   263→  function updatePriceCategory(index: number, field: string, value: string | number | string[] | null) {
+   264→    setFormData((prev) => {
+   265→      const updated = [...prev.priceCategories]
+   266→      updated[index] = { ...updated[index], [field]: value }
+   267→      return { ...prev, priceCategories: updated }
+   268→    })
+   269→  }
+   270→
+   271→  function addPriceCategory() {
+   272→    setFormData((prev) => ({
+   273→      ...prev,
+   274→      priceCategories: [...prev.priceCategories, {
+   275→        name: '',
+   276→        price: 0,
+   277→        colorCode: '#8B8680',
+   278→        capacity: 100,
+   279→        // Festival defaults — inherit from previous category if exists
+   280→        packageType: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].packageType : null,
+   281→        applicableDayIds: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].applicableDayIds : [],
+   282→      }],
+   283→    }))
+   284→  }
+   285→
+   286→  function removePriceCategory(index: number) {
+   287→    setFormData((prev) => ({
+   288→      ...prev,
+   289→      priceCategories: prev.priceCategories.filter((_, i) => i !== index),
+   290→    }))
+   291→  }
+   292→
+   293→  function addShowDate() {
+   294→    setFormData((prev) => ({
+   295→      ...prev,
+   296→      showDates: [...prev.showDates, {
+   297→        date: '',
+   298→        openGate: '',
+   299→        label: `Hari ${prev.showDates.length + 1}`,
+   300→        tempId: `d${prev.showDates.length + 1}`,
+   301→      }],
+   302→    }))
+   303→  }
+   304→
+   305→  function removeShowDate(index: number) {
+   306→    setFormData((prev) => {
+   307→      const removed = prev.showDates[index]
+   308→      const removedTempId = removed.tempId
+   309→      // Also remove this tempId from any price categories that reference it
+   310→      const updatedPriceCats = prev.priceCategories.map(pc => ({
+   311→        ...pc,
+   312→        applicableDayIds: (pc.applicableDayIds || []).filter(id => id !== removedTempId),
+   313→      }))
+   314→      return {
+   315→        ...prev,
+   316→        showDates: prev.showDates.filter((_, i) => i !== index),
+   317→        priceCategories: updatedPriceCats,
+   318→      }
+   319→    })
+   320→  }
+   321→
+   322→  function updateShowDate(index: number, field: string, value: string) {
+   323→    setFormData((prev) => {
+   324→      const updated = [...prev.showDates]
+   325→      updated[index] = { ...updated[index], [field]: value }
+   326→      return { ...prev, showDates: updated }
+   327→    })
+   328→  }
+   329→
+   330→  async function handleSave() {
+   331→    setIsSaving(true)
+   332→    try {
+   333→      const url = editingId ? `/api/admin/events/${editingId}` : '/api/admin/events'
+   334→      const method = editingId ? 'PUT' : 'POST'
+   335→
+   336→      const isFestival = formData.eventMode === 'FESTIVAL'
+   337→
+   338→      // Build a map of showDate tempId → existing DB id (for editing existing events)
+   339→      // For new showDates (no DB id), they'll be saved first then matched to price categories in a second pass
+   340→      // Use Record (plain object) — avoids conflict with lucide-react's `Map` icon import
+   341→      const showDateTempToDbId: Record<string, string> = {}
+   342→      formData.showDates.forEach(sd => {
+   343→        if (sd.id && sd.tempId) showDateTempToDbId[sd.tempId] = sd.id
+   344→      })
+   345→
+   346→      // Festival Mode: filter out empty price categories and serialize applicableDayIds
+   347→      const serializedPriceCategories = formData.priceCategories
+   348→        .filter(pc => pc.name.trim())
+   349→        .map(pc => {
+   350→          if (!isFestival) {
+   351→            // Regular event: no packageType / applicableDayIds
+   352→            const { packageType, applicableDayIds, ...rest } = pc
+   353→            void packageType; void applicableDayIds
+   354→            return rest
+   355→          }
+   356→          // Festival Mode
+   357→          const pkgType = pc.packageType || 'SINGLE'
+   358→          // FULL = all days (null), SINGLE/MULTI = specific days
+   359→          if (pkgType === 'FULL') {
+   360→            const { packageType: _pt, applicableDayIds: _ad, ...rest } = pc
+   361→            void _pt; void _ad
+   362→            return { ...rest, packageType: 'FULL', applicableDayIds: null }
+   363→          }
+   364→          // SINGLE or MULTI: convert tempIds to DB IDs where possible (fallback to tempId for new showDates)
+   365→          const dayIds = (pc.applicableDayIds || []).map(tempId =>
+   366→            showDateTempToDbId[tempId] || tempId
+   367→          )
+   368→          return {
+   369→            name: pc.name,
+   370→            price: pc.price,
+   371→            colorCode: pc.colorCode,
+   372→            packageType: pkgType,
+   373→            applicableDayIds: JSON.stringify(dayIds),
+   374→          }
+   375→        })
+   376→
+   377→      // ─── GA Integration: auto-build gaZoneConfig from price categories ──
+   378→      // For GA events (REGULAR+GA or FESTIVAL), auto-generate one zone per
+   379→      // price category so admin doesn't have to redefine zones in seats page.
+   380→      const effectiveSeatType = isFestival ? 'GENERAL_ADMISSION' : formData.seatType
+   381→      const isGA = effectiveSeatType === 'GENERAL_ADMISSION'
+   382→
+   383→      // Preserve existing zone notes if a zone with the same name already exists
+   384→      let existingZones: Array<{ name?: string; priceCategoryName?: string; notes?: string }> = []
+   385→      try {
+   386→        if (formData.gaZoneConfig) {
+   387→          existingZones = JSON.parse(formData.gaZoneConfig)
+   388→        }
+   389→      } catch { /* ignore */ }
+   390→
+   391→      // Build new gaZoneConfig from price categories (1 zone per category)
+   392→      const gaZoneConfig = isGA
+   393→        ? JSON.stringify(formData.priceCategories
+   394→            .filter(pc => pc.name.trim())
+   395→            .map(pc => {
+   396→              const match = existingZones.find(z =>
+   397→                z.priceCategoryName === pc.name || z.name === pc.name)
+   398→              return {
+   399→                name: pc.name,
+   400→                capacity: pc.capacity ?? 100,
+   401→                price: pc.price,
+   402→                color: pc.colorCode,
+   403→                priceCategoryName: pc.name,
+   404→                notes: match?.notes || '',
+   405→              }
+   406→            }))
+   407→        : undefined
+   408→
+   409→      const payload = {
+   410→        ...formData,
+   411→        // Use first showDate entry as the primary showDate (backward compat)
+   412→        showDate: formData.showDates[0]?.date
+   413→          ? new Date(formData.showDates[0].date).toISOString()
+   414→          : new Date().toISOString(),
+   415→        openGate: formData.showDates[0]?.openGate
+   416→          ? new Date(formData.showDates[0].openGate).toISOString()
+   417→          : null,
+   418→        showDates: formData.showDates
+   419→          .filter((sd) => sd.date)
+   420→          .map(sd => ({ id: sd.id, date: sd.date, openGate: sd.openGate, label: sd.label })),
+   421→        priceCategories: serializedPriceCategories,
+   422→        // Festival Mode
+   423→        eventMode: formData.eventMode,
+   424→        scanCooldownMinutes: formData.scanCooldownMinutes,
+   425→        cooldownEnabled: formData.cooldownEnabled,
+   426→        // Force seatType = GA when FESTIVAL
+   427→        seatType: isFestival ? 'GENERAL_ADMISSION' : formData.seatType,
+   428→        // GA Integration: auto-sync gaZoneConfig from price categories
+   429→        ...(gaZoneConfig !== undefined ? { gaZoneConfig } : {}),
+   430→      }
+   431→
+   432→      const res = await fetch(url, {
+   433→        method,
+   434→        headers: { 'Content-Type': 'application/json' },
+   435→        body: JSON.stringify(payload),
+   436→      })
+   437→
+   438→      if (res.ok) {
+   439→        // For FESTIVAL events with new showDates, we need a second pass to update applicableDayIds
+   440→        // with real DB IDs (since new showDates only got their IDs after the first save)
+   441→        if (isFestival && editingId) {
+   442→          // Refetch event to get actual DB IDs for showDates
+   443→          const refetchRes = await fetch(`/api/admin/events/${editingId}`)
+   444→          if (refetchRes.ok) {
+   445→            const refetchData = await refetchRes.json()
+   446→            const updatedShowDates = refetchData.event.showDates || []
+   447→            // Build new tempId → DB ID map using position in array (since order is preserved by date asc)
+   448→            const newTempToDbMap: Record<string, string> = {}
+   449→            const sortedShowDates = [...formData.showDates].filter(sd => sd.date)
+   450→              .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+   451→            updatedShowDates.forEach((dbSd: { id: string }, idx: number) => {
+   452→              if (sortedShowDates[idx]?.tempId) {
+   453→                newTempToDbMap[sortedShowDates[idx].tempId!] = dbSd.id
+   454→              }
+   455→            })
+   456→            // Check if any price category has applicableDayIds that need updating
+   457→            const needsUpdate = formData.priceCategories.some(pc =>
+   458→              pc.packageType && pc.packageType !== 'FULL' &&
+   459→              (pc.applicableDayIds || []).some(tempId => !showDateTempToDbId[tempId])
+   460→            )
+   461→            if (needsUpdate) {
+   462→              const updatedPriceCats = formData.priceCategories
+   463→                .filter(pc => pc.name.trim())
+   464→                .map(pc => {
+   465→                  if (!pc.packageType || pc.packageType === 'FULL') {
+   466→                    return {
+   467→                      name: pc.name,
+   468→                      price: pc.price,
+   469→                      colorCode: pc.colorCode,
+   470→                      packageType: pc.packageType || null,
+   471→                      applicableDayIds: null,
+   472→                    }
+   473→                  }
+   474→                  const dayIds = (pc.applicableDayIds || []).map(tempId =>
+   475→                    newTempToDbMap[tempId] || showDateTempToDbId[tempId] || tempId
+   476→                  )
+   477→                  return {
+   478→                    name: pc.name,
+   479→                    price: pc.price,
+   480→                    colorCode: pc.colorCode,
+   481→                    packageType: pc.packageType,
+   482→                    applicableDayIds: JSON.stringify(dayIds),
+   483→                  }
+   484→                })
+   485→              // Send second update to fix applicableDayIds
+   486→              await fetch(`/api/admin/events/${editingId}`, {
+   487→                method: 'PUT',
+   488→                headers: { 'Content-Type': 'application/json' },
+   489→                body: JSON.stringify({ priceCategories: updatedPriceCats }),
+   490→              })
+   491→            }
+   492→          }
+   493→        }
+   494→        setIsDialogOpen(false)
+   495→        fetchEvents()
+   496→      } else {
+   497→        const data = await res.json()
+   498→        alert(data.error || 'Gagal menyimpan event')
+   499→      }
+   500→    } catch (err) {
+   501→      console.error('Save error:', err)
+   502→      alert('Terjadi kesalahan')
+   503→    } finally {
+   504→      setIsSaving(false)
+   505→    }
+   506→  }
+   507→
+   508→  const [isSaving, setIsSaving] = useState(false)
+   509→
+   510→  async function handleDelete(id: string) {
+   511→    if (!confirm('Apakah Anda yakin ingin menghapus event ini? Semua data terkait akan dihapus.')) return
+   512→
+   513→    try {
+   514→      const res = await fetch(`/api/admin/events/${id}`, { method: 'DELETE' })
+   515→      if (res.ok) {
+   516→        fetchEvents()
+   517→      }
+   518→    } catch (err) {
+   519→      console.error('Delete error:', err)
+   520→    }
+   521→  }
+   522→
+   523→  function openPublishDialog(event: EventData) {
+   524→    setPublishEvent(event)
+   525→    setIsPublishDialogOpen(true)
+   526→  }
+   527→
+   528→  async function handleTogglePublish() {
+   529→    if (!publishEvent) return
+   530→    setIsTogglingPublish(true)
+   531→    try {
+   532→      const res = await fetch(`/api/admin/events/${publishEvent.id}`, {
+   533→        method: 'PUT',
+   534→        headers: { 'Content-Type': 'application/json' },
+   535→        body: JSON.stringify({ ...publishEvent, isPublished: !publishEvent.isPublished }),
+   536→      })
+   537→      if (res.ok) {
+   538→        fetchEvents()
+   539→        setIsPublishDialogOpen(false)
+   540→      }
+   541→    } catch (err) {
+   542→      console.error('Toggle publish error:', err)
+   543→    } finally {
+   544→      setIsTogglingPublish(false)
+   545→    }
+   546→  }
+   547→
+   548→  // ─── Toggle Completed ────────────────────────────────────────────────
+   549→
+   550→  async function handleToggleComplete(event: EventData) {
+   551→    const newCompleted = !event.isCompleted
+   552→    const confirmed = confirm(
+   553→      newCompleted
+   554→        ? `Tandai "${event.title}" sebagai SELESAI?\n\nTiket tidak bisa dibeli lagi, tapi guest bisa memberikan review.`
+   555→        : `Buka kembali "${event.title}"?\n\nEvent akan bisa dibeli tiketnya lagi.`
+   556→    )
+   557→    if (!confirmed) return
+   558→
+   559→    try {
+   560→      const res = await fetch(`/api/admin/events/${event.id}`, {
+   561→        method: 'PUT',
+   562→        headers: { 'Content-Type': 'application/json' },
+   563→        body: JSON.stringify({ isCompleted: newCompleted }),
+   564→      })
+   565→      if (res.ok) {
+   566→        fetchEvents()
+   567→      } else {
+   568→        const data = await res.json()
+   569→        alert(data.error || 'Gagal mengubah status')
+   570→      }
+   571→    } catch (err) {
+   572→      console.error('Toggle complete error:', err)
+   573→      alert('Terjadi kesalahan')
+   574→    }
+   575→  }
+   576→
+   577→  // ─── Queue Management ────────────────────────────────────────────────
+   578→
+   579→  async function openQueueDialog(eventId: string, eventTitle: string) {
+   580→    setQueueEventId(eventId)
+   581→    setQueueEventTitle(eventTitle)
+   582→    setIsQueueDialogOpen(true)
+   583→    setIsLoadingQueue(true)
+   584→
+   585→    try {
+   586→      const res = await fetch(`/api/events/${eventId}/queue/configure`, { credentials: 'include' })
+   587→      if (res.ok) {
+   588→        const data = await res.json()
+   589→        setQueueEnabled(data.enabled)
+   590→        setQueueMaxConcurrent(data.maxConcurrent)
+   591→        setQueueStats({
+   592→          activeUsers: data.activeUsers,
+   593→          waitingUsers: data.waitingUsers,
+   594→          expiredUsers: data.expiredUsers,
+   595→        })
+   596→      }
+   597→    } catch (err) {
+   598→      console.error('Failed to fetch queue config:', err)
+   599→    } finally {
+   600→      setIsLoadingQueue(false)
+   601→    }
+   602→  }
+   603→
+   604→  async function handleSaveQueue() {
+   605→    if (!queueEventId) return
+   606→    setIsSavingQueue(true)
+   607→
+   608→    try {
+   609→      const res = await fetch(`/api/events/${queueEventId}/queue/configure`, {
+   610→        method: 'PUT',
+   611→        headers: { 'Content-Type': 'application/json' },
+   612→        credentials: 'include',
+   613→        body: JSON.stringify({ enabled: queueEnabled, maxConcurrent: queueMaxConcurrent }),
+   614→      })
+   615→
+   616→      if (res.ok) {
+   617→        const data = await res.json()
+   618→        setQueueEnabled(data.enabled)
+   619→        setQueueStats({
+   620→          activeUsers: data.activeUsers,
+   621→          waitingUsers: data.waitingUsers,
+   622→        })
+   623→      } else {
+   624→        const data = await res.json()
+   625→        alert(data.error || 'Gagal menyimpan konfigurasi queue')
+   626→      }
+   627→    } catch (err) {
+   628→      console.error('Save queue error:', err)
+   629→      alert('Terjadi kesalahan')
+   630→    } finally {
+   631→      setIsSavingQueue(false)
+   632→    }
+   633→  }
+   634→
+   635→  // ─── Generate Seats from Seat Map ────────────────────────────────────
+   636→
+   637→  function openGenerateDialog(eventId: string, eventTitle: string, currentSeatMapId: string | null) {
+   638→    setGenEventId(eventId)
+   639→    setGenEventTitle(eventTitle)
+   640→    setSelectedSeatMapId(currentSeatMapId || '')
+   641→    setIsGenDialogOpen(true)
+   642→
+   643→    // Fetch available seat maps
+   644→    setIsLoadingMaps(true)
+   645→    fetch('/api/admin/seat-maps')
+   646→      .then((res) => res.ok ? res.json() : { seatMaps: [] })
+   647→      .then((data) => setSeatMaps(data.seatMaps || []))
+   648→      .catch(() => setSeatMaps([]))
+   649→      .finally(() => setIsLoadingMaps(false))
+   650→  }
+   651→
+   652→  async function handleGenerateSeats() {
+   653→    if (!genEventId || !selectedSeatMapId) return
+   654→
+   655→    // If event already has seats, confirm deletion first
+   656→    const currentSeats = genEvent?.seatSummary?.total || 0
+   657→    if (currentSeats > 0) {
+   658→      const confirmed = confirm(
+   659→        `Event ini sudah punya ${currentSeats} kursi.\n\nKursi lama akan dihapus dan diganti dengan yang baru dari seat map yang dipilih.\nLanjutkan?`
+   660→      )
+   661→      if (!confirmed) return
+   662→    }
+   663→
+   664→    setIsGeneratingSeats(true)
+   665→    try {
+   666→      // Delete existing seats first if any
+   667→      if (currentSeats > 0) {
+   668→        const delRes = await fetch(`/api/admin/events/${genEventId}/seats`, { method: 'DELETE' })
+   669→        if (!delRes.ok) {
+   670→          const delData = await delRes.json()
+   671→          alert(delData.error || 'Gagal menghapus kursi lama')
+   672→          setIsGeneratingSeats(false)
+   673→          return
+   674→        }
+   675→      }
+   676→
+   677→      const res = await fetch(`/api/admin/events/${genEventId}/generate-seats`, {
+   678→        method: 'POST',
+   679→        headers: { 'Content-Type': 'application/json' },
+   680→        body: JSON.stringify({ seatMapId: selectedSeatMapId }),
+   681→      })
+   682→
+   683→      if (res.ok) {
+   684→        const data = await res.json()
+   685→        alert(`${data.message}`)
+   686→        setIsGenDialogOpen(false)
+   687→        fetchEvents()
+   688→      } else {
+   689→        const data = await res.json()
+   690→        alert(data.error || 'Gagal generate kursi')
+   691→      }
+   692→    } catch (err) {
+   693→      console.error('Generate seats error:', err)
+   694→      alert('Terjadi kesalahan')
+   695→    } finally {
+   696→      setIsGeneratingSeats(false)
+   697→    }
+   698→  }
+   699→
+   700→  // ─── Get selected seat map info ──────────────────────────────────────
+   701→
+   702→  const selectedMap = seatMaps.find((m) => m.id === selectedSeatMapId)
+   703→  const genEvent = events.find((e) => e.id === genEventId)
+   704→
+   705→  return (
+   706→    <div className="space-y-6">
+   707→      {/* Header */}
+   708→      <div className="flex items-center justify-between">
+   709→        <div>
+   710→          <h1 className="font-serif text-2xl font-bold text-charcoal">Events</h1>
+   711→          <p className="text-sm text-muted-foreground mt-1">Kelola pertunjukan teater</p>
+   712→        </div>
+   713→        <Button onClick={openCreateDialog} className="bg-charcoal hover:bg-charcoal/90 text-gold">
+   714→          <Plus className="w-4 h-4 mr-2" />
+   715→          Buat Event
+   716→        </Button>
+   717→      </div>
+   718→
+   719→      {/* Events Table */}
+   720→      <Card className="border-border/50">
+   721→        <CardContent className="p-0">
+   722→          {isLoading ? (
+   723→            <div className="flex items-center justify-center py-12">
+   724→              <Loader2 className="w-6 h-6 text-gold animate-spin" />
+   725→            </div>
+   726→          ) : fetchError ? (
+   727→            <div className="text-center py-12">
+   728→              <p className="text-destructive text-sm font-medium">{fetchError}</p>
+   729→              <Button onClick={fetchEvents} variant="outline" size="sm" className="mt-4">
+   730→                Coba Lagi
+   731→              </Button>
+   732→            </div>
+   733→          ) : events.length === 0 ? (
+   734→            <div className="text-center py-12">
+   735→              <p className="text-muted-foreground text-sm">Belum ada event</p>
+   736→              <Button onClick={openCreateDialog} variant="outline" size="sm" className="mt-4">
+   737→                <Plus className="w-3 h-3 mr-1" />
+   738→                Buat Event Pertama
+   739→              </Button>
+   740→            </div>
+   741→          ) : (
+   742→            <Table>
+   743→              <TableHeader>
+   744→                <TableRow>
+   745→                  <TableHead className="text-xs">Judul</TableHead>
+   746→                  <TableHead className="text-xs">Seat Map</TableHead>
+   747→                  <TableHead className="text-xs">Tanggal</TableHead>
+   748→                  <TableHead className="text-xs">Kursi</TableHead>
+   749→                  <TableHead className="text-xs">Status</TableHead>
+   750→                  <TableHead className="text-xs text-right">Aksi</TableHead>
+   751→                </TableRow>
+   752→              </TableHeader>
+   753→              <TableBody>
+   754→                {events.map((event) => (
+   755→                  <TableRow key={event.id}>
+   756→                    <TableCell>
+   757→                      <Link href={`/events/${event.id}`} className="font-medium text-charcoal hover:text-gold transition-colors">
+   758→                        {event.title}
+   759→                      </Link>
+   760→                      <div className="flex items-center gap-2 mt-0.5">
+   761→                        <p className="text-xs text-muted-foreground">{event.location}</p>
+   762→                        {event.eventMode === 'FESTIVAL' && (
+   763→                          <Badge variant="secondary" className="text-[9px] bg-gold/15 text-gold border-gold/30 px-1.5 py-0 h-4">
+   764→                            🎪 Festival
+   765→                          </Badge>
+   766→                        )}
+   767→                      </div>
+   768→                    </TableCell>
+   769→                    <TableCell>
+   770→                      {event.seatMapInfo ? (
+   771→                        <div className="flex flex-col gap-0.5">
+   772→                          <span className="text-xs font-medium text-charcoal">{event.seatMapInfo.name}</span>
+   773→                          <Badge
+   774→                            variant="secondary"
+   775→                            className={`text-[10px] w-fit ${
+   776→                              event.seatMapInfo.seatType === 'NUMBERED'
+   777→                                ? 'bg-blue-500/10 text-blue-600'
+   778→                                : event.seatMapInfo.seatType === 'PIANO_ROLL'
+   779→                                ? 'bg-purple-500/10 text-purple-600'
+   780→                                : 'bg-success/10 text-success'
+   781→                            }`}
+   782→                          >
+   783→                            {event.seatMapInfo.seatType === 'NUMBERED' ? 'Kursi Nomor' : event.seatMapInfo.seatType === 'PIANO_ROLL' ? 'Piano Roll' : 'Bebas Duduk'}
+   784→                          </Badge>
+   785→                        </div>
+   786→                      ) : event.seatSummary && event.seatSummary.total > 0 ? (
+   787→                        <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700 border-emerald-200">
+   788→                          <CheckCircle2 className="w-3 h-3 mr-1" />
+   789→                          {event.seatSummary.total} kursi
+   790→                        </Badge>
+   791→                      ) : (
+   792→                        <Badge variant="outline" className="text-xs text-muted-foreground">
+   793→                          Belum generate
+   794→                        </Badge>
+   795→                      )}
+   796→                    </TableCell>
+   797→                    <TableCell className="text-xs text-muted-foreground">
+   798→                      {event.showDates && event.showDates.length > 1 ? (
+   799→                        <div className="flex flex-col gap-0.5">
+   800→                          <span>{formatShortDate(event.showDate)}</span>
+   801→                          <Badge variant="secondary" className="text-[9px] bg-gold/10 text-gold-dark w-fit">Multi-hari</Badge>
+   802→                        </div>
+   803→                      ) : (
+   804→                        formatShortDate(event.showDate)
+   805→                      )}
+   806→                    </TableCell>
+   807→                    <TableCell>
+   808→                      {event.seatSummary && event.seatSummary.total > 0 && (
+   809→                        <span className="text-xs text-muted-foreground">
+   810→                          {event.seatSummary.available}/{event.seatSummary.total}
+   811→                        </span>
+   812→                      )}
+   813→                    </TableCell>
+   814→                    <TableCell>
+   815→                      <div className="flex flex-col gap-1">
+   816→                        <Badge
+   817→                          variant="secondary"
+   818→                          className={`text-xs ${event.isPublished ? 'bg-success/10 text-success' : 'bg-muted text-muted-foreground'}`}
+   819→                        >
+   820→                          {event.isPublished ? 'Published' : 'Draft'}
+   821→                        </Badge>
+   822→                        {event.isCompleted && (
+   823→                          <Badge variant="secondary" className="text-xs bg-emerald-500/10 text-emerald-700">
+   824→                            <CheckCircle2 className="w-3 h-3 mr-1" />
+   825→                            Selesai
+   826→                          </Badge>
+   827→                        )}
+   828→                        {event.isCompleted && event.reviewStats && event.reviewStats.total > 0 && (
+   829→                          <Badge variant="secondary" className="text-xs bg-gold/10 text-gold-dark">
+   830→                            <Star className="w-3 h-3 mr-1" />
+   831→                            {event.reviewStats.average} ({event.reviewStats.total})
+   832→                          </Badge>
+   833→                        )}
+   834→                      </div>
+   835→                    </TableCell>
+   836→                    <TableCell>
+   837→                      <div className="flex items-center justify-end gap-1">
+   838→                        <Button
+   839→                          variant="ghost"
+   840→                          size="icon"
+   841→                          className="h-8 w-8"
+   842→                          asChild
+   843→                          title="Seat Editor"
+   844→                        >
+   845→                          <Link href={`/admin/events/${event.id}/seats`}>
+   846→                            <LayoutGrid className="w-3.5 h-3.5" />
+   847→                          </Link>
+   848→                        </Button>
+   849→                        <Button
+   850→                          variant="ghost"
+   851→                          size="icon"
+   852→                          className={cn(
+   853→                            'h-8 w-8',
+   854→                            event.seatSummary && event.seatSummary.total > 0
+   855→                              ? 'text-amber-500 hover:text-amber-600'
+   856→                              : 'text-gold'
+   857→                          )}
+   858→                          onClick={() => openGenerateDialog(event.id, event.title, event.seatMapId)}
+   859→                          title={
+   860→                            event.seatSummary && event.seatSummary.total > 0
+   861→                              ? 'Regenerate Kursi (hapus & ganti)'
+   862→                              : 'Generate Kursi dari Seat Map'
+   863→                          }
+   864→                        >
+   865→                          <Map className="w-3.5 h-3.5" />
+   866→                        </Button>
+   867→                        <Button
+   868→                          variant="ghost"
+   869→                          size="icon"
+   870→                          className="h-8 w-8"
+   871→                          onClick={() => openPublishDialog(event)}
+   872→                          title={event.isPublished ? 'Unpublish' : 'Publish'}
+   873→                        >
+   874→                          {event.isPublished ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+   875→                        </Button>
+   876→                        <Button
+   877→                          variant="ghost"
+   878→                          size="icon"
+   879→                          className={cn(
+   880→                            'h-8 w-8',
+   881→                            event.isCompleted
+   882→                              ? 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50'
+   883→                              : 'text-muted-foreground hover:text-charcoal'
+   884→                          )}
+   885→                          onClick={() => handleToggleComplete(event)}
+   886→                          title={event.isCompleted ? 'Buka Kembali (Reopen)' : 'Tandai Selesai'}
+   887→                        >
+   888→                          {event.isCompleted ? <RotateCcw className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+   889→                        </Button>
+   890→                        <Button
+   891→                          variant="ghost"
+   892→                          size="icon"
+   893→                          className="h-8 w-8"
+   894→                          asChild
+   895→                          title="Edit Event"
+   896→                        >
+   897→                          <Link href={`/admin/events/${event.id}`}>
+   898→                            <Edit className="w-3.5 h-3.5" />
+   899→                          </Link>
+   900→                        </Button>
+   901→                        <Button
+   902→                          variant="ghost"
+   903→                          size="icon"
+   904→                          className={cn(
+   905→                            'h-8 w-8',
+   906→                            queueEventId === event.id && queueEnabled
+   907→                              ? 'text-gold'
+   908→                              : 'text-muted-foreground'
+   909→                          )}
+   910→                          onClick={() => openQueueDialog(event.id, event.title)}
+   911→                          title="Queue Settings"
+   912→                        >
+   913→                          <Users className="w-3.5 h-3.5" />
+   914→                        </Button>
+   915→                        <Button
+   916→                          variant="ghost"
+   917→                          size="icon"
+   918→                          className="h-8 w-8 text-danger"
+   919→                          onClick={() => handleDelete(event.id)}
+   920→                          title="Delete"
+   921→                        >
+   922→                          <Trash2 className="w-3.5 h-3.5" />
+   923→                        </Button>
+   924→                      </div>
+   925→                    </TableCell>
+   926→                  </TableRow>
+   927→                ))}
+   928→              </TableBody>
+   929→            </Table>
+   930→          )}
+   931→        </CardContent>
+   932→      </Card>
+   933→
+   934→      {/* Create/Edit Event Dialog */}
+   935→      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+   936→        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+   937→          <DialogHeader>
+   938→            <DialogTitle className="font-serif text-lg">
+   939→              {editingId ? 'Edit Event' : 'Buat Event Baru'}
+   940→            </DialogTitle>
+   941→          </DialogHeader>
+   942→
+   943→          <div className="space-y-4 py-4">
+   944→            {/* Title */}
+   945→            <div className="space-y-2">
+   946→              <Label className="text-sm font-medium">Judul Event *</Label>
+   947→              <Input
+   948→                value={formData.title}
+   949→                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+   950→                placeholder="Contoh: Hamlet - Pertunjukan Spesial"
+   951→              />
+   952→            </div>
+   953→
+   954→            {/* ── FESTIVAL MODE SELECTOR ── */}
+   955→            <div className="space-y-2">
+   956→              <Label className="text-sm font-medium">Mode Event</Label>
+   957→              <div className="grid grid-cols-2 gap-3">
+   958→                <button
+   959→                  type="button"
+   960→                  onClick={() => setFormData({
+   961→                    ...formData,
+   962→                    eventMode: 'REGULAR',
+   963→                    // Reset festival fields when switching to REGULAR
+   964→                    seatType: formData.seatType === 'GENERAL_ADMISSION' ? 'NUMBERED' : formData.seatType,
+   965→                  })}
+   966→                  className={`text-left p-3 rounded-lg border-2 transition-all ${
+   967→                    formData.eventMode === 'REGULAR'
+   968→                      ? 'border-gold bg-gold/5'
+   969→                      : 'border-border/50 hover:border-gold/30'
+   970→                  }`}
+   971→                >
+   972→                  <div className="flex items-center gap-2 mb-1">
+   973→                    <span className="text-base">🎭</span>
+   974→                    <span className="text-sm font-semibold text-charcoal">Regular</span>
+   975→                  </div>
+   976→                  <p className="text-[11px] text-muted-foreground">Single show. Numbered/GA seating. Untuk pertunjukan teater biasa.</p>
+   977→                </button>
+   978→                <button
+   979→                  type="button"
+   980→                  onClick={() => setFormData({
+   981→                    ...formData,
+   982→                    eventMode: 'FESTIVAL',
+   983→                    // Force GA when FESTIVAL
+   984→                    seatType: 'GENERAL_ADMISSION',
+   985→                  })}
+   986→                  className={`text-left p-3 rounded-lg border-2 transition-all ${
+   987→                    formData.eventMode === 'FESTIVAL'
+   988→                      ? 'border-gold bg-gold/5'
+   989→                      : 'border-border/50 hover:border-gold/30'
+   990→                  }`}
+   991→                >
+   992→                  <div className="flex items-center gap-2 mb-1">
+   993→                    <span className="text-base">🎪</span>
+   994→                    <span className="text-sm font-semibold text-charcoal">Festival</span>
+   995→                  </div>
+   996→                  <p className="text-[11px] text-muted-foreground">Multi-day pass (1/2/4 hari). GA only. Scan cooldown anti-share tiket.</p>
+   997→                </button>
+   998→              </div>
+   999→            </div>
+  1000→
+  1001→            {/* ── FESTIVAL SETTINGS (only show when FESTIVAL) ── */}
+  1002→            {formData.eventMode === 'FESTIVAL' && (
+  1003→              <div className="rounded-lg border-2 border-gold/30 bg-gold/5 p-4 space-y-3">
+  1004→                <div className="flex items-center gap-2 mb-2">
+  1005→                  <span className="text-sm font-semibold text-charcoal">🎪 Pengaturan Festival</span>
+  1006→                  <Badge variant="secondary" className="text-[10px] bg-gold/20 text-gold border-gold/30">Festival Mode</Badge>
+  1007→                </div>
+  1008→
+  1009→                {/* Cooldown Toggle */}
+  1010→                <div className="flex items-center justify-between">
+  1011→                  <div>
+  1012→                    <p className="text-sm font-medium text-charcoal">Aktifkan Cooldown Scan</p>
+  1013→                    <p className="text-xs text-muted-foreground mt-0.5">
+  1014→                      Setelah scan valid, tiket di-lock sementara untuk cegah share tiket antar penonton
+  1015→                    </p>
+  1016→                  </div>
+  1017→                  <Switch
+  1018→                    checked={formData.cooldownEnabled}
+  1019→                    onCheckedChange={(checked) => setFormData({ ...formData, cooldownEnabled: checked })}
+  1020→                  />
+  1021→                </div>
+  1022→
+  1023→                {/* Cooldown Minutes */}
+  1024→                {formData.cooldownEnabled && (
+  1025→                  <div className="space-y-1.5">
+  1026→                    <Label className="text-xs text-muted-foreground">Durasi Cooldown (menit)</Label>
+  1027→                    <Input
+  1028→                      type="number"
+  1029→                      min={1}
+  1030→                      max={240}
+  1031→                      value={formData.scanCooldownMinutes}
+  1032→                      onChange={(e) => setFormData({
+  1033→                        ...formData,
+  1034→                        scanCooldownMinutes: Math.max(1, Number(e.target.value) || 30),
+  1035→                      })}
+  1036→                      className="h-9 text-sm max-w-[140px]"
+  1037→                    />
+  1038→                    <p className="text-[11px] text-muted-foreground">
+  1039→                      Default 30 menit. Usher bisa reset manual kapan saja. Contoh: 30 menit cukup untuk cegah share, tapi tetap fleksibel untuk re-entry antar pertunjukan.
+  1040→                    </p>
+  1041→                  </div>
+  1042→                )}
+  1043→
+  1044→                <div className="text-[11px] text-muted-foreground bg-white/50 rounded p-2 border border-gold/20">
+  1045→                  💡 <span className="font-medium">Tips setup Festival:</span><br />
+  1046→                  • Tambah minimal 2 hari pertunjukan (gunakan tombol "Tambah Hari")<br />
+  1047→                  • Bikin price category per paket: 1-Day, 2-Day, Full Pass<br />
+  1048→                  • Setiap paket pilih hari mana saja yang berlaku<br />
+  1049→                  • Seating otomatis di-lock ke General Admission (GA)
+  1050→                </div>
+  1051→              </div>
+  1052→            )}
+  1053→
+  1054→            {/* Category & Location */}
+  1055→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+  1056→              <div className="space-y-2">
+  1057→                <Label className="text-sm font-medium">Kategori</Label>
+  1058→                <Input
+  1059→                  value={formData.category}
+  1060→                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+  1061→                  placeholder="Teater"
+  1062→                />
+  1063→              </div>
+  1064→              <div className="space-y-2">
+  1065→                <Label className="text-sm font-medium">Lokasi *</Label>
+  1066→                <Input
+  1067→                  value={formData.location}
+  1068→                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+  1069→                  placeholder="Teateran, Yogyakarta"
+  1070→                />
+  1071→              </div>
+  1072→            </div>
+  1073→
+  1074→            {/* Seat Type */}
+  1075→            <div className="space-y-2">
+  1076→              <Label className="text-sm font-medium flex items-center gap-2">
+  1077→                Tipe Kursi
+  1078→                {formData.eventMode === 'FESTIVAL' && (
+  1079→                  <Badge variant="secondary" className="text-[10px] bg-amber-100 text-amber-700 border-amber-200">
+  1080→                    🔒 Locked to GA (Festival Mode)
+  1081→                  </Badge>
+  1082→                )}
+  1083→              </Label>
+  1084→              <Select
+  1085→                value={formData.seatType}
+  1086→                onValueChange={(val) => setFormData({ ...formData, seatType: val })}
+  1087→                disabled={formData.eventMode === 'FESTIVAL'}
+  1088→              >
+  1089→                <SelectTrigger className={`bg-white ${formData.eventMode === 'FESTIVAL' ? 'opacity-60 cursor-not-allowed' : ''}`}>
+  1090→                  <SelectValue placeholder="Pilih tipe kursi" />
+  1091→                </SelectTrigger>
+  1092→                <SelectContent>
+  1093→                  <SelectItem value="NUMBERED" disabled={formData.eventMode === 'FESTIVAL'}>
+  1094→                    <div className="flex items-center gap-2">
+  1095→                      <LayoutGrid className="w-3.5 h-3.5" />
+  1096→                      <span>Kursi Nomor (Numbered) {formData.eventMode === 'FESTIVAL' && '— Tidak tersedia di Festival Mode'}</span>
+  1097→                    </div>
+  1098→                  </SelectItem>
+  1099→                  <SelectItem value="GENERAL_ADMISSION">
+  1100→                    <div className="flex items-center gap-2">
+  1101→                      <Users className="w-3.5 h-3.5" />
+  1102→                      <span>General Admission (GA)</span>
+  1103→                    </div>
+  1104→                  </SelectItem>
+  1105→                </SelectContent>
+  1106→              </Select>
+  1107→              <p className="text-xs text-muted-foreground">
+  1108→                {formData.eventMode === 'FESTIVAL'
+  1109→                  ? '🔒 Festival Mode hanya support General Admission. Numbered seating tidak tersedia untuk event multi-day pass.'
+  1110→                  : formData.seatType === 'GENERAL_ADMISSION'
+  1111→                    ? 'GA: Pengunjung memilih zona, bukan kursi individu. Upload layout gambar & definisi zona di halaman Seat Editor.'
+  1112→                    : 'Kursi Nomor: Pengunjung memilih kursi individual dari seat map.'}
+  1113→              </p>
+  1114→            </div>
+  1115→
+  1116→            {/* Dates */}
+  1117→            <div className="space-y-3">
+  1118→              <div className="flex items-center justify-between">
+  1119→                <Label className="text-sm font-medium">Jadwal Pertunjukan *</Label>
+  1120→                <Button variant="outline" size="sm" onClick={addShowDate} className="text-xs h-7">
+  1121→                  <Plus className="w-3 h-3 mr-1" />
+  1122→                  Tambah Hari
+  1123→                </Button>
+  1124→              </div>
+  1125→              {formData.showDates.map((sd, idx) => (
+  1126→                <div key={idx} className="relative rounded-lg border border-border/60 p-3 space-y-2 bg-muted/20">
+  1127→                  <div className="flex items-center justify-between">
+  1128→                    <span className="text-xs font-medium text-muted-foreground">
+  1129→                      {formData.showDates.length > 1 ? `Hari ${idx + 1}` : 'Tanggal & Waktu'}
+  1130→                    </span>
+  1131→                    {idx > 0 && (
+  1132→                      <Button variant="ghost" size="sm" onClick={() => removeShowDate(idx)} className="h-6 w-6 p-0 text-danger hover:text-danger hover:bg-danger/10">
+  1133→                        <X className="w-3.5 h-3.5" />
+  1134→                      </Button>
+  1135→                    )}
+  1136→                  </div>
+  1137→                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+  1138→                    <div className="space-y-1">
+  1139→                      <Label className="text-xs text-muted-foreground">Label</Label>
+  1140→                      <Input
+  1141→                        value={sd.label}
+  1142→                        onChange={(e) => updateShowDate(idx, 'label', e.target.value)}
+  1143→                        placeholder="contoh: Premiere, Gala..."
+  1144→                        className="h-8 text-sm"
+  1145→                      />
+  1146→                    </div>
+  1147→                    <div className="space-y-1">
+  1148→                      <Label className="text-xs text-muted-foreground">Buka Pintu (WIB)</Label>
+  1149→                      <Input
+  1150→                        type="datetime-local"
+  1151→                        value={sd.openGate}
+  1152→                        onChange={(e) => updateShowDate(idx, 'openGate', e.target.value)}
+  1153→                        className="h-8 text-sm"
+  1154→                      />
+  1155→                    </div>
+  1156→                  </div>
+  1157→                  <div className="space-y-1">
+  1158→                    <Label className="text-xs text-muted-foreground">Tanggal & Waktu Tayang (WIB) *</Label>
+  1159→                    <Input
+  1160→                      type="datetime-local"
+  1161→                      value={sd.date}
+  1162→                      onChange={(e) => updateShowDate(idx, 'date', e.target.value)}
+  1163→                      className="h-8 text-sm"
+  1164→                    />
+  1165→                  </div>
+  1166→                </div>
+  1167→              ))}
+  1168→            </div>
+  1169→
+  1170→            {/* Poster URL */}
+  1171→            <div className="space-y-2">
+  1172→              <Label className="text-sm font-medium">URL Poster (opsional)</Label>
+  1173→              <Input
+  1174→                value={formData.posterUrl}
+  1175→                onChange={(e) => setFormData({ ...formData, posterUrl: e.target.value })}
+  1176→                placeholder="https://example.com/poster.jpg"
+  1177→              />
+  1178→            </div>
+  1179→
+  1180→            {/* Teaser Video URL */}
+  1181→            <div className="space-y-2">
+  1182→              <Label className="text-sm font-medium flex items-center gap-2">
+  1183→                <Video className="w-4 h-4 text-gold" />
+  1184→                URL Video Teaser (opsional)
+  1185→              </Label>
+  1186→              <Input
+  1187→                value={formData.teaserVideoUrl}
+  1188→                onChange={(e) => setFormData({ ...formData, teaserVideoUrl: e.target.value })}
+  1189→                placeholder="https://www.youtube.com/watch?v=..."
+  1190→              />
+  1191→              <p className="text-xs text-muted-foreground">Mendukung YouTube dan Vimeo. Video akan ditampilkan di halaman publik event.</p>
+  1192→            </div>
+  1193→
+  1194→            {/* Synopsis */}
+  1195→            <div className="space-y-2">
+  1196→              <Label className="text-sm font-medium">Sinopsis</Label>
+  1197→              <Textarea
+  1198→                value={formData.synopsis}
+  1199→                onChange={(e) => setFormData({ ...formData, synopsis: e.target.value })}
+  1200→                placeholder="Deskripsi singkat pertunjukan..."
+  1201→                rows={4}
+  1202→              />
+  1203→            </div>
+  1204→
+  1205→            {/* Admin Fee */}
+  1206→            <div className="space-y-2">
+  1207→              <Label className="text-sm font-medium flex items-center gap-2">
+  1208→                <Banknote className="w-4 h-4 text-gold" />
+  1209→                Biaya Admin per Tiket (Rp)
+  1210→              </Label>
+  1211→              <Input
+  1212→                type="number"
+  1213→                value={formData.adminFee}
+  1214→                onChange={(e) => setFormData({ ...formData, adminFee: Number(e.target.value) || 0 })}
+  1215→                placeholder="0"
+  1216→                className="bg-white"
+  1217→              />
+  1218→              <p className="text-xs text-muted-foreground">Biaya tambahan per tiket. Set 0 jika tidak ada biaya admin.</p>
+  1219→            </div>
+  1220→
+  1221→            <Separator />
+  1222→
+  1223→            {/* Price Categories */}
+  1224→            <div className="space-y-3">
+  1225→              <div className="flex items-center justify-between">
+  1226→                <Label className="text-sm font-medium">
+  1227→                  Kategori Harga
+  1228→                  {formData.eventMode === 'FESTIVAL' && (
+  1229→                    <Badge variant="secondary" className="ml-2 text-[10px] bg-gold/20 text-gold border-gold/30">
+  1230→                      Paket Festival
+  1231→                    </Badge>
+  1232→                  )}
+  1233→                </Label>
+  1234→                <Button variant="outline" size="sm" onClick={addPriceCategory}>
+  1235→                  <Plus className="w-3 h-3 mr-1" />
+  1236→                  Tambah
+  1237→                </Button>
+  1238→              </div>
+  1239→
+  1240→              {formData.eventMode === 'FESTIVAL' && (
+  1241→                <div className="text-[11px] text-muted-foreground bg-gold/5 border border-gold/20 rounded p-2">
+  1242→                  🎪 <span className="font-medium">Paket Festival:</span> Setiap kategori = 1 paket tiket.
+  1243→                  Pilih <span className="font-medium">Single</span> untuk 1 hari, <span className="font-medium">Multi</span> untuk beberapa hari (e.g., 2-day pass Hari 1+2),
+  1244→                  atau <span className="font-medium">Full Pass</span> untuk akses semua hari.
+  1245→                </div>
+  1246→              )}
+  1247→
+  1248→              {/* GA Integration hint */}
+  1249→              {(formData.seatType === 'GENERAL_ADMISSION' || formData.eventMode === 'FESTIVAL') && (
+  1250→                <div className="text-[11px] text-muted-foreground bg-emerald-50 border border-emerald-200 rounded p-2 flex items-start gap-1.5">
+  1251→                  <Ticket className="w-3 h-3 text-emerald-600 mt-0.5 shrink-0" />
+  1252→                  <span>
+  1253→                    <span className="font-medium text-emerald-700">Auto GA Zona:</span> Isi kapasitas per kategori — zona GA akan otomatis ter-generate di halaman Seat Editor saat event disimpan. Tidak perlu input zona manual lagi.
+  1254→                  </span>
+  1255→                </div>
+  1256→              )}
+  1257→
+  1258→              {formData.priceCategories.map((pc, index) => (
+  1259→                <div key={index} className="rounded-lg border border-border/60 p-3 space-y-2 bg-muted/20">
+  1260→                  <div className="flex items-end gap-2">
+  1261→                    <div className="flex-1">
+  1262→                      <Label className="text-xs text-muted-foreground">Nama</Label>
+  1263→                      <Input
+  1264→                        value={pc.name}
+  1265→                        onChange={(e) => updatePriceCategory(index, 'name', e.target.value)}
+  1266→                        placeholder={formData.eventMode === 'FESTIVAL' ? "Contoh: Day 1, 2-Day Pass, Full 4-Day" : "VIP"}
+  1267→                        className="h-9 text-sm"
+  1268→                      />
+  1269→                    </div>
+  1270→                    <div className="flex-1">
+  1271→                      <Label className="text-xs text-muted-foreground">Harga (Rp)</Label>
+  1272→                      <Input
+  1273→                        type="number"
+  1274→                        value={pc.price}
+  1275→                        onChange={(e) => updatePriceCategory(index, 'price', Number(e.target.value))}
+  1276→                        className="h-9 text-sm"
+  1277→                      />
+  1278→                    </div>
+  1279→                    <div className="w-16">
+  1280→                      <Label className="text-xs text-muted-foreground">Warna</Label>
+  1281→                      <Input
+  1282→                        type="color"
+  1283→                        value={pc.colorCode}
+  1284→                        onChange={(e) => updatePriceCategory(index, 'colorCode', e.target.value)}
+  1285→                        className="h-9 p-1"
+  1286→                      />
+  1287→                    </div>
+  1288→                    <Button
+  1289→                      variant="ghost"
+  1290→                      size="icon"
+  1291→                      className="h-9 w-9 text-danger"
+  1292→                      onClick={() => removePriceCategory(index)}
+  1293→                    >
+  1294→                      <X className="w-3.5 h-3.5" />
+  1295→                    </Button>
+  1296→                  </div>
+  1297→
+  1298→                  {/* GA Integration: Capacity input (only for GA events) */}
+  1299→                  {(formData.seatType === 'GENERAL_ADMISSION' || formData.eventMode === 'FESTIVAL') && (
+  1300→                    <div className="flex items-end gap-2 pt-1">
+  1301→                      <div className="w-40">
+  1302→                        <Label className="text-xs text-muted-foreground flex items-center gap-1">
+  1303→                          <Users className="w-3 h-3" />
+  1304→                          Kapasitas Zona
+  1305→                        </Label>
+  1306→                        <Input
+  1307→                          type="number"
+  1308→                          min={1}
+  1309→                          value={pc.capacity ?? 100}
+  1310→                          onChange={(e) => updatePriceCategory(index, 'capacity', Math.max(1, Number(e.target.value) || 0))}
+  1311→                          className="h-8 text-sm"
+  1312→                        />
+  1313→                      </div>
+  1314→                      <p className="text-[11px] text-muted-foreground pb-2">
+  1315→                        Jumlah slot tersedia untuk kategori ini. Zona GA akan terbentuk otomatis di Seat Editor.
+  1316→                      </p>
+  1317→                    </div>
+  1318→                  )}
+  1319→
+  1320→                  {/* Festival Mode: Package Type + Applicable Days */}
+  1321→                  {formData.eventMode === 'FESTIVAL' && (
+  1322→                    <div className="space-y-2 pt-2 border-t border-border/40">
+  1323→                      <div>
+  1324→                        <Label className="text-xs text-muted-foreground mb-1.5 block">Tipe Paket</Label>
+  1325→                        <div className="grid grid-cols-3 gap-1.5">
+  1326→                          <button
+  1327→                            type="button"
+  1328→                            onClick={() => updatePriceCategory(index, 'packageType', 'SINGLE')}
+  1329→                            className={`text-[11px] px-2 py-1.5 rounded border transition-all ${
+  1330→                              (pc.packageType || 'SINGLE') === 'SINGLE'
+  1331→                                ? 'bg-gold/20 border-gold text-charcoal font-medium'
+  1332→                                : 'bg-white border-border/50 text-muted-foreground hover:border-gold/30'
+  1333→                            }`}
+  1334→                          >
+  1335→                            Single Day
+  1336→                          </button>
+  1337→                          <button
+  1338→                            type="button"
+  1339→                            onClick={() => updatePriceCategory(index, 'packageType', 'MULTI')}
+  1340→                            className={`text-[11px] px-2 py-1.5 rounded border transition-all ${
+  1341→                              pc.packageType === 'MULTI'
+  1342→                                ? 'bg-gold/20 border-gold text-charcoal font-medium'
+  1343→                                : 'bg-white border-border/50 text-muted-foreground hover:border-gold/30'
+  1344→                            }`}
+  1345→                          >
+  1346→                            Multi-Day
+  1347→                          </button>
+  1348→                          <button
+  1349→                            type="button"
+  1350→                            onClick={() => updatePriceCategory(index, 'packageType', 'FULL')}
+  1351→                            className={`text-[11px] px-2 py-1.5 rounded border transition-all ${
+  1352→                              pc.packageType === 'FULL'
+  1353→                                ? 'bg-emerald-100 border-emerald-400 text-emerald-700 font-medium'
+  1354→                                : 'bg-white border-border/50 text-muted-foreground hover:border-emerald-300'
+  1355→                            }`}
+  1356→                          >
+  1357→                            Full Pass
+  1358→                          </button>
+  1359→                        </div>
+  1360→                      </div>
+  1361→
+  1362→                      {/* Applicable Days — only for SINGLE and MULTI */}
+  1363→                      {pc.packageType !== 'FULL' && (
+  1364→                        <div>
+  1365→                          <Label className="text-xs text-muted-foreground mb-1.5 block">
+  1366→                            Hari yang Berlaku {(pc.packageType || 'SINGLE') === 'SINGLE' ? '(pilih 1)' : '(pilih yang sesuai)'}
+  1367→                          </Label>
+  1368→                          {formData.showDates.length === 0 ? (
+  1369→                            <p className="text-[11px] text-muted-foreground italic">Tambahkan jadwal hari pertunjukan dulu di atas ⤴</p>
+  1370→                          ) : (
+  1371→                            <div className="flex flex-wrap gap-1.5">
+  1372→                              {formData.showDates.map((sd, sdIdx) => {
+  1373→                                const tempId = sd.tempId || `d${sdIdx + 1}`
+  1374→                                const isSelected = (pc.applicableDayIds || []).includes(tempId)
+  1375→                                const dayLabel = sd.label || `Hari ${sdIdx + 1}`
+  1376→                                const dateLabel = sd.date ? new Date(sd.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) : '(no date)'
+  1377→                                return (
+  1378→                                  <button
+  1379→                                    key={tempId}
+  1380→                                    type="button"
+  1381→                                    onClick={() => {
+  1382→                                      const current = pc.applicableDayIds || []
+  1383→                                      if (isSelected) {
+  1384→                                        updatePriceCategory(index, 'applicableDayIds', current.filter(id => id !== tempId))
+  1385→                                      } else {
+  1386→                                        updatePriceCategory(index, 'applicableDayIds', [...current, tempId])
+  1387→                                      }
+  1388→                                    }}
+  1389→                                    className={`text-[11px] px-2.5 py-1 rounded-full border transition-all ${
+  1390→                                      isSelected
+  1391→                                        ? 'bg-gold border-gold text-white font-medium'
+  1392→                                        : 'bg-white border-border/50 text-muted-foreground hover:border-gold/40'
+  1393→                                    }`}
+  1394→                                  >
+  1395→                                    {dayLabel} · {dateLabel}
+  1396→                                  </button>
+  1397→                                )
+  1398→                              })}
+  1399→                            </div>
+  1400→                          )}
+  1401→                        </div>
+  1402→                      )}
+  1403→
+  1404→                      {/* Full Pass Info */}
+  1405→                      {pc.packageType === 'FULL' && (
+  1406→                        <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
+  1407→                          ✓ Full Pass — berlaku untuk semua hari pertunjukan ({formData.showDates.length} hari)
+  1408→                        </p>
+  1409→                      )}
+  1410→                    </div>
+  1411→                  )}
+  1412→                </div>
+  1413→              ))}
+  1414→            </div>
+  1415→          </div>
+  1416→
+  1417→          <DialogFooter>
+  1418→            <DialogClose asChild>
+  1419→              <Button variant="outline" className="text-sm">Batal</Button>
+  1420→            </DialogClose>
+  1421→            <Button
+  1422→              onClick={handleSave}
+  1423→              disabled={isSaving || !formData.title || !formData.location || !formData.showDates.some(sd => sd.date)}
+  1424→              className="bg-charcoal hover:bg-charcoal/90 text-gold text-sm"
+  1425→            >
+  1426→              {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+  1427→              {editingId ? 'Simpan Perubahan' : 'Buat Event'}
+  1428→            </Button>
+  1429→          </DialogFooter>
+  1430→        </DialogContent>
+  1431→      </Dialog>
+  1432→
+  1433→      {/* Queue Config Dialog */}
+  1434→      <Dialog open={isQueueDialogOpen} onOpenChange={setIsQueueDialogOpen}>
+  1435→        <DialogContent className="max-w-md">
+  1436→          <DialogHeader>
+  1437→            <DialogTitle className="font-serif text-lg flex items-center gap-2">
+  1438→              <Users className="w-5 h-5 text-gold" />
+  1439→              Virtual Waiting Room
+  1440→            </DialogTitle>
+  1441→          </DialogHeader>
+  1442→
+  1443→          <div className="space-y-4 py-2">
+  1444→            {/* Event info */}
+  1445→            <div className="bg-muted/30 rounded-lg p-3">
+  1446→              <p className="text-xs text-muted-foreground">Event</p>
+  1447→              <p className="text-sm font-medium text-charcoal">{queueEventTitle}</p>
+  1448→            </div>
+  1449→
+  1450→            {/* Toggle */}
+  1451→            <div className="flex items-center justify-between rounded-lg border border-border/60 p-4">
+  1452→              <div>
+  1453→                <p className="text-sm font-medium">Aktifkan Queue</p>
+  1454→                <p className="text-xs text-muted-foreground mt-0.5">
+  1455→                  Batasi jumlah pengguna yang memilih kursi secara bersamaan
+  1456→                </p>
+  1457→              </div>
+  1458→              <Switch
+  1459→                checked={queueEnabled}
+  1460→                onCheckedChange={setQueueEnabled}
+  1461→                disabled={isLoadingQueue}
+  1462→              />
+  1463→            </div>
+  1464→
+  1465→            {/* Max Concurrent */}
+  1466→            {queueEnabled && (
+  1467→              <div className="space-y-2">
+  1468→                <Label className="text-sm font-medium">
+  1469→                  Maks. Pengguna Bersamaan
+  1470→                </Label>
+  1471→                <Input
+  1472→                  type="number"
+  1473→                  min={1}
+  1474→                  max={500}
+  1475→                  value={queueMaxConcurrent}
+  1476→                  onChange={(e) => setQueueMaxConcurrent(Math.max(1, Number(e.target.value) || 1))}
+  1477→                  className="bg-white"
+  1478→                />
+  1479→                <p className="text-xs text-muted-foreground">
+  1480→                  Pengguna baru akan masuk antrian jika sudah ada {queueMaxConcurrent} pengguna aktif. Default: 50
+  1481→                </p>
+  1482→              </div>
+  1483→            )}
+  1484→
+  1485→            {/* Stats */}
+  1486→            {queueEnabled && queueStats && (
+  1487→              <div className="grid grid-cols-2 gap-3">
+  1488→                <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-100">
+  1489→                  <p className="text-xs text-emerald-600 font-medium">Aktif</p>
+  1490→                  <p className="text-xl font-bold text-emerald-700">{queueStats.activeUsers}</p>
+  1491→                  <p className="text-[10px] text-emerald-500">sedang memilih kursi</p>
+  1492→                </div>
+  1493→                <div className="bg-amber-50 rounded-lg p-3 border border-amber-100">
+  1494→                  <p className="text-xs text-amber-600 font-medium">Menunggu</p>
+  1495→                  <p className="text-xl font-bold text-amber-700">{queueStats.waitingUsers}</p>
+  1496→                  <p className="text-[10px] text-amber-500">dalam antrian</p>
+  1497→                </div>
+  1498→              </div>
+  1499→            )}
+  1500→
+  1501→            {/* Info note */}
+  1502→            <div className="bg-gold/5 rounded-lg p-3 border border-gold/10">
+  1503→              <p className="text-xs text-muted-foreground">
+  1504→                <strong className="text-charcoal">Admin bypass:</strong> Admin selalu bisa mengakses pemilihan kursi tanpa antrian.
+  1505→              </p>
+  1506→              <p className="text-xs text-muted-foreground mt-1">
+  1507→                Session pengguna aktif otomatis kadaluarsa setelah 5 menit tanpa aktivitas.
+  1508→              </p>
+  1509→            </div>
+  1510→          </div>
+  1511→
+  1512→          <DialogFooter>
+  1513→            <DialogClose asChild>
+  1514→              <Button variant="outline" className="text-sm">Tutup</Button>
+  1515→            </DialogClose>
+  1516→            <Button
+  1517→              onClick={handleSaveQueue}
+  1518→              disabled={isSavingQueue || isLoadingQueue}
+  1519→              className="bg-charcoal hover:bg-charcoal/90 text-gold text-sm"
+  1520→            >
+  1521→              {isSavingQueue ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+  1522→              Simpan
+  1523→            </Button>
+  1524→          </DialogFooter>
+  1525→        </DialogContent>
+  1526→      </Dialog>
+  1527→
+  1528→      {/* Generate Seats Dialog */}
+  1529→      <Dialog open={isGenDialogOpen} onOpenChange={setIsGenDialogOpen}>
+  1530→        <DialogContent className="max-w-md">
+  1531→          <DialogHeader>
+  1532→            <DialogTitle className="font-serif text-lg flex items-center gap-2">
+  1533→              <Map className="w-5 h-5 text-gold" />
+  1534→              Generate Kursi
+  1535→            </DialogTitle>
+  1536→          </DialogHeader>
+  1537→
+  1538→          <div className="space-y-4 py-2">
+  1539→            {/* Event info */}
+  1540→            <div className="bg-muted/30 rounded-lg p-3">
+  1541→              <p className="text-xs text-muted-foreground">Event</p>
+  1542→              <p className="text-sm font-medium text-charcoal">{genEventTitle}</p>
+  1543→              {genEvent?.seatSummary && genEvent.seatSummary.total > 0 && (
+  1544→                <p className="text-xs text-amber-600 mt-1">
+  1545→                  ⚠️ Kursi lama ({genEvent.seatSummary.total} kursi) akan dihapus dan diganti dengan yang baru.
+  1546→                </p>
+  1547→              )}
+  1548→            </div>
+  1549→
+  1550→            {/* Seat map selector — always show */}
+  1551→            <div className="space-y-2">
+  1552→              <Label className="text-sm font-medium">Pilih Seat Map *</Label>
+  1553→              {isLoadingMaps ? (
+  1554→                <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+  1555→                  <Loader2 className="w-4 h-4 animate-spin text-gold" />
+  1556→                  Memuat seat maps...
+  1557→                </div>
+  1558→              ) : seatMaps.length === 0 ? (
+  1559→                <div className="text-sm text-muted-foreground py-3 text-center bg-muted/30 rounded-lg">
+  1560→                  Belum ada seat map.{' '}
+  1561→                  <Link href="/admin/seat-maps/new/edit" className="text-gold underline" onClick={() => setIsGenDialogOpen(false)}>
+  1562→                    Buat Seat Map dulu
+  1563→                  </Link>
+  1564→                </div>
+  1565→              ) : (
+  1566→                <Select value={selectedSeatMapId} onValueChange={setSelectedSeatMapId}>
+  1567→                  <SelectTrigger className="w-full bg-white">
+  1568→                    <SelectValue placeholder="Pilih seat map..." />
+  1569→                  </SelectTrigger>
+  1570→                  <SelectContent>
+  1571→                    {seatMaps.map((map) => (
+  1572→                      <SelectItem key={map.id} value={map.id}>
+  1573→                        <div className="flex items-center gap-2">
+  1574→                          <Map className="w-3.5 h-3.5 text-gold" />
+  1575→                          <span>{map.name}</span>
+  1576→                          <Badge variant="secondary" className={`text-[10px] ml-auto ${
+  1577→                            map.seatType === 'NUMBERED'
+  1578→                              ? 'bg-blue-500/10 text-blue-600'
+  1579→                              : map.seatType === 'PIANO_ROLL'
+  1580→                              ? 'bg-purple-500/10 text-purple-600'
+  1581→                              : 'bg-success/10 text-success'
+  1582→                          }`}>
+  1583→                            {map.seatType === 'NUMBERED' ? 'Kursi Nomor' : map.seatType === 'PIANO_ROLL' ? 'Piano Roll' : 'Bebas Duduk'}
+  1584→                          </Badge>
+  1585→                        </div>
+  1586→                      </SelectItem>
+  1587→                    ))}
+  1588→                  </SelectContent>
+  1589→                </Select>
+  1590→              )}
+  1591→            </div>
+  1592→
+  1593→            {selectedMap && (
+  1594→              <p className="text-xs text-muted-foreground flex items-center gap-1">
+  1595→                <CheckCircle2 className="w-3 h-3 text-success" />
+  1596→                Seat map: <strong>{selectedMap.name}</strong> ({selectedMap.seatType === 'NUMBERED' ? 'Kursi Nomor' : selectedMap.seatType === 'PIANO_ROLL' ? 'Piano Roll' : 'General Admission'})
+  1597→              </p>
+  1598→            )}
+  1599→
+  1600→            <p className="text-xs text-muted-foreground">
+  1601→              Kursi akan di-generate sesuai layout seat map yang dipilih. Pastikan kategori harga di event cocok dengan section di seat map.
+  1602→            </p>
+  1603→          </div>
+  1604→
+  1605→          <DialogFooter>
+  1606→            <DialogClose asChild>
+  1607→              <Button variant="outline" className="text-sm">Batal</Button>
+  1608→            </DialogClose>
+  1609→            <Button
+  1610→              onClick={handleGenerateSeats}
+  1611→              disabled={isGeneratingSeats || !selectedSeatMapId}
+  1612→              className="bg-charcoal hover:bg-charcoal/90 text-gold text-sm"
+  1613→            >
+  1614→              {isGeneratingSeats ? (
+  1615→                <>
+  1616→                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+  1617→                  Generating...
+  1618→                </>
+  1619→              ) : (
+  1620→                <>
+  1621→                  <LayoutGrid className="w-4 h-4 mr-2" />
+  1622→                  Generate Kursi
+  1623→                </>
+  1624→              )}
+  1625→            </Button>
+  1626→          </DialogFooter>
+  1627→        </DialogContent>
+  1628→      </Dialog>
+  1629→
+  1630→      {/* Publish/Unpublish Confirmation Dialog */}
+  1631→      <AlertDialog open={isPublishDialogOpen} onOpenChange={setIsPublishDialogOpen}>
+  1632→        <AlertDialogContent>
+  1633→          <AlertDialogHeader>
+  1634→            <AlertDialogTitle className="font-serif">
+  1635→              {publishEvent?.isPublished ? 'Unpublish Event?' : 'Publish Event?'}
+  1636→            </AlertDialogTitle>
+  1637→            <AlertDialogDescription>
+  1638→              {publishEvent?.isPublished ? (
+  1639→                <>
+  1640→                  Event <strong>{publishEvent?.title}</strong> akan di-unpublish. Tamu tidak bisa lagi melihat atau membeli tiket event ini. Tiket yang sudah terlanjur dibeli tetap valid.
+  1641→                </>
+  1642→              ) : (
+  1643→                <>
+  1644→                  Event <strong>{publishEvent?.title}</strong> akan dipublish dan dapat dilihat serta dibeli tiketnya oleh tamu. Pastikan semua data event sudah benar sebelum publish.
+  1645→                </>
+  1646→              )}
+  1647→            </AlertDialogDescription>
+  1648→          </AlertDialogHeader>
+  1649→          <AlertDialogFooter>
+  1650→            <AlertDialogCancel disabled={isTogglingPublish}>Batal</AlertDialogCancel>
+  1651→            <AlertDialogAction
+  1652→              onClick={handleTogglePublish}
+  1653→              disabled={isTogglingPublish}
+  1654→              className={publishEvent?.isPublished ? 'bg-red-600 hover:bg-red-700' : 'bg-emerald-600 hover:bg-emerald-700'}
+  1655→            >
+  1656→              {isTogglingPublish ? (
+  1657→                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{'Memproses...'}</>
+  1658→              ) : publishEvent?.isPublished ? (
+  1659→                <><EyeOff className="w-4 h-4 mr-2" />Ya, Unpublish</>
+  1660→              ) : (
+  1661→                <><Eye className="w-4 h-4 mr-2" />Ya, Publish</>
+  1662→              )}
+  1663→            </AlertDialogAction>
+  1664→          </AlertDialogFooter>
+  1665→        </AlertDialogContent>
+  1666→      </AlertDialog>
+  1667→    </div>
+  1668→  )
+  1669→}
+  1670→
