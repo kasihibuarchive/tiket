@@ -506,11 +506,17 @@ export default function AdminEventEditPage() {
         setIsCompleted(ev.isCompleted || false)
         setHideSeatAvailability(ev.hideSeatAvailability || false)
         setHideSoldCount(ev.hideSoldCount || false)
-        // Convert openGate from ISO → datetime-local value (no UTC shift)
-        // so the editable input shows the correct wall-clock WIB time.
+        // Convert date AND openGate from ISO → datetime-local value (no UTC shift)
+        // so the editable inputs show the correct wall-clock WIB time.
+        // Fallback: if showDates is empty (legacy event), use event.showDate as a single row.
+        const loadedShowDates: ShowDateData[] =
+          ev.showDates && ev.showDates.length > 0
+            ? ev.showDates
+            : [{ id: '', date: ev.showDate, openGate: ev.openGate, label: null }]
         setShowDates(
-          (ev.showDates || []).map((sd) => ({
+          loadedShowDates.map((sd) => ({
             ...sd,
+            date: sd.date ? toDatetimeLocalValue(sd.date) : '',
             openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : null,
           }))
         )
@@ -528,12 +534,17 @@ export default function AdminEventEditPage() {
     fetchEvent()
   }, [eventId])
 
-  // ─── Open Gate handler ───────────────────────────────────────
-  // Only the openGate time is editable. The show date itself and label
-  // are preserved as-is (seats already generated + event published).
-  function updateShowDateOpenGate(idx: number, openGateLocal: string) {
+  // ─── Show Date field handler ────────────────────────────────
+  // All fields are editable: label, date (jam tayang), and openGate.
+  // Changing the date updates the show date/time for that day.
+  // Changing the label lets admin fix labels lost during migration.
+  function updateShowDateField(
+    idx: number,
+    field: 'date' | 'openGate' | 'label',
+    value: string
+  ) {
     const updated = [...showDates]
-    updated[idx] = { ...updated[idx], openGate: openGateLocal }
+    updated[idx] = { ...updated[idx], [field]: value }
     setShowDates(updated)
   }
 
@@ -541,14 +552,17 @@ export default function AdminEventEditPage() {
   async function handleSave() {
     setIsSaving(true)
     try {
-      // Build showDates payload — preserve id, date, label; convert openGate
-      // datetime-local value to ISO string (interpreted as wall-clock WIB).
-      const showDatesPayload = showDates.map((sd) => ({
-        id: sd.id,
-        date: sd.date,
-        label: sd.label,
-        openGate: sd.openGate ? new Date(sd.openGate).toISOString() : null,
-      }))
+      // Build showDates payload — convert date AND openGate from datetime-local
+      // to ISO string (interpreted as wall-clock WIB). Filter out rows with no
+      // date to avoid Invalid Date in Prisma.
+      const showDatesPayload = showDates
+        .filter((sd) => sd.date)
+        .map((sd) => ({
+          id: sd.id || undefined,
+          date: new Date(sd.date).toISOString(),
+          label: sd.label || null,
+          openGate: sd.openGate ? new Date(sd.openGate).toISOString() : null,
+        }))
 
       const res = await fetch(`/api/admin/events/${eventId}`, {
         method: 'PUT',
@@ -579,12 +593,13 @@ export default function AdminEventEditPage() {
 
       const data = await res.json()
       setEvent(data.event)
-      // Refresh showDates from server response — re-convert openGate to
-      // datetime-local value so the input stays in sync after save.
+      // Refresh showDates from server response — re-convert date AND openGate
+      // to datetime-local values so the inputs stay in sync after save.
       if (data.event?.showDates) {
         setShowDates(
           data.event.showDates.map((sd: ShowDateData) => ({
             ...sd,
+            date: sd.date ? toDatetimeLocalValue(sd.date) : '',
             openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : null,
           }))
         )
@@ -845,15 +860,31 @@ export default function AdminEventEditPage() {
         </CardContent>
       </Card>
 
-      {/* ─── Schedule & Open Gate Card ───────────────────────────── */}
+      {/* ─── Schedule, Jam Tayang & Open Gate Card ────────────────── */}
       <Card className="border-border/50">
         <CardHeader className="pb-3">
-          <div className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-gold" />
-            <CardTitle className="font-serif text-lg text-charcoal">Jadwal &amp; Open Gate</CardTitle>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-gold" />
+              <CardTitle className="font-serif text-lg text-charcoal">Jadwal, Jam Tayang &amp; Open Gate</CardTitle>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setShowDates([
+                  ...showDates,
+                  { id: '', date: '', openGate: null, label: `Hari ${showDates.length + 1}` },
+                ])
+              }}
+              className="text-xs h-8"
+            >
+              <Plus className="w-3 h-3 mr-1" />
+              Tambah Hari
+            </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Tanggal &amp; jam tayang sudah terkunci (kursi ter-generate). Yang bisa diubah hanya jam <strong>Open Gate</strong> (pintu dibuka). Semua waktu dalam WIB.
+            Atur label hari, tanggal &amp; jam tayang, dan jam buka pintu untuk setiap hari pertunjukan. Semua waktu dalam WIB. Hari baru perlu generate ulang kursi di halaman seat editor.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -866,38 +897,63 @@ export default function AdminEventEditPage() {
           ) : (
             showDates.map((sd, idx) => (
               <div
-                key={sd.id || idx}
-                className="rounded-lg border border-border/60 p-3 bg-white space-y-2"
+                key={sd.id || `new-${idx}`}
+                className="rounded-lg border border-border/60 p-3 bg-white space-y-3"
               >
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <Badge variant="secondary" className="text-[10px] bg-gold/10 text-gold-dark px-1.5 py-0 shrink-0">
-                      Hari {idx + 1}
-                    </Badge>
-                    {sd.label && (
-                      <span className="text-xs font-medium text-charcoal truncate">· {sd.label}</span>
-                    )}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    <span className="font-medium text-charcoal">Tayang:</span>{' '}
-                    {formatEventDate(sd.date)} · {formatEventTime(sd.date)}
-                  </div>
+                <div className="flex items-center justify-between gap-2">
+                  <Badge variant="secondary" className="text-[10px] bg-gold/10 text-gold-dark px-1.5 py-0 shrink-0">
+                    Hari {idx + 1}
+                  </Badge>
+                  {!sd.id && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowDates(showDates.filter((_, i) => i !== idx))
+                      }}
+                      className="h-6 w-6 p-0 text-danger hover:text-danger hover:bg-danger/10"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-end">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Label Hari</Label>
+                    <Input
+                      value={sd.label || ''}
+                      onChange={(e) => updateShowDateField(idx, 'label', e.target.value)}
+                      placeholder="contoh: Premiere, Gala…"
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Jam Tayang (WIB)</Label>
+                    <Input
+                      type="datetime-local"
+                      value={sd.date || ''}
+                      onChange={(e) => updateShowDateField(idx, 'date', e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
                   <div className="space-y-1">
                     <Label className="text-xs text-muted-foreground">Open Gate (WIB)</Label>
                     <Input
                       type="datetime-local"
                       value={sd.openGate || ''}
-                      onChange={(e) => updateShowDateOpenGate(idx, e.target.value)}
+                      onChange={(e) => updateShowDateField(idx, 'openGate', e.target.value)}
                       className="h-9 text-sm"
                     />
                   </div>
-                  <p className="text-xs text-muted-foreground/70 sm:pb-2">
-                    {sd.openGate
-                      ? <>Pintu dibuka <strong>{formatEventTime(sd.openGate)}</strong></>
-                      : 'Belum diatur — pintu mengikuti jam tayang.'}
-                  </p>
+                </div>
+                <div className="text-xs text-muted-foreground/70">
+                  {sd.date
+                    ? <>Tayang: <strong>{formatEventDate(sd.date)}</strong> pukul <strong>{formatEventTime(sd.date)}</strong></>
+                    : 'Tanggal tayang belum diatur.'
+                  }
+                  {sd.openGate && (
+                    <>{sd.date && ' · '}Pintu dibuka <strong>{formatEventTime(sd.openGate)}</strong></>
+                  )}
                 </div>
               </div>
             ))
