@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, withDbRetry } from '@/lib/db'
+import { ensureShowDatesForEvent } from '@/lib/migrate-show-dates'
 
 export async function GET(
   request: NextRequest,
@@ -51,6 +52,16 @@ export async function GET(
       // Block unpublished events for non-admin guests (unless completed — completed events can be viewed)
       if (!event.isPublished && !event.isCompleted && !isAdmin) {
         return { unpublished: true, title: event.title }
+      }
+
+      // Auto-migrate: ensure event has at least one EventShowDate record.
+      // This fixes events created before the multi-day feature that only have
+      // the legacy `event.showDate` field but no EventShowDate records.
+      try {
+        await ensureShowDatesForEvent(id)
+      } catch (migrateErr) {
+        // Non-critical — log and continue. The buyer page has a fallback.
+        console.error('[events/get] Auto-migration error:', migrateErr)
       }
 
       // Run price categories, show dates, seat stats, and review stats in parallel

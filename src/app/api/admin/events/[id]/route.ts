@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, withDbRetry } from '@/lib/db'
 import { logActivity } from '@/lib/activity-log'
+import { ensureShowDatesForEvent } from '@/lib/migrate-show-dates'
 
 export async function GET(
   request: NextRequest,
@@ -9,10 +10,25 @@ export async function GET(
   try {
     const { id } = await params
 
-    // Separate queries — NO include (crashes Next.js 16)
-    const [event, priceCategories, seats, transactions, showDates] = await withDbRetry(() =>
+    // Fetch event first — needed for existence check + auto-migration
+    const event = await withDbRetry(() => db.event.findUnique({ where: { id } }))
+
+    if (!event) {
+      return NextResponse.json({ error: 'Event not found' }, { status: 404 })
+    }
+
+    // Auto-migrate: ensure event has at least one EventShowDate record.
+    // This fixes events created before the multi-day feature that only have
+    // the legacy `event.showDate` field but no EventShowDate records.
+    try {
+      await ensureShowDatesForEvent(id)
+    } catch (migrateErr) {
+      console.error('[admin/events/get] Auto-migration error:', migrateErr)
+    }
+
+    // Now fetch the rest in parallel — showDates will include the auto-created record
+    const [priceCategories, seats, transactions, showDates] = await withDbRetry(() =>
       Promise.all([
-        db.event.findUnique({ where: { id } }),
         db.priceCategory.findMany({
           where: { eventId: id },
           // Include festival fields for package categories
@@ -29,10 +45,6 @@ export async function GET(
         }),
       ])
     )
-
-    if (!event) {
-      return NextResponse.json({ error: 'Event not found' }, { status: 404 })
-    }
 
     // Attach priceCategory to each seat
     const seatsWithCat = seats.map((seat) => {
