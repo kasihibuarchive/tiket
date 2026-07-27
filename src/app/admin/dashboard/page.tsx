@@ -28,6 +28,9 @@ interface RecentTransaction {
   adminFeeApplied: number
   netAmount: number
   seatCount: number
+  rawSeatCount?: number
+  isFestival?: boolean
+  eventIsFestival?: boolean
   paymentMethod: string | null
   paidAt: string | null
   eventId: string
@@ -341,10 +344,30 @@ export default function AdminDashboard() {
                 <tbody>
                   {data.recentTransactions.map((tx) => (
                     <tr key={tx.transactionId} className="border-b border-border/20 hover:bg-muted/20">
-                      <td className="py-2 px-2 font-mono text-charcoal">{tx.transactionId}</td>
-                      <td className="py-2 px-2 text-charcoal max-w-[120px] truncate">{tx.eventTitle}</td>
+                      <td className="py-2 px-2 font-mono text-charcoal">
+                        <div className="flex items-center gap-1.5">
+                          {tx.transactionId}
+                          {tx.isFestival && (
+                            <Badge variant="secondary" className="text-[8px] bg-purple-100 text-purple-700 px-1 py-0 h-3.5" title={`Festival pass — ${tx.rawSeatCount || tx.seatCount} seat entries across all days`}>
+                              FEST
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2 px-2 text-charcoal max-w-[120px] truncate">
+                        <div className="flex items-center gap-1">
+                          <span className="truncate">{tx.eventTitle}</span>
+                          {tx.eventIsFestival && (
+                            <span title="Festival mode event" className="shrink-0 inline-block w-1.5 h-1.5 rounded-full bg-purple-500" />
+                          )}
+                        </div>
+                      </td>
                       <td className="py-2 px-2 text-charcoal">{tx.customerName}</td>
-                      <td className="py-2 px-2 text-center text-charcoal">{tx.seatCount}</td>
+                      <td className="py-2 px-2 text-center text-charcoal">
+                        <span title={tx.isFestival ? `${tx.seatCount} tiket festival (mencakup ${tx.rawSeatCount || tx.seatCount} seat entries)` : `${tx.seatCount} tiket`}>
+                          {tx.seatCount}
+                        </span>
+                      </td>
                       {!isNet && <td className="py-2 px-2 text-right font-semibold text-charcoal">{fmt(tx.totalAmount)}</td>}
                       <td className={`py-2 px-2 text-right font-semibold ${isNet ? 'text-emerald-600' : 'text-emerald-600'}`}>
                         {fmt(tx.netAmount)}

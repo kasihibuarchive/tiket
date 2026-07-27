@@ -147,6 +147,64 @@ export async function buildEmailTicketPayload(
  */
 export type SeatStatus = 'SOLD' | 'AVAILABLE'
 
+// ───────────────────────────────────────────────────────────────────
+// Helper: parse seatCodes JSON safely
+// ───────────────────────────────────────────────────────────────────
+export function parseSeatCodes(raw: string): string[] {
+  try {
+    const parsed = JSON.parse(raw)
+    if (Array.isArray(parsed)) return parsed as string[]
+  } catch { /* fall through */ }
+  // Legacy: comma-separated
+  return raw.split(',').map(s => s.trim()).filter(Boolean)
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Helper: detect if seatCodes use festival format (seatCode@dayId)
+// ───────────────────────────────────────────────────────────────────
+export function isFestivalSeatCodes(seatCodes: string[]): boolean {
+  return seatCodes.some((c) => c.includes('@'))
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Helper: compute the effective ticket count from seatCodes.
+//
+// REGULAR mode: each seatCode = 1 ticket. Returns seatCodes.length.
+// FESTIVAL mode: seatCodes are stored as `seatCode@dayId`, one entry
+//   per (ticket × day). So a 2-day pass × 3 tickets = 6 seat codes.
+//   Effective ticket count = total / uniqueDays.
+//
+// This is the canonical helper to use ANYWHERE the dashboard / finance
+// report needs the "real" number of tickets sold — using seatCodes.length
+// directly will OVER-COUNT festival sales by N× (where N = days per pass).
+// ───────────────────────────────────────────────────────────────────
+export function computeEffectiveTicketCount(seatCodes: string[]): number {
+  if (seatCodes.length === 0) return 0
+  if (!isFestivalSeatCodes(seatCodes)) return seatCodes.length
+
+  const uniqueDayIds = new Set<string>()
+  for (const code of seatCodes) {
+    const parts = code.split('@')
+    if (parts.length >= 2 && parts[1]) uniqueDayIds.add(parts[1])
+  }
+  const dayCount = uniqueDayIds.size || 1
+  return Math.floor(seatCodes.length / dayCount)
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Helper: extract unique day IDs from festival seatCodes.
+// Returns [] for regular transactions.
+// ───────────────────────────────────────────────────────────────────
+export function getFestivalDayIds(seatCodes: string[]): string[] {
+  if (!isFestivalSeatCodes(seatCodes)) return []
+  const ids = new Set<string>()
+  for (const code of seatCodes) {
+    const parts = code.split('@')
+    if (parts.length >= 2 && parts[1]) ids.add(parts[1])
+  }
+  return Array.from(ids)
+}
+
 export async function markSeatsForTransaction(
   eventId: string,
   rawSeatCodesJson: string,
@@ -161,10 +219,7 @@ export async function markSeatsForTransaction(
   }
   if (!Array.isArray(seatCodes) || seatCodes.length === 0) return 0
 
-  // Check if any seatCode has '@' (festival format: seatCode@dayId)
-  const isFestivalFormat = seatCodes.some((code) => code.includes('@'))
-
-  if (!isFestivalFormat) {
+  if (!isFestivalSeatCodes(seatCodes)) {
     // REGULAR mode: match by seatCode only (legacy behavior)
     const result = await db.seat.updateMany({
       where: { eventId, seatCode: { in: seatCodes } },
@@ -213,9 +268,7 @@ export async function buildQrText(transaction: {
     seatCodes = JSON.parse(transaction.seatCodes)
   } catch { /* ignore */ }
 
-  const isFestivalFormat = seatCodes.some((code) => code.includes('@'))
-
-  if (!isFestivalFormat) {
+  if (!isFestivalSeatCodes(seatCodes)) {
     // REGULAR mode
     return 'NAMA: ' + transaction.customerName +
       ' | KURSI: ' + transaction.seatCodes +
@@ -231,7 +284,7 @@ export async function buildQrText(transaction: {
   })
 
   let packageName = 'Festival Pass'
-  let applicableDayIds: string[] = [...new Set(seatCodes.map((c) => c.split('@')[1]))]
+  let applicableDayIds = getFestivalDayIds(seatCodes)
 
   if (firstSeat?.priceCategoryId) {
     const pc = await db.priceCategory.findUnique({
@@ -250,7 +303,7 @@ export async function buildQrText(transaction: {
   }
 
   // Count unique tickets (one ticket = one seat per day; quantity = total seats / days)
-  const ticketCount = Math.floor(seatCodes.length / applicableDayIds.length) || seatCodes.length
+  const ticketCount = Math.floor(seatCodes.length / (applicableDayIds.length || 1)) || seatCodes.length
 
   return 'NAMA: ' + transaction.customerName +
     ' | FESTIVAL: ' + packageName + ' (' + ticketCount + ' tiket)' +

@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
+import {
+  parseSeatCodes,
+  isFestivalSeatCodes,
+  computeEffectiveTicketCount,
+} from '@/lib/festival-seats'
 
 export async function GET() {
   try {
@@ -38,6 +43,7 @@ export async function GET() {
         showDate: true,
         location: true,
         adminFee: true,
+        eventMode: true,
         priceCategories: { select: { price: true } },
       },
       orderBy: { showDate: 'desc' },
@@ -97,10 +103,10 @@ export async function GET() {
       // Check-in
       if (tx.checkInTime) stat.checkedIn++
 
-      // Parse seat codes to count tickets
-      let seatCodesArr: string[] = []
-      try { seatCodesArr = JSON.parse(tx.seatCodes) } catch { seatCodesArr = tx.seatCodes.split(',') }
-      stat.ticketCount += seatCodesArr.length
+      // Parse seat codes & count effective tickets (festival passes count as 1 ticket per package,
+      // not N×dayCount seats — see computeEffectiveTicketCount helper)
+      const seatCodesArr = parseSeatCodes(tx.seatCodes)
+      stat.ticketCount += computeEffectiveTicketCount(seatCodesArr)
 
       // Admin fee
       const adminFee = tx.adminFeeApplied || 0
@@ -162,38 +168,83 @@ export async function GET() {
     }
 
     // ── Ticket Category Breakdown ──
-    const seatsWithCategory = await db.seat.findMany({
-      where: { status: 'SOLD' },
-      select: {
-        priceCategoryId: true,
-        priceCategory: { select: { name: true, colorCode: true, price: true } },
-      },
-    })
+    // For REGULAR events: each SOLD seat = 1 ticket at seat.priceCategory.price.
+    // For FESTIVAL events: each SOLD seat is one (ticket × day) entry. Counting seats
+    // directly would inflate both the count (by N× for N-day passes) AND the revenue
+    // (since priceCategory.price is the full package price, not per-day).
+    //
+    // Fix: derive category counts from PAID TRANSACTIONS using computeEffectiveTicketCount.
+    // This gives the true "tickets sold" per category and matches what the customer paid.
+    const festivalEventIds = new Set(
+      events.filter(e => e.eventMode === 'FESTIVAL').map(e => e.id)
+    )
 
-    const categoryMap = new Map<string, { name: string; color: string; count: number; pricePerSeat: number }>()
-    for (const seat of seatsWithCategory) {
-      const catId = seat.priceCategoryId || 'unknown'
-      if (!categoryMap.has(catId)) {
-        categoryMap.set(catId, {
-          name: seat.priceCategory?.name || 'Lainnya',
-          color: seat.priceCategory?.colorCode || '#8B8680',
-          count: 0,
-          pricePerSeat: seat.priceCategory?.price || 0,
-        })
-      }
-      categoryMap.get(catId)!.count++
+    // Fetch ALL SOLD seats (with priceCategoryId) in ONE query — used to look up
+    // the price category for both regular and festival transactions.
+    // Index by composite key: eventId|seatCode|dayId (dayId="" for regular).
+    const allSoldSeats = await db.seat.findMany({
+      where: { status: 'SOLD' },
+      select: { eventId: true, seatCode: true, eventShowDateId: true, priceCategoryId: true },
+    })
+    const seatLookup = new Map<string, string | null>()
+    for (const s of allSoldSeats) {
+      const key = `${s.eventId}|${s.seatCode}|${s.eventShowDateId || ''}`
+      seatLookup.set(key, s.priceCategoryId)
     }
 
-    // Calculate revenue per category using actual seat price
+    // All price categories in one query
+    const allPriceCats = await db.priceCategory.findMany({
+      select: { id: true, name: true, colorCode: true, price: true, eventId: true },
+    })
+    const pcMap = new Map(allPriceCats.map(pc => [pc.id, pc]))
+
+    // Build category aggregation from transactions (not seats) for accurate ticket counts
+    const categoryMap = new Map<string, { name: string; color: string; count: number; grossRevenue: number }>()
+
+    for (const tx of paidTransactions) {
+      const codes = parseSeatCodes(tx.seatCodes)
+      const isFestival = isFestivalSeatCodes(codes)
+      const effectiveCount = computeEffectiveTicketCount(codes)
+
+      let priceCatId: string | null = null
+      if (codes.length > 0) {
+        if (isFestival) {
+          // Festival: seatCode@dayId format
+          const [seatCode, dayId] = codes[0].split('@')
+          priceCatId = seatLookup.get(`${tx.eventId}|${seatCode}|${dayId || ''}`) || null
+        } else {
+          // Regular: plain seatCode
+          priceCatId = seatLookup.get(`${tx.eventId}|${codes[0]}|`) || null
+        }
+      }
+      if (!priceCatId) continue
+
+      const pc = pcMap.get(priceCatId)
+      if (!pc) continue
+
+      if (!categoryMap.has(priceCatId)) {
+        categoryMap.set(priceCatId, {
+          name: pc.name,
+          color: pc.colorCode || '#8B8680',
+          count: 0,
+          grossRevenue: 0,
+        })
+      }
+      const entry = categoryMap.get(priceCatId)!
+      entry.count += effectiveCount
+      entry.grossRevenue += pc.price * effectiveCount
+    }
+
+    // Calculate revenue per category using actual ticket price × effective ticket count
     const categoryBreakdown = Array.from(categoryMap.entries()).map(([id, cat]) => {
-      const grossRevenue = cat.count * cat.pricePerSeat
+      const grossRevenue = cat.grossRevenue
       return {
         id,
         name: cat.name,
         color: cat.color,
         count: cat.count,
         revenue: Math.round(grossRevenue),
-        netRevenue: Math.round(grossRevenue - (grossRevenue * totalAdminFee / totalGrossRevenue)),
+        netRevenue: Math.round(grossRevenue - (grossRevenue * totalAdminFee / (totalGrossRevenue || 1))),
       }
     }).sort((a, b) => b.count - a.count)
 
@@ -225,8 +276,8 @@ export async function GET() {
       .sort((a, b) => (b.paidAt?.getTime() || 0) - (a.paidAt?.getTime() || 0))
       .slice(0, 10)
       .map((tx) => {
-        let seatCodesArr: string[] = []
-        try { seatCodesArr = JSON.parse(tx.seatCodes) } catch { seatCodesArr = tx.seatCodes.split(',') }
+        const seatCodesArr = parseSeatCodes(tx.seatCodes)
+        const isFestival = isFestivalSeatCodes(seatCodesArr)
         return {
           transactionId: tx.transactionId,
           customerName: tx.customerName,
@@ -234,11 +285,14 @@ export async function GET() {
           totalAmount: tx.totalAmount,
           adminFeeApplied: tx.adminFeeApplied,
           netAmount: tx.totalAmount - (tx.adminFeeApplied || 0),
-          seatCount: seatCodesArr.length,
+          seatCount: computeEffectiveTicketCount(seatCodesArr),
+          rawSeatCount: seatCodesArr.length, // raw count for debugging / display
+          isFestival,
           paymentMethod: tx.paymentMethod,
           paidAt: tx.paidAt?.toISOString(),
           eventId: tx.eventId,
           eventTitle: eventStats[tx.eventId]?.eventTitle || 'Unknown',
+          eventIsFestival: festivalEventIds.has(tx.eventId),
           checkedIn: !!tx.checkInTime,
         }
       })
@@ -259,9 +313,8 @@ export async function GET() {
       }
       revenueByDay[dayKey].revenue += tx.totalAmount
       revenueByDay[dayKey].netRevenue += tx.totalAmount - (tx.adminFeeApplied || 0)
-      let seatCodesArr: string[] = []
-      try { seatCodesArr = JSON.parse(tx.seatCodes) } catch { seatCodesArr = tx.seatCodes.split(',') }
-      revenueByDay[dayKey].tickets += seatCodesArr.length
+      const seatCodesArr = parseSeatCodes(tx.seatCodes)
+      revenueByDay[dayKey].tickets += computeEffectiveTicketCount(seatCodesArr)
       revenueByDay[dayKey].transactions++
     }
     const revenueTimeline = Object.values(revenueByDay).sort((a, b) => a.date.localeCompare(b.date))

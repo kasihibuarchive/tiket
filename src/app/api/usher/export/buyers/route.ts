@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db, withDbRetry } from '@/lib/db'
 import * as XLSX from 'xlsx'
+import {
+  parseSeatCodes,
+  isFestivalSeatCodes,
+  computeEffectiveTicketCount,
+} from '@/lib/festival-seats'
 
 // GET /api/usher/export/buyers?eventId=xxx
 // Exports buyer data as an XLSX spreadsheet
@@ -79,9 +84,28 @@ export async function GET(request: NextRequest) {
         zoneName: true,
         priceCategoryId: true,
         eventShowDateId: true,
+        status: true,
       },
     }))
-    const seatMap = new Map(seats.map(s => [s.seatCode, s]))
+    // Build composite-key lookup so both regular (seatCode only) and festival (seatCode@dayId) transactions can resolve.
+    // Key format: `${seatCode}|${dayId}` (dayId is empty for regular)
+    const seatMap = new Map<string, { seatCode: string; zoneName: string | null; priceCategoryId: string | null; eventShowDateId: string | null; status: string }>()
+    for (const s of seats) {
+      seatMap.set(`${s.seatCode}|${s.eventShowDateId || ''}`, s as any)
+      // Also index by seatCode only for backward compat (regular case)
+      if (!s.eventShowDateId) {
+        seatMap.set(`${s.seatCode}|`, s as any)
+      }
+    }
+
+    // Helper to look up a seat by raw code (regular: 'A-1', festival: 'A-1@dayId')
+    function lookupSeat(code: string) {
+      if (code.includes('@')) {
+        const [sc, did] = code.split('@')
+        return seatMap.get(`${sc}|${did || ''}`) || null
+      }
+      return seatMap.get(`${code}|`) || null
+    }
 
     // Helper: format date for display
     function formatDateTime(date: Date | null | undefined): string {
@@ -174,10 +198,12 @@ export async function GET(request: NextRequest) {
     for (let i = 0; i < transactions.length; i++) {
       const txn = transactions[i]
       const seatCodes = parseSeatCodes(txn.seatCodes)
+      const isFestival = isFestivalSeatCodes(seatCodes)
+      const effectiveTicketCount = computeEffectiveTicketCount(seatCodes)
 
-      // Look up seat details for zone & price category info
+      // Look up seat details for zone & price category info (festival-aware)
       const seatDetails = seatCodes.map(code => {
-        const seatInfo = seatMap.get(code)
+        const seatInfo = lookupSeat(code)
         const priceCat = seatInfo?.priceCategoryId
           ? priceCatMap.get(seatInfo.priceCategoryId)
           : null
@@ -189,16 +215,21 @@ export async function GET(request: NextRequest) {
         }
       })
 
-      // Join seat codes
-      const seatCodesStr = seatCodes.join(', ') || '-'
+      // For festival passes, the displayed "Kode Kursi" should show the package name + day count,
+      // not the raw seat entries (which are auto-generated GA seats per day)
+      const seatCodesStr = isFestival
+        ? `${seatDetails[0]?.category || 'Festival Pass'} × ${effectiveTicketCount} tiket (${seatCodes.length} seat entries across ${new Set(seatCodes.map(c => c.split('@')[1])).size} hari)`
+        : (seatCodes.join(', ') || '-')
       const zoneNames = [...new Set(seatDetails.map(s => s.zone))].join(', ')
       const categoryNames = [...new Set(seatDetails.map(s => s.category))].join(', ')
 
       // Show date
       const showDateInfo = txn.showDateId ? showDateMap.get(txn.showDateId) : null
-      const showDateStr = showDateInfo
-        ? formatDateShort(showDateInfo.date)
-        : formatDateShort(event.showDate)
+      const showDateStr = isFestival
+        ? 'Semua Hari (Festival Pass)'
+        : (showDateInfo
+            ? formatDateShort(showDateInfo.date)
+            : formatDateShort(event.showDate))
 
       // Is complimentary?
       const isComplimentary = txn.transactionId.startsWith('COMP-')
@@ -214,7 +245,7 @@ export async function GET(request: NextRequest) {
         'Email': txn.customerEmail,
         'No. WhatsApp': txn.customerWa,
         'Kode Kursi': seatCodesStr,
-        'Jumlah Tiket': seatCodes.length,
+        'Jumlah Tiket': effectiveTicketCount,
         'Zona': zoneNames,
         'Kategori': categoryNames,
         'Total Bayar': isComplimentary ? 'Komplimen' : formatCurrency(txn.totalAmount),
@@ -229,7 +260,7 @@ export async function GET(request: NextRequest) {
 
     // Add summary section at the bottom
     const totalBuyers = transactions.length
-    const totalTickets = transactions.reduce((sum, txn) => sum + parseSeatCodes(txn.seatCodes).length, 0)
+    const totalTickets = transactions.reduce((sum, txn) => sum + computeEffectiveTicketCount(parseSeatCodes(txn.seatCodes)), 0)
     const totalCheckedIn = transactions.filter(txn => txn.checkInTime).length
     const totalRevenue = transactions.reduce((sum, txn) => {
       if (txn.transactionId.startsWith('COMP-')) return sum
@@ -294,20 +325,33 @@ export async function GET(request: NextRequest) {
 
       for (const zone of zones) {
         const zoneSeats = seats.filter(s => s.zoneName === zone)
-        const zoneSold = zoneSeats.filter(s => s.status === 'SOLD' || s.status === 'INVITATION').length
-        const zoneCheckedIn = zoneSeats.filter(s => {
+        const zoneSold = zoneSeats.filter((s: any) => s.status === 'SOLD' || s.status === 'INVITATION').length
+        const zoneCheckedIn = zoneSeats.filter((s: any) => {
           // We'd need to cross-reference with transactions but this is approximate
           return s.status === 'SOLD' || s.status === 'INVITATION'
         }).length
 
-        // Count tickets sold in this zone from transactions
+        // Count tickets sold in this zone from transactions.
+        // For festival transactions, each raw seat entry counts as 1 (one seat per day),
+        // but we want the EFFECTIVE ticket count (1 festival pass = 1 ticket, not N×dayCount).
+        // We attribute the effective ticket count to the zone of the first seat entry.
         let zoneTicketCount = 0
         for (const txn of transactions) {
           const codes = parseSeatCodes(txn.seatCodes)
-          for (const code of codes) {
-            const seatInfo = seatMap.get(code)
-            if (seatInfo?.zoneName === zone) {
-              zoneTicketCount++
+          const isFestival = isFestivalSeatCodes(codes)
+          if (isFestival) {
+            // For festival: check the first seat's zone; if it matches, count as effectiveTicketCount
+            const firstSeatInfo = codes.length > 0 ? lookupSeat(codes[0]) : null
+            if (firstSeatInfo?.zoneName === zone) {
+              zoneTicketCount += computeEffectiveTicketCount(codes)
+            }
+          } else {
+            // Regular: count each seat matching the zone
+            for (const code of codes) {
+              const seatInfo = lookupSeat(code)
+              if (seatInfo?.zoneName === zone) {
+                zoneTicketCount++
+              }
             }
           }
         }

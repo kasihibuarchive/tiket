@@ -28,8 +28,9 @@ interface FinanceData {
     id: string; title: string; category: string; showDate: string;
     location: string; posterUrl: string | null; isPublished: boolean;
     isCompleted: boolean; adminFeeQris: number; adminFeeNonQris: number;
-    showDates: Array<{ id: string; date: string; label: string | null }>;
-    priceCategories: Array<{ id: string; name: string; price: number; colorCode: string }>;
+    eventMode?: string;
+    showDates: Array<{ id: string; date: string; label: string | null; openGate?: string | null }>;
+    priceCategories: Array<{ id: string; name: string; price: number; colorCode: string; packageType?: string | null; applicableDayIds?: string | null }>;
   }
   summary: {
     grossRevenue: number; adminFeeRevenue: number; merchRevenue: number;
@@ -37,14 +38,28 @@ interface FinanceData {
     totalTickets: number; checkedIn: number; totalPaidTransactions: number;
     pendingCount: number; expiredCount: number; failedCount: number; cancelledCount: number;
     checkInRate: number; soldRate: number; adminFeePct: number;
+    // Festival-specific
+    festivalTicketCount?: number;
+    festivalTransactionCount?: number;
+    festivalGrossRevenue?: number;
+    festivalNetRevenue?: number;
+    festivalAdminFee?: number;
+    festivalScannedDays?: number;
+    festivalTotalScans?: number;
   }
   seatSummary: { total: number; available: number; sold: number; invitation: number; locked: number; unavailable: number }
   categoryBreakdown: Array<{ name: string; price: number; color: string; count: number; grossRevenue: number }>
   showDateBreakdown: Array<{ label: string; date: string; grossRevenue: number; adminFee: number; netRevenue: number; ticketCount: number; transactions: number }>
+  festivalPackageBreakdown?: Array<{
+    packageType: string; packageName: string; daysCount: number;
+    ticketCount: number; transactions: number;
+    grossRevenue: number; adminFee: number; netRevenue: number;
+  }>
   paymentMethodBreakdown: Array<{ method: string; count: number; grossRevenue: number; adminFee: number; netRevenue: number }>
   revenueTimeline: Array<{ date: string; gross: number; net: number; tickets: number }>
   transactions: Array<{
     transactionId: string; customerName: string; seatCount: number;
+    rawSeatCount?: number; isFestival?: boolean;
     seatCodes: string[]; totalAmount: number; adminFeeApplied: number;
     netAmount: number; merchTotal: number; paymentMethod: string | null;
     paidAt: string | null; checkedIn: boolean; promoCode: string | null;
@@ -198,7 +213,7 @@ export default function EventFinancePage() {
 
   ${data.showDateBreakdown.length > 1 ? `
   <div class="section">
-    <div class="section-title">Rincian Per Hari</div>
+    <div class="section-title">Rincian Per Hari${data.event.eventMode === 'FESTIVAL' ? ' (Tiket Reguler Saja)' : ''}</div>
     <table>
       <thead>
         <tr>
@@ -221,6 +236,46 @@ export default function EventFinancePage() {
             <td class="text-right" style="font-weight:600;">${fmt(isNet ? sd.netRevenue : sd.grossRevenue)}</td>
           </tr>
         `).join('')}
+      </tbody>
+    </table>
+  </div>` : ''}
+
+  ${data.festivalPackageBreakdown && data.festivalPackageBreakdown.length > 0 ? `
+  <div class="section">
+    <div class="section-title">Rincian Paket Festival (${data.summary.festivalTicketCount || 0} tiket &middot; ${data.summary.festivalTransactionCount || 0} transaksi)</div>
+    <table>
+      <thead>
+        <tr>
+          <th>Paket</th>
+          <th>Tipe</th>
+          <th class="text-center">Hari</th>
+          <th class="text-center">Tiket</th>
+          <th class="text-center">Transaksi</th>
+          ${!isNet ? '<th class="text-right">Kotor</th><th class="text-right">Admin</th>' : ''}
+          <th class="text-right">Pendapatan ${modeLabel}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${data.festivalPackageBreakdown.map(fp => {
+          const typeLabel = fp.packageType === 'FULL' ? 'Full Pass' : fp.packageType === 'MULTI' ? 'Multi-Day' : 'Single Day'
+          return `
+          <tr>
+            <td>${fp.packageName}</td>
+            <td>${typeLabel}</td>
+            <td class="text-center">${fp.daysCount}</td>
+            <td class="text-center">${fp.ticketCount}</td>
+            <td class="text-center">${fp.transactions}</td>
+            ${!isNet ? `<td class="text-right">${fmt(fp.grossRevenue)}</td><td class="text-right" style="color:#f59e0b;">${fmt(fp.adminFee)}</td>` : ''}
+            <td class="text-right" style="font-weight:600;">${fmt(isNet ? fp.netRevenue : fp.grossRevenue)}</td>
+          </tr>
+        `}).join('')}
+        <tr style="border-top:2px solid #e5e7eb;font-weight:600;background:#faf5ff;">
+          <td colspan="3">Total Festival</td>
+          <td class="text-center">${data.summary.festivalTicketCount || 0}</td>
+          <td class="text-center">${data.summary.festivalTransactionCount || 0}</td>
+          ${!isNet ? `<td class="text-right">${fmt(data.summary.festivalGrossRevenue || 0)}</td><td class="text-right" style="color:#f59e0b;">${fmt(data.summary.festivalAdminFee || 0)}</td>` : ''}
+          <td class="text-right" style="color:#047857;">${fmt(data.summary.festivalNetRevenue || 0)}</td>
+        </tr>
       </tbody>
     </table>
   </div>` : ''}
@@ -332,7 +387,14 @@ export default function EventFinancePage() {
             Kembali
           </Button>
           <div>
-            <h1 className="font-serif text-xl font-bold text-charcoal">{data.event.title}</h1>
+            <h1 className="font-serif text-xl font-bold text-charcoal flex items-center gap-2">
+              {data.event.title}
+              {data.event.eventMode === 'FESTIVAL' && (
+                <Badge variant="secondary" className="text-[10px] bg-purple-100 text-purple-700">
+                  Festival Mode
+                </Badge>
+              )}
+            </h1>
             <p className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
               <Calendar className="w-3 h-3" /> {fmtDate(data.event.showDate)}
               <MapPin className="w-3 h-3 ml-1" /> {data.event.location}
@@ -576,7 +638,17 @@ export default function EventFinancePage() {
             <CardTitle className="text-sm font-semibold text-charcoal flex items-center gap-2">
               <Calendar className="w-4 h-4 text-gold" />
               Rincian Per Hari
+              {data.event.eventMode === 'FESTIVAL' && (
+                <Badge variant="secondary" className="text-[9px] bg-purple-100 text-purple-700 ml-1">
+                  Tiket Reguler Saja
+                </Badge>
+              )}
             </CardTitle>
+            {data.event.eventMode === 'FESTIVAL' && (
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Hanya transaksi single-day. Pendapatan paket festival (multi-day/full pass) ditampilkan di bagian &quot;Rincian Paket Festival&quot; di bawah.
+              </p>
+            )}
           </CardHeader>
           <CardContent className="pt-0">
             <div className="overflow-x-auto">
@@ -607,6 +679,86 @@ export default function EventFinancePage() {
                 </tbody>
               </table>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ── Festival Package Breakdown ── */}
+      {data.festivalPackageBreakdown && data.festivalPackageBreakdown.length > 0 && (
+        <Card className="border-purple-200/50 ring-1 ring-purple-200/30">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold text-charcoal flex items-center gap-2">
+              <Users className="w-4 h-4 text-purple-600" />
+              Rincian Paket Festival
+              <Badge variant="secondary" className="text-[9px] bg-purple-100 text-purple-700">
+                {data.summary.festivalTicketCount || 0} tiket &middot; {data.summary.festivalTransactionCount || 0} transaksi
+              </Badge>
+            </CardTitle>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Pendapatan paket festival tidak diatribusikan ke hari tertentu karena satu paket mencakup beberapa hari. Hitungan tiket = paket (bukan seat entries).
+            </p>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border/50">
+                    <th className="text-left py-2 px-2 text-muted-foreground font-medium">Paket</th>
+                    <th className="text-left py-2 px-2 text-muted-foreground font-medium">Tipe</th>
+                    <th className="text-center py-2 px-2 text-muted-foreground font-medium">Hari</th>
+                    <th className="text-center py-2 px-2 text-muted-foreground font-medium">Tiket</th>
+                    <th className="text-center py-2 px-2 text-muted-foreground font-medium">Transaksi</th>
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Kotor</th>}
+                    {!isNet && <th className="text-right py-2 px-2 text-muted-foreground font-medium">Admin</th>}
+                    <th className="text-right py-2 px-2 text-muted-foreground font-medium">Pendapatan {isNet ? 'Bersih' : 'Bersih'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.festivalPackageBreakdown.map((fp, idx) => {
+                    const typeLabel = fp.packageType === 'FULL' ? 'Full Pass' : fp.packageType === 'MULTI' ? 'Multi-Day' : 'Single Day'
+                    return (
+                      <tr key={idx} className="border-b border-border/20">
+                        <td className="py-2 px-2 font-medium text-charcoal">{fp.packageName}</td>
+                        <td className="py-2 px-2">
+                          <Badge variant="secondary" className="text-[9px] bg-purple-100 text-purple-700">{typeLabel}</Badge>
+                        </td>
+                        <td className="py-2 px-2 text-center text-charcoal">{fp.daysCount}</td>
+                        <td className="py-2 px-2 text-center text-charcoal">{fp.ticketCount}</td>
+                        <td className="py-2 px-2 text-center text-charcoal">{fp.transactions}</td>
+                        {!isNet && <td className="py-2 px-2 text-right text-charcoal">{fmt(fp.grossRevenue)}</td>}
+                        {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(fp.adminFee)}</td>}
+                        <td className="py-2 px-2 text-right font-semibold text-emerald-600">{fmt(fp.netRevenue)}</td>
+                      </tr>
+                    )
+                  })}
+                  {/* Total row */}
+                  <tr className="border-t-2 border-border/50 bg-purple-50/30 font-semibold">
+                    <td className="py-2 px-2 text-charcoal" colSpan={3}>Total Festival</td>
+                    <td className="py-2 px-2 text-center text-charcoal">{data.summary.festivalTicketCount || 0}</td>
+                    <td className="py-2 px-2 text-center text-charcoal">{data.summary.festivalTransactionCount || 0}</td>
+                    {!isNet && <td className="py-2 px-2 text-right text-charcoal">{fmt(data.summary.festivalGrossRevenue || 0)}</td>}
+                    {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(data.summary.festivalAdminFee || 0)}</td>}
+                    <td className="py-2 px-2 text-right text-emerald-700">{fmt(data.summary.festivalNetRevenue || 0)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            {/* Festival scan stats */}
+            {data.event.eventMode === 'FESTIVAL' && (data.summary.festivalTotalScans || 0) > 0 && (
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <div className="rounded-lg bg-purple-50/50 border border-purple-200/40 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-purple-600">Hari Discan</p>
+                  <p className="text-base font-bold text-charcoal">
+                    {data.summary.festivalScannedDays || 0}
+                    <span className="text-xs font-normal text-muted-foreground"> / {data.event.showDates.length} hari</span>
+                  </p>
+                </div>
+                <div className="rounded-lg bg-purple-50/50 border border-purple-200/40 px-3 py-2">
+                  <p className="text-[10px] uppercase tracking-wider text-purple-600">Total Scan</p>
+                  <p className="text-base font-bold text-charcoal">{data.summary.festivalTotalScans || 0}</p>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}
@@ -680,9 +832,22 @@ export default function EventFinancePage() {
               <tbody>
                 {data.transactions.map((tx) => (
                   <tr key={tx.transactionId} className="border-b border-border/20 hover:bg-muted/20">
-                    <td className="py-2 px-2 font-mono text-[10px] text-charcoal">{tx.transactionId}</td>
+                    <td className="py-2 px-2 font-mono text-[10px] text-charcoal">
+                      <div className="flex items-center gap-1">
+                        {tx.transactionId}
+                        {tx.isFestival && (
+                          <Badge variant="secondary" className="text-[8px] bg-purple-100 text-purple-700 px-1 py-0 h-3.5" title={`Festival pass — ${tx.rawSeatCount || tx.seatCount} seat entries across all days`}>
+                            FEST
+                          </Badge>
+                        )}
+                      </div>
+                    </td>
                     <td className="py-2 px-2 text-charcoal">{tx.customerName}</td>
-                    <td className="py-2 px-2 text-center text-charcoal">{tx.seatCount}</td>
+                    <td className="py-2 px-2 text-center text-charcoal">
+                      <span title={tx.isFestival ? `${tx.seatCount} tiket festival (${tx.rawSeatCount || tx.seatCount} seat entries)` : `${tx.seatCount} tiket`}>
+                        {tx.seatCount}
+                      </span>
+                    </td>
                     {!isNet && <td className="py-2 px-2 text-right text-charcoal">{fmt(tx.totalAmount)}</td>}
                     {!isNet && <td className="py-2 px-2 text-right text-orange-500">{fmt(tx.adminFeeApplied)}</td>}
                     <td className={`py-2 px-2 text-right font-semibold ${isNet ? 'text-emerald-600' : 'text-emerald-600'}`}>
