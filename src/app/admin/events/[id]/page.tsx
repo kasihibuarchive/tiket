@@ -11,9 +11,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { toDatetimeLocalValue, formatEventDate, formatEventTime } from '@/lib/date'
 import {
   Loader2, Save, ArrowLeft, Users, Star, Plus, Trash2, Edit, X, Check, MessageSquareQuote,
-  Link2, Copy, ExternalLink, MousePointerClick,
+  Link2, Copy, ExternalLink, MousePointerClick, Clock,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -463,6 +464,9 @@ export default function AdminEventEditPage() {
   const [hideSeatAvailability, setHideSeatAvailability] = useState(false)
   const [hideSoldCount, setHideSoldCount] = useState(false)
 
+  // Show dates (editable open gate only — date & label are read-only after publish)
+  const [showDates, setShowDates] = useState<ShowDateData[]>([])
+
   // Cast & Crew
   const [cast, setCast] = useState<CastMember[]>([])
   const [editingCastIdx, setEditingCastIdx] = useState<number | null>(null)
@@ -502,6 +506,14 @@ export default function AdminEventEditPage() {
         setIsCompleted(ev.isCompleted || false)
         setHideSeatAvailability(ev.hideSeatAvailability || false)
         setHideSoldCount(ev.hideSoldCount || false)
+        // Convert openGate from ISO → datetime-local value (no UTC shift)
+        // so the editable input shows the correct wall-clock WIB time.
+        setShowDates(
+          (ev.showDates || []).map((sd) => ({
+            ...sd,
+            openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : null,
+          }))
+        )
 
         // Parse cast & reviews
         setCast(safeParseArray<CastMember>(ev.castData, []))
@@ -516,10 +528,28 @@ export default function AdminEventEditPage() {
     fetchEvent()
   }, [eventId])
 
+  // ─── Open Gate handler ───────────────────────────────────────
+  // Only the openGate time is editable. The show date itself and label
+  // are preserved as-is (seats already generated + event published).
+  function updateShowDateOpenGate(idx: number, openGateLocal: string) {
+    const updated = [...showDates]
+    updated[idx] = { ...updated[idx], openGate: openGateLocal }
+    setShowDates(updated)
+  }
+
   // ─── Save handler ──────────────────────────────────────────────
   async function handleSave() {
     setIsSaving(true)
     try {
+      // Build showDates payload — preserve id, date, label; convert openGate
+      // datetime-local value to ISO string (interpreted as wall-clock WIB).
+      const showDatesPayload = showDates.map((sd) => ({
+        id: sd.id,
+        date: sd.date,
+        label: sd.label,
+        openGate: sd.openGate ? new Date(sd.openGate).toISOString() : null,
+      }))
+
       const res = await fetch(`/api/admin/events/${eventId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -537,6 +567,7 @@ export default function AdminEventEditPage() {
           hideSoldCount,
           castData: JSON.stringify(cast),
           reviewsData: JSON.stringify(reviews),
+          showDates: showDatesPayload,
         }),
       })
 
@@ -548,6 +579,16 @@ export default function AdminEventEditPage() {
 
       const data = await res.json()
       setEvent(data.event)
+      // Refresh showDates from server response — re-convert openGate to
+      // datetime-local value so the input stays in sync after save.
+      if (data.event?.showDates) {
+        setShowDates(
+          data.event.showDates.map((sd: ShowDateData) => ({
+            ...sd,
+            openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : null,
+          }))
+        )
+      }
       alert('Perubahan berhasil disimpan!')
     } catch (err) {
       console.error('Save error:', err)
@@ -801,6 +842,66 @@ export default function AdminEventEditPage() {
               )}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* ─── Schedule & Open Gate Card ───────────────────────────── */}
+      <Card className="border-border/50">
+        <CardHeader className="pb-3">
+          <div className="flex items-center gap-2">
+            <Clock className="w-5 h-5 text-gold" />
+            <CardTitle className="font-serif text-lg text-charcoal">Jadwal &amp; Open Gate</CardTitle>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Tanggal &amp; jam tayang sudah terkunci (kursi ter-generate). Yang bisa diubah hanya jam <strong>Open Gate</strong> (pintu dibuka). Semua waktu dalam WIB.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {showDates.length === 0 ? (
+            <div className="text-center py-6 rounded-lg border border-dashed border-border/60 bg-muted/20">
+              <Clock className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+              <p className="text-sm text-muted-foreground">Belum ada jadwal pertunjukan</p>
+              <p className="text-xs text-muted-foreground/60">Jadwal diatur saat pembuatan event.</p>
+            </div>
+          ) : (
+            showDates.map((sd, idx) => (
+              <div
+                key={sd.id || idx}
+                className="rounded-lg border border-border/60 p-3 bg-white space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Badge variant="secondary" className="text-[10px] bg-gold/10 text-gold-dark px-1.5 py-0 shrink-0">
+                      Hari {idx + 1}
+                    </Badge>
+                    {sd.label && (
+                      <span className="text-xs font-medium text-charcoal truncate">· {sd.label}</span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-medium text-charcoal">Tayang:</span>{' '}
+                    {formatEventDate(sd.date)} · {formatEventTime(sd.date)}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 items-end">
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Open Gate (WIB)</Label>
+                    <Input
+                      type="datetime-local"
+                      value={sd.openGate || ''}
+                      onChange={(e) => updateShowDateOpenGate(idx, e.target.value)}
+                      className="h-9 text-sm"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground/70 sm:pb-2">
+                    {sd.openGate
+                      ? <>Pintu dibuka <strong>{formatEventTime(sd.openGate)}</strong></>
+                      : 'Belum diatur — pintu mengikuti jam tayang.'}
+                  </p>
+                </div>
+              </div>
+            ))
+          )}
         </CardContent>
       </Card>
 

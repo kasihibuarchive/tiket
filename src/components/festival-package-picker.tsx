@@ -38,14 +38,14 @@ interface FestivalPackagePickerProps {
   }) => void
 }
 
-// Format date for display: "Sen, 12 Jun · 19:30"
+// Format date for display: "Sen, 12 Jun · 19:30 WIB"
 function formatDay(d: string) {
   const date = new Date(d)
   return {
-    weekday: date.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' }),
-    dayMonth: date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' }),
-    time: date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }),
-    label: date.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Jakarta' }),
+    weekday: date.toLocaleDateString('id-ID', { weekday: 'short' }),
+    dayMonth: date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+    time: `${date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`,
+    label: date.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long' }),
   }
 }
 

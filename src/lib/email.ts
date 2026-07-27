@@ -23,20 +23,16 @@ function getTransporter() {
   })
 }
 
-const JAKARTA_TZ = 'Asia/Jakarta'
-
 function formatDayShort(iso: string): string {
   return new Date(iso).toLocaleDateString('id-ID', {
     weekday: 'short', day: 'numeric', month: 'short',
-    timeZone: JAKARTA_TZ,
   })
 }
 
 function formatTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString('id-ID', {
+  return `${new Date(iso).toLocaleTimeString('id-ID', {
     hour: '2-digit', minute: '2-digit',
-    timeZone: JAKARTA_TZ,
-  })
+  })} WIB`
 }
 
 // ── Build the .highlight info-rows block depending on ticket type ──

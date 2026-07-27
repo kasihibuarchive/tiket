@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
         const scanTime = transaction.checkInTime
         return NextResponse.json({
           status: 'WARNING',
-          message: `Sudah di-scan pada ${scanTime.toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', dateStyle: 'full', timeStyle: 'short' })}`,
+          message: `Sudah di-scan pada ${scanTime.toLocaleString('id-ID', { dateStyle: 'full', timeStyle: 'short' })} WIB`,
           transaction: serializeTransaction(transaction),
         })
       }
@@ -407,7 +407,6 @@ function formatDayLabel(dateInput: Date | string): string {
   const d = new Date(dateInput)
   return d.toLocaleDateString('id-ID', {
     weekday: 'short', day: 'numeric', month: 'short',
-    timeZone: 'Asia/Jakarta',
   })
 }
 

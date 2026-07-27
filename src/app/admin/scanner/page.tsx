@@ -310,8 +310,8 @@ export default function UsherScannerPage() {
                 <div className="mt-2 space-y-1.5">
                   {festival.applicableShowDates.map((d) => {
                     const date = new Date(d.date)
-                    const weekday = date.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' })
-                    const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' })
+                    const weekday = date.toLocaleDateString('id-ID', { weekday: 'short' })
+                    const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
                     const isToday = d.id === festival.targetShowDateId
                     return (
                       <div
@@ -463,8 +463,8 @@ export default function UsherScannerPage() {
                 <div className="mt-2 space-y-1.5">
                   {festival.applicableShowDates.map((d) => {
                     const date = new Date(d.date)
-                    const weekday = date.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' })
-                    const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' })
+                    const weekday = date.toLocaleDateString('id-ID', { weekday: 'short' })
+                    const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
                     const isToday = d.id === festival.targetShowDateId
                     return (
                       <div
@@ -607,9 +607,9 @@ export default function UsherScannerPage() {
               <div className="space-y-1.5">
                 {festival.applicableShowDates.map((d) => {
                   const date = new Date(d.date)
-                  const weekday = date.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' })
-                  const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' })
-                  const time = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })
+                  const weekday = date.toLocaleDateString('id-ID', { weekday: 'short' })
+                  const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+                  const time = `${date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
                   return (
                     <div key={d.id} className="flex items-center justify-between text-sm">
                       <span className="font-mono">{weekday}, {dayMonth} · {time}</span>

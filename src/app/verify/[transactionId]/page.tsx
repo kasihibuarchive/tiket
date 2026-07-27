@@ -461,7 +461,6 @@ export default function VerifyPage() {
                       <span className="font-medium text-charcoal">
                         {new Date(regularShowDate.openGate).toLocaleTimeString('id-ID', {
                           hour: '2-digit', minute: '2-digit',
-                          timeZone: 'Asia/Jakarta',
                         })}
                       </span>
                       {' '}WIB
@@ -509,11 +508,11 @@ export default function VerifyPage() {
                     <div className="space-y-2">
                       {festival.applicableShowDates.map((d) => {
                         const date = new Date(d.date)
-                        const weekday = date.toLocaleDateString('id-ID', { weekday: 'short', timeZone: 'Asia/Jakarta' })
-                        const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', timeZone: 'Asia/Jakarta' })
-                        const time = date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })
+                        const weekday = date.toLocaleDateString('id-ID', { weekday: 'short' })
+                        const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+                        const time = `${date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
                         const gateTime = d.openGate
-                          ? new Date(d.openGate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' })
+                          ? `${new Date(d.openGate).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
                           : null
                         return (
                           <div

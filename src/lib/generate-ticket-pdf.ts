@@ -10,29 +10,24 @@ const LIGHT_GOLD = '#e8d48b'
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-const JAKARTA_TZ = 'Asia/Jakarta'
-
 function formatDateForPdf(iso: string | Date): string {
   // "Sabtu, 5 Juli 2025"
   return new Date(iso).toLocaleDateString('id-ID', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    timeZone: JAKARTA_TZ,
   })
 }
 
 function formatTimeForPdf(iso: string | Date): string {
-  // "19:00"
-  return new Date(iso).toLocaleTimeString('id-ID', {
+  // "19.00 WIB"
+  return `${new Date(iso).toLocaleTimeString('id-ID', {
     hour: '2-digit', minute: '2-digit',
-    timeZone: JAKARTA_TZ,
-  })
+  })} WIB`
 }
 
 function formatDayShortForPdf(iso: string | Date): string {
   // "Sab, 5 Jul"
   return new Date(iso).toLocaleDateString('id-ID', {
     weekday: 'short', day: 'numeric', month: 'short',
-    timeZone: JAKARTA_TZ,
   })
 }
 

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatShortDate } from '@/lib/date'
+import { formatShortDate, toDatetimeLocalValue } from '@/lib/date'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -202,13 +202,13 @@ export default function AdminEventsPage() {
     const showDates: ShowDateForm[] = (event.showDates && event.showDates.length > 0)
       ? event.showDates.map((sd, idx) => ({
           id: sd.id,
-          date: new Date(sd.date).toISOString().slice(0, 16),
-          openGate: sd.openGate ? new Date(sd.openGate).toISOString().slice(0, 16) : '',
+          date: toDatetimeLocalValue(sd.date),
+          openGate: sd.openGate ? toDatetimeLocalValue(sd.openGate) : '',
           label: sd.label || '',
           tempId: `d${idx + 1}`,
         }))
       : [
-          { date: new Date(event.showDate).toISOString().slice(0, 16), openGate: '', label: '', tempId: 'd1' },
+          { date: toDatetimeLocalValue(event.showDate), openGate: '', label: '', tempId: 'd1' },
         ]
 
     // Map price categories — convert DB applicableDayIds (array of showDate DB IDs) to tempIds for frontend editing
@@ -221,8 +221,8 @@ export default function AdminEventsPage() {
     setFormData({
       title: event.title,
       category: event.category,
-      showDate: new Date(event.showDate).toISOString().slice(0, 16),
-      openGate: event.showDates?.[0]?.openGate ? new Date(event.showDates[0].openGate).toISOString().slice(0, 16) : '',
+      showDate: toDatetimeLocalValue(event.showDate),
+      openGate: event.showDates?.[0]?.openGate ? toDatetimeLocalValue(event.showDates[0].openGate) : '',
       location: event.location,
       posterUrl: event.posterUrl || '',
       teaserVideoUrl: event.teaserVideoUrl || '',
@@ -1145,7 +1145,7 @@ export default function AdminEventsPage() {
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Buka Pintu</Label>
+                      <Label className="text-xs text-muted-foreground">Buka Pintu (WIB)</Label>
                       <Input
                         type="datetime-local"
                         value={sd.openGate}
@@ -1155,7 +1155,7 @@ export default function AdminEventsPage() {
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Tanggal & Waktu Tayang *</Label>
+                    <Label className="text-xs text-muted-foreground">Tanggal & Waktu Tayang (WIB) *</Label>
                     <Input
                       type="datetime-local"
                       value={sd.date}

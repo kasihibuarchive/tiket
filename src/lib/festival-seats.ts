@@ -35,22 +35,22 @@ export interface EmailTicketPayload {
 // Helper: format a Date for email/PDF display
 // ───────────────────────────────────────────────────────────────────
 
-const JAKARTA_TZ = 'Asia/Jakarta'
-
 function formatShowDateDisplay(iso: string | Date): string {
-  return new Date(iso).toLocaleDateString('id-ID', {
+  const d = new Date(iso)
+  const datePart = d.toLocaleDateString('id-ID', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-    timeZone: JAKARTA_TZ,
   })
+  const timePart = d.toLocaleTimeString('id-ID', {
+    hour: '2-digit', minute: '2-digit',
+  })
+  return `${datePart} ${timePart} WIB`
 }
 
 function formatOpenGateDisplay(iso: string | Date | null): string | null {
   if (!iso) return null
-  return new Date(iso).toLocaleTimeString('id-ID', {
+  return `${new Date(iso).toLocaleTimeString('id-ID', {
     hour: '2-digit', minute: '2-digit',
-    timeZone: JAKARTA_TZ,
-  })
+  })} WIB`
 }
 
 // ───────────────────────────────────────────────────────────────────
