@@ -95,57 +95,55 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Paket festival tidak memiliki hari yang berlaku. Hubungi admin.' }, { status: 400 })
       }
 
-      // For each applicable day, pick `qty` available GA seats matching the price category zone
-      // (zone name = price category name in our auto-built GA config)
-      const uniqueSeatCodes = new Set<string>()
-      const allPickedSeats: { id: string; seatCode: string; eventShowDateId: string; priceCategoryId: string }[] = []
+      // ─── NEW MODEL: 1 tiket = 1 seat (single pool, no per-day duplication) ───
+      // Multi-day access is encoded in the seatCode stored on the transaction:
+      //   "VIP-1@day1abc,day2def,day3ghi"
+      // The seat itself has eventShowDateId = null. The applicable days are
+      // derived from the price category's applicableDayIds at checkout time.
+      //
+      // Availability = count of AVAILABLE seats in this package's zone, period.
+      // No per-day breakdown, no min-across-days.
+      const allPickedSeats: { id: string; seatCode: string; priceCategoryId: string }[] = []
 
-      for (const dayId of applicableDayIds) {
-        // Find available GA seats for this day + price category
-        const availableSeats = await db.seat.findMany({
-          where: {
-            eventId,
-            eventShowDateId: dayId,
-            priceCategoryId: priceCat.id,
-            status: 'AVAILABLE',
-          },
-          orderBy: { seatCode: 'asc' },
-          take: qty,
-        })
+      // Find `qty` available GA seats in this price category's zone
+      // (zoneName === price category name in our auto-built GA config)
+      const availableSeats = await db.seat.findMany({
+        where: {
+          eventId,
+          priceCategoryId: priceCat.id,
+          status: 'AVAILABLE',
+        },
+        orderBy: { seatCode: 'asc' },
+        take: qty,
+      })
 
-        if (availableSeats.length < qty) {
-          const dayLabel = await db.eventShowDate.findUnique({ where: { id: dayId } })
-          const dateStr = dayLabel
-            ? new Date(dayLabel.date).toLocaleDateString('id-ID', { weekday: 'short', day: 'numeric', month: 'short' })
-            : dayId
-          return NextResponse.json({
-            error: `Tiket untuk hari ${dateStr} hanya tersisa ${availableSeats.length} (Anda pesan ${qty}). Kurangi jumlah atau pilih paket lain.`,
-          }, { status: 409 })
-        }
-
-        for (const s of availableSeats) {
-          allPickedSeats.push({
-            id: s.id,
-            seatCode: s.seatCode,
-            eventShowDateId: s.eventShowDateId!,
-            priceCategoryId: s.priceCategoryId!,
-          })
-          // Make seat code unique across days (since same seatCode can exist on multiple days)
-          uniqueSeatCodes.add(`${s.seatCode}@${dayId}`)
-        }
+      if (availableSeats.length < qty) {
+        return NextResponse.json({
+          error: `Tiket tinggal ${availableSeats.length} (Anda pesan ${qty}). Kurangi jumlah atau pilih paket lain.`,
+        }, { status: 409 })
       }
 
-      // Lock all picked seats (across all days) under this checkout session
+      for (const s of availableSeats) {
+        allPickedSeats.push({
+          id: s.id,
+          seatCode: s.seatCode,
+          priceCategoryId: s.priceCategoryId!,
+        })
+      }
+
+      // Lock the picked seats under this checkout session
       const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
       await db.seat.updateMany({
         where: { id: { in: allPickedSeats.map(s => s.id) } },
         data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
       })
 
-      festivalAutoSeats = allPickedSeats
-      // For backward compat with seatCodes JSON column — store as flat array with day prefix
-      // e.g., ["VIP-1@day1abc", "VIP-1@day2def", ...] so we can map back when scanning
-      festivalSeatCodes = allPickedSeats.map(s => `${s.seatCode}@${s.eventShowDateId}`)
+      festivalAutoSeats = allPickedSeats as any
+      // Encode applicable day IDs into seatCode string for check-in:
+      // "VIP-1@day1abc,day2def,day3ghi" — usher scans, system knows ticket
+      // is valid for any of those days.
+      const dayIdsJoined = applicableDayIds.join(',')
+      festivalSeatCodes = allPickedSeats.map(s => `${s.seatCode}@${dayIdsJoined}`)
     } else {
       // REGULAR Mode: validate seats as before
       const seatWhere: any = { eventId, seatCode: { in: seatCodes } }

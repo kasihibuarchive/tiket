@@ -4,7 +4,32 @@ import {
   parseSeatCodes,
   isFestivalSeatCodes,
   computeEffectiveTicketCount,
+  getFestivalDayIds,
 } from '@/lib/festival-seats'
+
+// Helper: look up a seat in the composite-key map for both new & legacy festival formats.
+// New format: "VIP-1@day1,day2,day3" → try seatCode only (empty dayId) first, then each dayId.
+// Legacy format: "VIP-1@day1" → try (seatCode, dayId).
+function lookupSeatPriceCat<T>(
+  map: Map<string, T>,
+  rawCode: string
+): T | null {
+  if (!rawCode.includes('@')) {
+    return map.get(`${rawCode}|`) || null
+  }
+  const [sc, dayPart] = rawCode.split('@')
+  // Try seatCode only first (new model — seat.eventShowDateId is null)
+  const byCode = map.get(`${sc}|`)
+  if (byCode) return byCode
+  // Fallback: try each day ID (legacy model — seat.eventShowDateId is set)
+  if (dayPart) {
+    for (const did of dayPart.split(',')) {
+      const found = map.get(`${sc}|${did}`)
+      if (found) return found
+    }
+  }
+  return null
+}
 
 export async function GET(
   _request: Request,
@@ -201,31 +226,30 @@ export async function GET(
         festivalGrossRevenue += tx.totalAmount
 
         // Look up the price category to find the package type
-        const firstPair = seatCodesArr[0]?.split('@')
-        if (firstPair && firstPair.length >= 2) {
-          const seatInfo = seatPriceCatLookup.get(`${firstPair[0]}|${firstPair[1]}`)
-          if (seatInfo) {
-            const pcInfo = festivalPcLookup.get(seatInfo.id)
-            if (pcInfo) {
-              const key = seatInfo.id
-              if (!festivalPackageMap[key]) {
-                festivalPackageMap[key] = {
-                  packageType: pcInfo.packageType,
-                  packageName: seatInfo.name,
-                  daysCount: pcInfo.applicableDayIds.length,
-                  ticketCount: 0,
-                  transactions: 0,
-                  grossRevenue: 0,
-                  adminFee: 0,
-                  netRevenue: 0,
-                }
+        const seatInfo = seatCodesArr[0]
+          ? lookupSeatPriceCat(seatPriceCatLookup, seatCodesArr[0])
+          : null
+        if (seatInfo) {
+          const pcInfo = festivalPcLookup.get(seatInfo.id)
+          if (pcInfo) {
+            const key = seatInfo.id
+            if (!festivalPackageMap[key]) {
+              festivalPackageMap[key] = {
+                packageType: pcInfo.packageType,
+                packageName: seatInfo.name,
+                daysCount: pcInfo.applicableDayIds.length,
+                ticketCount: 0,
+                transactions: 0,
+                grossRevenue: 0,
+                adminFee: 0,
+                netRevenue: 0,
               }
-              festivalPackageMap[key].ticketCount += effectiveTicketCount
-              festivalPackageMap[key].transactions++
-              festivalPackageMap[key].grossRevenue += tx.totalAmount
-              festivalPackageMap[key].adminFee += adminFee
-              festivalPackageMap[key].netRevenue += tx.totalAmount - adminFee
             }
+            festivalPackageMap[key].ticketCount += effectiveTicketCount
+            festivalPackageMap[key].transactions++
+            festivalPackageMap[key].grossRevenue += tx.totalAmount
+            festivalPackageMap[key].adminFee += adminFee
+            festivalPackageMap[key].netRevenue += tx.totalAmount - adminFee
           }
         }
       } else {
@@ -241,23 +265,15 @@ export async function GET(
 
       // Per category — find this transaction's price category from the first seat
       let txPriceCatId: string | null = null
+      let txPriceCatInfo: { id: string; name: string; price: number; color: string } | null = null
       if (seatCodesArr.length > 0) {
-        if (isFestival) {
-          const [sc, did] = seatCodesArr[0].split('@')
-          txPriceCatId = seatPriceCatLookup.get(`${sc}|${did || ''}`)?.id || null
-        } else {
-          txPriceCatId = seatPriceCatLookup.get(`${seatCodesArr[0]}|`)?.id || null
-        }
+        txPriceCatInfo = lookupSeatPriceCat(seatPriceCatLookup, seatCodesArr[0])
+        txPriceCatId = txPriceCatInfo?.id || null
       }
-      if (txPriceCatId) {
-        const seatInfo = seatPriceCatLookup.get(
-          isFestival
-            ? `${seatCodesArr[0].split('@')[0]}|${seatCodesArr[0].split('@')[1] || ''}`
-            : `${seatCodesArr[0]}|`
-        )
-        const catName = seatInfo?.name || 'Lainnya'
-        const catPrice = seatInfo?.price || 0
-        const catColor = seatInfo?.color || '#8B8680'
+      if (txPriceCatId && txPriceCatInfo) {
+        const catName = txPriceCatInfo.name || 'Lainnya'
+        const catPrice = txPriceCatInfo.price || 0
+        const catColor = txPriceCatInfo.color || '#8B8680'
         if (!catRevenueMap[txPriceCatId]) {
           catRevenueMap[txPriceCatId] = { name: catName, price: catPrice, color: catColor, count: 0, grossRevenue: 0 }
         }

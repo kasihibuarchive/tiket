@@ -4,18 +4,23 @@ import { db, withDbRetry } from '@/lib/db'
 /**
  * POST /api/admin/events/[id]/fix-seats
  *
- * Diagnose & fix: duplicate seats from an existing show date to days
- * that have 0 seats. Safe — never deletes existing seats.
+ * Consolidate duplicated per-day seats into a single pool.
  *
- * Use case: event was created with 1 show date (legacy bug), seats were
- * generated only for day 1. Admin then added days 2-4 via edit event page.
- * Days 2-4 exist in EventShowDate but have NO seats → packages show "Habis".
+ * NEW MODEL (current):
+ *   - Multi-day is just metadata on PriceCategory.applicableDayIds
+ *   - Seats have eventShowDateId = null (single pool, not duplicated per day)
+ *   - 1 tiket = 1 seat in its package zone, regardless of how many days it covers
  *
- * This endpoint:
- *   1. Lists all show dates + seat counts
- *   2. Finds a source day (prefer day with 0 sold seats)
- *   3. Duplicates seats to all days with 0 seats
- *   4. New seats get status=AVAILABLE (fresh inventory)
+ * OLD MODEL (legacy):
+ *   - Seats were duplicated per show date (4 days × 100 seats = 400 seats)
+ *   - Each seat had eventShowDateId set
+ *   - Caused over-counting and confused availability
+ *
+ * This endpoint migrates old-model data to new-model:
+ *   1. For each (eventId, seatCode, zoneName) group with multiple records:
+ *      - Keep ONE record (prefer AVAILABLE > LOCKED > SOLD)
+ *      - Delete the rest
+ *   2. Clear eventShowDateId on all remaining seats
  *
  * Body: { dryRun?: boolean }
  * Returns: { diagnosis, fixed }
@@ -47,155 +52,111 @@ export async function POST(
       return NextResponse.json({ error: 'Event not found' }, { status: 404 })
     }
 
-    const showDates = await withDbRetry(() =>
-      db.eventShowDate.findMany({
-        where: { eventId: id },
-        orderBy: { date: 'asc' },
-      })
-    )
-
-    if (showDates.length === 0) {
-      return NextResponse.json({
-        error: 'Event tidak punya show date. Tambah hari dulu di edit event page.',
-      }, { status: 400 })
-    }
-
-    // Count seats per day
-    const diagnosis = []
-    for (let i = 0; i < showDates.length; i++) {
-      const sd = showDates[i]
-      const seats = await withDbRetry(() =>
-        db.seat.findMany({
-          where: { eventShowDateId: sd.id },
-          select: { status: true },
-        })
-      )
-      const available = seats.filter(s => s.status === 'AVAILABLE').length
-      const sold = seats.filter(s => s.status === 'SOLD').length
-      const locked = seats.filter(s => s.status === 'LOCKED_TEMPORARY').length
-      diagnosis.push({
-        dayIndex: i + 1,
-        showDateId: sd.id,
-        date: sd.date.toISOString(),
-        label: sd.label,
-        totalSeats: seats.length,
-        available,
-        sold,
-        locked,
-        hasSeats: seats.length > 0,
-      })
-    }
-
-    const daysWithSeats = diagnosis.filter(d => d.hasSeats)
-    const daysWithoutSeats = diagnosis.filter(d => !d.hasSeats)
-
-    // If all days have seats, nothing to fix
-    if (daysWithoutSeats.length === 0) {
-      return NextResponse.json({
-        event: { id: event.id, title: event.title },
-        diagnosis,
-        needsFix: false,
-        message: '✅ Semua hari sudah punya kursi. Tidak perlu fix.',
-      })
-    }
-
-    // If no day has seats at all, can't duplicate
-    if (daysWithSeats.length === 0) {
-      return NextResponse.json({
-        event: { id: event.id, title: event.title },
-        diagnosis,
-        needsFix: true,
-        canFix: false,
-        message: '❌ Semua hari kosong. Generate kursi dulu dari admin seat editor.',
-      })
-    }
-
-    // Find source day — prefer a day with 0 sold seats
-    const cleanSource = daysWithSeats.find(d => d.sold === 0) || daysWithSeats[0]
-
-    const result = {
-      event: { id: event.id, title: event.title },
-      diagnosis,
-      needsFix: true,
-      canFix: true,
-      source: {
-        dayIndex: cleanSource.dayIndex,
-        showDateId: cleanSource.showDateId,
-        seatCount: cleanSource.totalSeats,
-        sold: cleanSource.sold,
-      },
-      targets: daysWithoutSeats.map(d => ({
-        dayIndex: d.dayIndex,
-        showDateId: d.showDateId,
-        label: d.label,
-      })),
-    }
-
-    if (dryRun) {
-      return NextResponse.json({
-        ...result,
-        message: `🔍 Dry run: akan duplikat ${cleanSource.totalSeats} kursi dari Hari ${cleanSource.dayIndex} ke ${daysWithoutSeats.length} hari.`,
-      })
-    }
-
-    // ─── EXECUTE FIX ───────────────────────────────────────────────
-    const sourceSeats = await withDbRetry(() =>
+    // ─── DIAGNOSIS ────────────────────────────────────────────────
+    const allSeats = await withDbRetry(() =>
       db.seat.findMany({
-        where: { eventShowDateId: cleanSource.showDateId },
+        where: { eventId: id },
         select: {
+          id: true,
           seatCode: true,
-          status: true,
-          row: true,
-          col: true,
           zoneName: true,
+          status: true,
+          eventShowDateId: true,
           priceCategoryId: true,
         },
       })
     )
 
-    const fixed = []
-    let totalCreated = 0
+    const totalSeats = allSeats.length
+    const seatsWithDateId = allSeats.filter(s => s.eventShowDateId !== null).length
+    const seatsWithoutDateId = allSeats.filter(s => s.eventShowDateId === null).length
 
-    for (const target of daysWithoutSeats) {
-      const existing = await db.seat.count({ where: { eventShowDateId: target.showDateId } })
-      if (existing > 0) {
-        fixed.push({
-          dayIndex: target.dayIndex,
-          label: target.label,
-          created: 0,
-          skipped: true,
-          reason: 'Sudah ada kursi',
-        })
-        continue
-      }
+    // Group by (seatCode, zoneName) to detect duplicates
+    const groups = new Map<string, typeof allSeats>()
+    for (const s of allSeats) {
+      const key = `${s.seatCode}||${s.zoneName || ''}`
+      if (!groups.has(key)) groups.set(key, [])
+      groups.get(key)!.push(s)
+    }
+    const duplicateGroups = [...groups.values()].filter(g => g.length > 1)
+    const totalDuplicates = duplicateGroups.reduce((sum, g) => sum + g.length - 1, 0)
 
-      const createResult = await db.seat.createMany({
-        data: sourceSeats.map(s => ({
-          eventId: id,
-          eventShowDateId: target.showDateId,
-          seatCode: s.seatCode,
-          status: 'AVAILABLE' as const,
-          row: s.row,
-          col: s.col,
-          zoneName: s.zoneName,
-          priceCategoryId: s.priceCategoryId,
-        })),
-      })
-
-      fixed.push({
-        dayIndex: target.dayIndex,
-        showDateId: target.showDateId,
-        label: target.label,
-        created: createResult.count,
-      })
-      totalCreated += createResult.count
+    const diagnosis = {
+      totalSeats,
+      seatsWithDateId,
+      seatsWithoutDateId,
+      duplicateGroups: duplicateGroups.length,
+      totalDuplicatesToDelete: totalDuplicates,
+      needsConsolidation: seatsWithDateId > 0 || totalDuplicates > 0,
     }
 
+    if (!diagnosis.needsConsolidation) {
+      return NextResponse.json({
+        event: { id: event.id, title: event.title },
+        diagnosis,
+        needsFix: false,
+        message: '✅ Kursi sudah dalam model single-pool. Tidak perlu konsolidasi.',
+      })
+    }
+
+    if (dryRun) {
+      return NextResponse.json({
+        event: { id: event.id, title: event.title },
+        diagnosis,
+        needsFix: true,
+        canFix: true,
+        message: `🔍 Dry run: akan hapus ${totalDuplicates} kursi duplikat & clear eventShowDateId pada ${seatsWithDateId} kursi.`,
+      })
+    }
+
+    // ─── EXECUTE CONSOLIDATION ────────────────────────────────────
+    // Status priority: AVAILABLE > LOCKED_TEMPORARY > SOLD > others
+    // (keep the most "available" record so inventory is preserved)
+    const statusPriority: Record<string, number> = {
+      AVAILABLE: 1,
+      LOCKED_TEMPORARY: 2,
+      SOLD: 3,
+    }
+    const getStatusScore = (s: string) => statusPriority[s] ?? 99
+
+    let deletedCount = 0
+    const idsToDelete: string[] = []
+
+    for (const group of duplicateGroups) {
+      // Sort by status priority — keep the first one (best status)
+      const sorted = [...group].sort((a, b) => getStatusScore(a.status) - getStatusScore(b.status))
+      const keep = sorted[0]
+      const remove = sorted.slice(1)
+      idsToDelete.push(...remove.map(s => s.id))
+    }
+
+    if (idsToDelete.length > 0) {
+      // Delete in batches to avoid SQLite/Postgres parameter limits
+      const BATCH = 500
+      for (let i = 0; i < idsToDelete.length; i += BATCH) {
+        const batch = idsToDelete.slice(i, i + BATCH)
+        const r = await db.seat.deleteMany({ where: { id: { in: batch } } })
+        deletedCount += r.count
+      }
+    }
+
+    // Clear eventShowDateId on ALL remaining seats for this event
+    const cleared = await db.seat.updateMany({
+      where: { eventId: id, eventShowDateId: { not: null } },
+      data: { eventShowDateId: null },
+    })
+
     return NextResponse.json({
-      ...result,
-      message: `🎉 Berhasil! ${totalCreated} kursi baru dibuat untuk ${daysWithoutSeats.length} hari. Status: AVAILABLE (fresh).`,
-      fixed,
-      totalCreated,
+      event: { id: event.id, title: event.title },
+      diagnosis,
+      needsFix: true,
+      canFix: true,
+      fixed: {
+        deletedDuplicates: deletedCount,
+        clearedDateId: cleared.count,
+        remainingSeats: totalSeats - deletedCount,
+      },
+      message: `🎉 Berhasil! ${deletedCount} kursi duplikat dihapus, ${cleared.count} kursi di-clear eventShowDateId-nya. Sekarang ${totalSeats - deletedCount} kursi single-pool.`,
     })
   } catch (error) {
     console.error('Error fixing seats:', error)

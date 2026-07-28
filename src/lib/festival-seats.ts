@@ -82,8 +82,8 @@ export async function buildEmailTicketPayload(
   let festivalDays: FestivalDayInfo[] | undefined
 
   if (isFestivalFormat) {
-    // FESTIVAL — show all applicable days
-    const applicableDayIds = [...new Set(seatCodes.map((c) => c.split('@')[1]))]
+    // FESTIVAL — show all applicable days (handles both new & legacy seatCode formats)
+    const applicableDayIds = getFestivalDayIds(seatCodes)
     const showDates = await db.eventShowDate.findMany({
       where: { id: { in: applicableDayIds } },
       orderBy: { date: 'asc' },
@@ -167,21 +167,41 @@ export function isFestivalSeatCodes(seatCodes: string[]): boolean {
 }
 
 // ───────────────────────────────────────────────────────────────────
+// Helper: detect NEW format (comma-separated multi-day in single code)
+// New format: "VIP-1@day1abc,day2def,day3ghi" — 1 code = 1 tiket (multi-day)
+// Legacy format: "VIP-1@day1abc" — 1 code per (ticket × day), multiple codes for multi-day
+// ───────────────────────────────────────────────────────────────────
+function isNewFestivalFormat(seatCodes: string[]): boolean {
+  return seatCodes.some((c) => {
+    const parts = c.split('@')
+    return parts.length >= 2 && parts[1].includes(',')
+  })
+}
+
+// ───────────────────────────────────────────────────────────────────
 // Helper: compute the effective ticket count from seatCodes.
 //
 // REGULAR mode: each seatCode = 1 ticket. Returns seatCodes.length.
-// FESTIVAL mode: seatCodes are stored as `seatCode@dayId`, one entry
-//   per (ticket × day). So a 2-day pass × 3 tickets = 6 seat codes.
+//
+// NEW FESTIVAL format ("VIP-1@day1,day2,day3"):
+//   1 code = 1 tiket (covers multiple days). Returns seatCodes.length.
+//
+// LEGACY FESTIVAL format ("VIP-1@day1", "VIP-1@day2", ...):
+//   1 code per (ticket × day). 2-day pass × 3 tickets = 6 codes.
 //   Effective ticket count = total / uniqueDays.
 //
 // This is the canonical helper to use ANYWHERE the dashboard / finance
 // report needs the "real" number of tickets sold — using seatCodes.length
-// directly will OVER-COUNT festival sales by N× (where N = days per pass).
+// directly will OVER-COUNT legacy festival sales by N× (where N = days per pass).
 // ───────────────────────────────────────────────────────────────────
 export function computeEffectiveTicketCount(seatCodes: string[]): number {
   if (seatCodes.length === 0) return 0
   if (!isFestivalSeatCodes(seatCodes)) return seatCodes.length
 
+  // NEW format: 1 code = 1 tiket, no division needed
+  if (isNewFestivalFormat(seatCodes)) return seatCodes.length
+
+  // LEGACY format: divide by unique day count
   const uniqueDayIds = new Set<string>()
   for (const code of seatCodes) {
     const parts = code.split('@')
@@ -194,13 +214,21 @@ export function computeEffectiveTicketCount(seatCodes: string[]): number {
 // ───────────────────────────────────────────────────────────────────
 // Helper: extract unique day IDs from festival seatCodes.
 // Returns [] for regular transactions.
+//
+// Handles BOTH formats:
+//   New: "VIP-1@day1,day2,day3" → split parts[1] on ',' → [day1, day2, day3]
+//   Legacy: "VIP-1@day1" → parts[1] is single ID → [day1]
 // ───────────────────────────────────────────────────────────────────
 export function getFestivalDayIds(seatCodes: string[]): string[] {
   if (!isFestivalSeatCodes(seatCodes)) return []
   const ids = new Set<string>()
   for (const code of seatCodes) {
     const parts = code.split('@')
-    if (parts.length >= 2 && parts[1]) ids.add(parts[1])
+    if (parts.length < 2 || !parts[1]) continue
+    // Split on ',' to handle new multi-day format (and legacy single-day gracefully)
+    for (const dayId of parts[1].split(',')) {
+      if (dayId) ids.add(dayId)
+    }
   }
   return Array.from(ids)
 }
@@ -228,8 +256,20 @@ export async function markSeatsForTransaction(
     return result.count
   }
 
-  // Festival mode: split into (seatCode, dayId) pairs and update each
-  // Group by seatCode for efficient querying
+  // Festival mode — NEW format: "VIP-1@day1,day2,day3"
+  // The seat itself has eventShowDateId = null. Just match by seatCode.
+  // The day IDs in the seatCode string are metadata for check-in only.
+  if (isNewFestivalFormat(seatCodes)) {
+    const seatCodesOnly = seatCodes.map((code) => code.split('@')[0])
+    const result = await db.seat.updateMany({
+      where: { eventId, seatCode: { in: seatCodesOnly } },
+      data: { status: newStatus, ...extras },
+    })
+    return result.count
+  }
+
+  // Festival mode — LEGACY format: "VIP-1@day1" (one code per ticket × day)
+  // Match by (seatCode, eventShowDateId) pairs.
   const pairs = seatCodes.map((code) => {
     const [seatCode, dayId] = code.split('@')
     return { seatCode, dayId }
@@ -278,8 +318,9 @@ export async function buildQrText(transaction: {
   // Festival mode — fetch price category info to display package name
   // Get the first seat to find the price category, then derive package info
   const firstPair = seatCodes[0].split('@')
+  // Under new model, seats have eventShowDateId = null. Match by seatCode only.
   const firstSeat = await db.seat.findFirst({
-    where: { eventId: transaction.eventId, seatCode: firstPair[0], eventShowDateId: firstPair[1] },
+    where: { eventId: transaction.eventId, seatCode: firstPair[0] },
     select: { priceCategoryId: true },
   })
 
@@ -302,8 +343,8 @@ export async function buildQrText(transaction: {
     }
   }
 
-  // Count unique tickets (one ticket = one seat per day; quantity = total seats / days)
-  const ticketCount = Math.floor(seatCodes.length / (applicableDayIds.length || 1)) || seatCodes.length
+  // Ticket count — use canonical helper (handles both new & legacy formats)
+  const ticketCount = computeEffectiveTicketCount(seatCodes)
 
   return 'NAMA: ' + transaction.customerName +
     ' | FESTIVAL: ' + packageName + ' (' + ticketCount + ' tiket)' +

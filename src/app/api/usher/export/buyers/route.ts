@@ -98,11 +98,24 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Helper to look up a seat by raw code (regular: 'A-1', festival: 'A-1@dayId')
+    // Helper to look up a seat by raw code
+    // Regular: 'A-1' → match by seatCode
+    // Festival legacy: 'A-1@dayId' → match by (seatCode, dayId)
+    // Festival new: 'A-1@day1,day2,day3' → match by seatCode only (seats have null eventShowDateId)
     function lookupSeat(code: string) {
       if (code.includes('@')) {
-        const [sc, did] = code.split('@')
-        return seatMap.get(`${sc}|${did || ''}`) || null
+        const [sc, dayPart] = code.split('@')
+        // Try seatCode only first (new model — seat.eventShowDateId is null)
+        const byCode = seatMap.get(`${sc}|`)
+        if (byCode) return byCode
+        // Fallback: try each day ID (legacy model — seat.eventShowDateId is set)
+        if (dayPart) {
+          for (const did of dayPart.split(',')) {
+            const found = seatMap.get(`${sc}|${did}`)
+            if (found) return found
+          }
+        }
+        return null
       }
       return seatMap.get(`${code}|`) || null
     }
@@ -216,9 +229,17 @@ export async function GET(request: NextRequest) {
       })
 
       // For festival passes, the displayed "Kode Kursi" should show the package name + day count,
-      // not the raw seat entries (which are auto-generated GA seats per day)
+      // not the raw seat entries (which are auto-generated GA seats)
+      // Handles both legacy format (seatCode@day1, seatCode@day2) and new format (seatCode@day1,day2)
+      const uniqueDayCount = isFestival
+        ? new Set(seatCodes.flatMap(c => {
+            const parts = c.split('@')
+            if (parts.length < 2 || !parts[1]) return []
+            return parts[1].split(',').filter(Boolean)
+          })).size
+        : 0
       const seatCodesStr = isFestival
-        ? `${seatDetails[0]?.category || 'Festival Pass'} × ${effectiveTicketCount} tiket (${seatCodes.length} seat entries across ${new Set(seatCodes.map(c => c.split('@')[1])).size} hari)`
+        ? `${seatDetails[0]?.category || 'Festival Pass'} × ${effectiveTicketCount} tiket (${seatCodes.length} seat entries, ${uniqueDayCount} hari)`
         : (seatCodes.join(', ') || '-')
       const zoneNames = [...new Set(seatDetails.map(s => s.zone))].join(', ')
       const categoryNames = [...new Set(seatDetails.map(s => s.category))].join(', ')

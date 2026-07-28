@@ -293,46 +293,40 @@ export async function POST(
       return true
     })
 
-    // ─── Multi-day: duplicate seats per show date ─────────────────────
-    // If event has multiple show dates, create separate seat inventories per date.
-    // If event has only 1 show date (or none), create seats without showDateId (backward compat).
-    let totalCreated = 0
+    // ─── Seat inventory: ONE pool of seats, NOT duplicated per day ────
+    // Multi-day is just metadata — applicableDayIds on each PriceCategory
+    // determines which days a ticket grants access to. We do NOT multiply
+    // seats by the number of show dates.
+    //
+    // Mental model:
+    //   - 1 tiket "Day 2"     = 1 seat in zone "Day 2"
+    //   - 1 tiket "Day 2&3"   = 1 seat in zone "Day 2&3" (valid for 2 days)
+    //   - 1 tiket "FULL Pass" = 1 seat in zone "FULL Pass" (valid all days)
+    //
+    // Each PriceCategory IS its own tiket pool. Selling a Day 2 tiket does
+    // not reduce the FULL Pass pool. The pools are independent.
+    //
+    // Seats are created WITHOUT eventShowDateId — the linkage to days is
+    // done via PriceCategory.applicableDayIds, which the check-in / scan
+    // logic reads to know which days the ticket grants access to.
+    //
+    // For single-show-date events, we still don't set eventShowDateId on
+    // the seat — the relation is implicit via the event itself.
 
-    if (showDates.length > 1) {
-      // Multi-day event: create seats for EACH show date
-      for (const sd of showDates) {
-        const result = await db.seat.createMany({
-          skipDuplicates: true,
-          data: uniqueSeatData.map((s) => ({
-            eventId: id,
-            eventShowDateId: sd.id,
-            seatCode: s.seatCode,
-            status: s.status as 'AVAILABLE',
-            row: s.row,
-            col: s.col,
-            priceCategoryId: s.priceCategoryId,
-            zoneName: s.zoneName,
-          })),
-        })
-        totalCreated += result.count
-      }
-    } else {
-      // Single-day event: create seats without showDateId
-      const result = await db.seat.createMany({
-        skipDuplicates: true,
-        data: uniqueSeatData.map((s) => ({
-          eventId: id,
-          eventShowDateId: showDates.length === 1 ? showDates[0].id : null,
-          seatCode: s.seatCode,
-          status: s.status as 'AVAILABLE',
-          row: s.row,
-          col: s.col,
-          priceCategoryId: s.priceCategoryId,
-          zoneName: s.zoneName,
-        })),
-      })
-      totalCreated = result.count
-    }
+    const result = await db.seat.createMany({
+      skipDuplicates: true,
+      data: uniqueSeatData.map((s) => ({
+        eventId: id,
+        eventShowDateId: null,  // ← never tie a seat to a specific day
+        seatCode: s.seatCode,
+        status: s.status as 'AVAILABLE',
+        row: s.row,
+        col: s.col,
+        priceCategoryId: s.priceCategoryId,
+        zoneName: s.zoneName,
+      })),
+    })
+    const totalCreated = result.count
 
     // Link event to seat map (only if using seatMapId path)
     if (!useGaZoneConfig && seatMapId) {
@@ -342,16 +336,16 @@ export async function POST(
       })
     }
 
-    const perDayLabel = showDates.length > 1
-      ? ` (${showDates.length} hari × ${uniqueSeatData.length} kursi/hari)`
+    const multiDayLabel = showDates.length > 1
+      ? ` (${showDates.length} hari — multi-day pass, kursi tidak di-duplikat per hari)`
       : ''
 
-    await logActivity(request, 'GENERATE_SEATS', `Generate ${totalCreated} kursi untuk event "${event.title}"${perDayLabel}`)
+    await logActivity(request, 'GENERATE_SEATS', `Generate ${totalCreated} kursi untuk event "${event.title}"${multiDayLabel}`)
 
     return NextResponse.json({
       message: useGaZoneConfig
-        ? `${totalCreated} kursi berhasil di-generate dari Manual GA Zones${perDayLabel}`
-        : `${totalCreated} kursi berhasil di-generate dari Seat Map "${seatMapName}"${perDayLabel}`,
+        ? `${totalCreated} kursi berhasil di-generate dari Manual GA Zones${multiDayLabel}`
+        : `${totalCreated} kursi berhasil di-generate dari Seat Map "${seatMapName}"${multiDayLabel}`,
       totalSeats: totalCreated,
       seatsPerDay: uniqueSeatData.length,
       showDatesCount: showDates.length,

@@ -93,6 +93,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Parse seatCodes — detect festival format
+    // Festival format: "VIP-1@day1abc,day2def,day3ghi" (multi-day, comma-separated)
+    // Legacy festival format: "VIP-1@day1abc" (single day per code, multiple codes for multi-day)
     let seatCodes: string[] = []
     try { seatCodes = JSON.parse(transaction.seatCodes) } catch { /* ignore */ }
     const isFestivalFormat = seatCodes.some((c) => c.includes('@'))
@@ -175,7 +177,16 @@ export async function POST(request: NextRequest) {
     // FESTIVAL MODE — multi-day, cooldown, override
     // ============================================================
     const event = transaction.event
-    const applicableDayIds = [...new Set(seatCodes.map((c) => c.split('@')[1]))]
+    // Extract applicable day IDs from seatCodes.
+    // New format: "VIP-1@day1abc,day2def,day3ghi" → split on '@', then ',' to get all day IDs
+    // Legacy format: "VIP-1@day1abc" → single day ID per code
+    const applicableDayIds = [...new Set(
+      seatCodes.flatMap((c) => {
+        const parts = c.split('@')
+        if (parts.length < 2 || !parts[1]) return []
+        return parts[1].split(',').filter(Boolean)
+      })
+    )]
     const applicableShowDates = event.showDates.filter((d) => applicableDayIds.includes(d.id))
 
     // Resolve which day the usher is trying to scan

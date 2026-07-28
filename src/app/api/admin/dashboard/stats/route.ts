@@ -209,9 +209,22 @@ export async function GET() {
       let priceCatId: string | null = null
       if (codes.length > 0) {
         if (isFestival) {
-          // Festival: seatCode@dayId format
-          const [seatCode, dayId] = codes[0].split('@')
-          priceCatId = seatLookup.get(`${tx.eventId}|${seatCode}|${dayId || ''}`) || null
+          // Festival format: seatCode@dayId (legacy) or seatCode@day1,day2,day3 (new)
+          // Under new model, seats have eventShowDateId = null. Match by seatCode only.
+          const seatCode = codes[0].split('@')[0]
+          // Try lookup with empty dayId first (new model — seat.eventShowDateId is null)
+          priceCatId = seatLookup.get(`${tx.eventId}|${seatCode}|`) || null
+          // Fallback: try with each applicable dayId (legacy model — seat.eventShowDateId is set)
+          if (!priceCatId) {
+            const dayIds = codes[0].split('@')[1]?.split(',') || []
+            for (const dayId of dayIds) {
+              const found = seatLookup.get(`${tx.eventId}|${seatCode}|${dayId}`)
+              if (found) {
+                priceCatId = found
+                break
+              }
+            }
+          }
         } else {
           // Regular: plain seatCode
           priceCatId = seatLookup.get(`${tx.eventId}|${codes[0]}|`) || null

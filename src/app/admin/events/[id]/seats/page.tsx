@@ -988,30 +988,54 @@ function GaZoneManagementPanel({
         </CardContent>
       </Card>
 
-      {/* ─── Fix Missing Seats (for multi-day events) ──────────────────── */}
-      {/* Shows when event has seats AND multiple show dates — duplicates seats to days that have 0 seats */}
-      {hasExistingSeats && showDates && showDates.length > 1 && (
-        <Card className="border-blue-300 bg-blue-50/50">
+      {/* ─── Consolidate Seats (for events generated under old per-day model) ── */}
+      {/* Shows when event has seats with eventShowDateId set (legacy duplication) */}
+      {hasExistingSeats && (
+        <Card className="border-amber-300 bg-amber-50/50">
           <CardContent className="p-6">
             <div className="flex items-center justify-between gap-4">
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <AlertTriangle className="w-4 h-4 text-blue-600" />
-                  <h2 className="font-serif text-lg font-semibold text-charcoal">Fix Kursi Hari Baru</h2>
+                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+                  <h2 className="font-serif text-lg font-semibold text-charcoal">Konsolidasi Kursi (Single Pool)</h2>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Event ini punya <span className="font-medium text-charcoal">{showDates.length} hari pertunjukan</span>.
-                  Klik tombol ini untuk menduplikat kursi ke hari yang belum punya kursi
-                  (misal hari yang baru ditambahkan dari edit event page).
-                  <strong className="text-blue-700"> Aman — tidak menghapus kursi yang sudah ada.</strong>
+                  Model baru: <strong>1 tiket = 1 seat</strong>. Multi-day cuma metadata di price category
+                  (<code className="text-[10px] bg-amber-100 px-1 rounded">applicableDayIds</code>),
+                  bukan duplikat kursi per hari. Klik tombol ini untuk:
+                </p>
+                <ul className="text-xs text-muted-foreground mt-2 ml-4 list-disc space-y-0.5">
+                  <li>Hapus kursi duplikat (same seatCode di multiple days) — keep yang AVAILABLE</li>
+                  <li>Clear <code className="text-[10px] bg-amber-100 px-1 rounded">eventShowDateId</code> di semua kursi yang tersisa</li>
+                  <li>Hasil: 1 pool of seats per zone, availability = count seat di zone itu</li>
+                </ul>
+                <p className="text-[11px] text-amber-700 mt-2">
+                  ⚠️ Backup DB dulu sebelum run. Kursi SOLD tetap dipertahankan (prioritas: AVAILABLE &gt; LOCKED &gt; SOLD).
                 </p>
               </div>
               <Button
                 size="lg"
                 variant="outline"
                 onClick={async () => {
-                  if (!confirm(`Cek & duplikat kursi ke hari yang kosong?\n\nAman: tidak akan menghapus kursi/sold yang sudah ada. Kursi baru = AVAILABLE (fresh).`)) return
+                  // Dry run first to show user what will happen
                   try {
+                    const dryRes = await fetch(`/api/admin/events/${eventId}/fix-seats`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ dryRun: true }),
+                    })
+                    const dryData = await dryRes.json()
+                    if (!dryRes.ok) {
+                      alert(dryData.error || 'Gagal cek kursi')
+                      return
+                    }
+                    if (!dryData.needsFix) {
+                      alert(dryData.message || 'Sudah aman, tidak perlu konsolidasi.')
+                      return
+                    }
+                    const confirmMsg = `${dryData.message}\n\nLanjutkan konsolidasi?\n\n⚠️ Backup DB dulu kalau ragu.`
+                    if (!confirm(confirmMsg)) return
+
                     const res = await fetch(`/api/admin/events/${eventId}/fix-seats`, {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
@@ -1020,20 +1044,18 @@ function GaZoneManagementPanel({
                     const data = await res.json()
                     if (res.ok) {
                       alert(data.message)
-                      if (data.totalCreated > 0) {
-                        window.location.reload()
-                      }
+                      window.location.reload()
                     } else {
-                      alert(data.error || 'Gagal fix kursi')
+                      alert(data.error || 'Gagal konsolidasi kursi')
                     }
                   } catch {
                     alert('Gagal terhubung ke server')
                   }
                 }}
-                className="border-blue-500 text-blue-700 hover:bg-blue-100 font-semibold shrink-0"
+                className="border-amber-500 text-amber-700 hover:bg-amber-100 font-semibold shrink-0"
               >
                 <AlertTriangle className="w-4 h-4 mr-2" />
-                Fix Kursi
+                Konsolidasi Kursi
               </Button>
             </div>
           </CardContent>

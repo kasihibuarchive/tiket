@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { getTripayTransactionDetail } from '@/lib/tripay'
-import { markSeatsForTransaction, buildQrText, buildEmailTicketPayload } from '@/lib/festival-seats'
+import { markSeatsForTransaction, buildQrText, buildEmailTicketPayload, getFestivalDayIds } from '@/lib/festival-seats'
 import QRCode from 'qrcode'
 
 export async function GET(
@@ -82,16 +82,17 @@ export async function GET(
     // Resolve festival package metadata (package name, applicable days, scanned days)
     let festivalInfo: any = null
     if (isFestivalFormat) {
-      const applicableDayIds = [...new Set(seatCodes.map((c) => c.split('@')[1]))]
+      const applicableDayIds = getFestivalDayIds(seatCodes)
       const showDates = await db.eventShowDate.findMany({
         where: { id: { in: applicableDayIds } },
         orderBy: { date: 'asc' },
       })
 
       // Derive package name from first seat's price category
+      // Under new model, seats have eventShowDateId = null. Match by seatCode only.
       const firstPair = seatCodes[0].split('@')
       const firstSeat = await db.seat.findFirst({
-        where: { eventId: transaction.eventId, seatCode: firstPair[0], eventShowDateId: firstPair[1] },
+        where: { eventId: transaction.eventId, seatCode: firstPair[0] },
         select: { priceCategoryId: true },
       })
       let packageName = 'Festival Pass'
