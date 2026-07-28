@@ -4,10 +4,9 @@ import { useState, useEffect, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Separator } from '@/components/ui/separator'
 import {
-  Ticket, Calendar, Users, Crown, Star, Minus, Plus, Loader2, AlertTriangle,
-  CheckCircle2, Sparkles,
+  Calendar, CalendarDays, CalendarRange, Users, Minus, Plus, Loader2,
+  Check,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -135,9 +134,9 @@ export function FestivalPackagePicker({
   }, [eventId, packages])
 
   const packageIcon = (pkgType: string | null | undefined) => {
-    if (pkgType === 'FULL') return Crown
-    if (pkgType === 'MULTI') return Star
-    return Ticket
+    if (pkgType === 'FULL') return CalendarDays
+    if (pkgType === 'MULTI') return CalendarRange
+    return Calendar
   }
 
   const packageLabel = (pkgType: string | null | undefined) => {
@@ -158,8 +157,7 @@ export function FestivalPackagePicker({
   if (packages.length === 0) {
     return (
       <div className="text-center py-12">
-        <AlertTriangle className="w-10 h-10 text-amber-500 mx-auto mb-3" />
-        <p className="text-charcoal font-medium">Belum ada paket tiket untuk festival ini.</p>
+        <p className="font-serif text-charcoal text-lg">Belum ada paket tiket untuk festival ini.</p>
         <p className="text-sm text-muted-foreground mt-1">Hubungi admin untuk informasi tiket.</p>
       </div>
     )
@@ -170,8 +168,8 @@ export function FestivalPackagePicker({
       {/* Header hint */}
       <div className="text-center mb-2">
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gold/10 border border-gold/30">
-          <Sparkles className="w-3.5 h-3.5 text-gold" />
-          <span className="text-xs font-medium text-gold tracking-wide">🎪 FESTIVAL MODE — Multi-Day Pass</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-gold" />
+          <span className="text-xs font-medium text-gold tracking-wide">Festival Mode — Multi-Day Pass</span>
         </div>
         <p className="text-sm text-muted-foreground mt-3 max-w-xl mx-auto">
           Pilih paket sesuai kebutuhan Anda. 1 QR berlaku untuk semua hari yang tercantum di paket.
@@ -223,7 +221,9 @@ export function FestivalPackagePicker({
                     </div>
                   </div>
                   {isSelected && (
-                    <CheckCircle2 className="w-5 h-5 text-gold shrink-0" />
+                    <div className="w-5 h-5 rounded-full border-2 border-gold bg-gold flex items-center justify-center shrink-0">
+                      <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                    </div>
                   )}
                 </div>
 
@@ -269,11 +269,6 @@ export function FestivalPackagePicker({
                       <span><span className="font-medium text-charcoal">{avail}</span> tiket tersedia</span>
                     )}
                   </span>
-                  {pkg.packageType === 'FULL' && (
-                    <Badge className="text-[9px] bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
-                      Best Value
-                    </Badge>
-                  )}
                 </div>
               </CardContent>
             </Card>
@@ -294,8 +289,8 @@ export function FestivalPackagePicker({
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
                 {/* Selected package summary */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-[10px] uppercase tracking-wider text-charcoal/60 font-semibold flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-gold" />
+                  <p className="text-[10px] uppercase tracking-wider text-charcoal/60 font-semibold flex items-center gap-1.5">
+                    <span className="w-1 h-1 rounded-full bg-gold" />
                     Paket Terpilih
                   </p>
                   <p className="font-serif font-bold text-charcoal text-base sm:text-lg truncate drop-shadow-sm">
@@ -347,7 +342,6 @@ export function FestivalPackagePicker({
                   disabled={(availability[selectedPkg.id] ?? 0) === 0}
                   className="bg-charcoal hover:bg-charcoal/90 text-gold font-semibold px-6 sm:px-8 py-4 sm:py-5 shadow-lg shadow-charcoal/30 transition-all hover:scale-[1.02] active:scale-95"
                 >
-                  <Ticket className="w-4 h-4 mr-2" />
                   Lanjut ke Pembayaran
                 </Button>
               </div>
