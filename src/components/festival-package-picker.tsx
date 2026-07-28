@@ -277,69 +277,79 @@ export function FestivalPackagePicker({
         })}
       </div>
 
-      {/* Quantity selector + CTA — appears when package is selected */}
+      {/* Quantity selector + CTA — Liquid Glass overlay (Apple-style frosted glass) */}
       {selectedPkg && (
-        <Card className="border-gold/40 bg-gold/5 sticky bottom-4 z-10 shadow-xl">
-          <CardContent className="p-4 sm:p-5">
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-              {/* Selected package summary */}
-              <div className="flex-1 min-w-0">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground font-medium">Paket Terpilih</p>
-                <p className="font-serif font-bold text-charcoal text-base sm:text-lg truncate">
-                  {selectedPkg.name}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {selectedPkg.parsedDayIds.length} hari · Rp {selectedPkg.price.toLocaleString('id-ID')}/paket
-                </p>
-              </div>
+        <div className="sticky bottom-4 z-50">
+          <div className="relative rounded-2xl border border-white/40 bg-white/60 backdrop-blur-2xl backdrop-saturate-150 shadow-2xl shadow-black/20 ring-1 ring-black/5 overflow-hidden">
+            {/* Subtle gold tint overlay */}
+            <div className="absolute inset-0 bg-gradient-to-br from-gold/10 via-transparent to-gold/5 pointer-events-none" />
+            {/* Top highlight line (glass reflection) */}
+            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
 
-              {/* Quantity selector */}
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground hidden sm:block">Jumlah:</span>
-                <div className="flex items-center gap-2 bg-white rounded-lg border-2 border-border p-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setQuantity(q => Math.max(1, q - 1))}
-                    disabled={quantity <= 1}
-                  >
-                    <Minus className="w-3.5 h-3.5" />
-                  </Button>
-                  <span className="w-10 text-center font-bold text-charcoal text-lg">{quantity}</span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => setQuantity(q => Math.min(availability[selectedPkg.id] ?? 99, q + 1))}
-                    disabled={quantity >= (availability[selectedPkg.id] ?? 99)}
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                  </Button>
+            <div className="relative p-4 sm:p-5">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+                {/* Selected package summary */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-charcoal/60 font-semibold flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-gold" />
+                    Paket Terpilih
+                  </p>
+                  <p className="font-serif font-bold text-charcoal text-base sm:text-lg truncate drop-shadow-sm">
+                    {selectedPkg.name}
+                  </p>
+                  <p className="text-xs text-charcoal/70">
+                    {selectedPkg.parsedDayIds.length} hari · Rp {selectedPkg.price.toLocaleString('id-ID')}/paket
+                  </p>
                 </div>
-              </div>
 
-              {/* Total + CTA */}
-              <div className="flex flex-col items-end gap-1">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Total</p>
-                <p className="text-xl font-bold text-gold">
-                  Rp {(selectedPkg.price * quantity).toLocaleString('id-ID')}
-                </p>
-              </div>
+                {/* Quantity selector */}
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-charcoal/70 hidden sm:block font-medium">Jumlah:</span>
+                  <div className="flex items-center gap-2 bg-white/70 backdrop-blur-sm rounded-lg border-2 border-white/60 shadow-sm p-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 hover:bg-white/80"
+                      onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                      disabled={quantity <= 1}
+                    >
+                      <Minus className="w-3.5 h-3.5" />
+                    </Button>
+                    <span className="w-10 text-center font-bold text-charcoal text-lg">{quantity}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 hover:bg-white/80"
+                      onClick={() => setQuantity(q => Math.min(availability[selectedPkg.id] ?? 99, q + 1))}
+                      disabled={quantity >= (availability[selectedPkg.id] ?? 99)}
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </div>
 
-              <Button
-                onClick={handleProceed}
-                disabled={(availability[selectedPkg.id] ?? 0) === 0}
-                className="bg-charcoal hover:bg-charcoal/90 text-gold font-semibold px-6 sm:px-8 py-4 sm:py-5"
-              >
-                <Ticket className="w-4 h-4 mr-2" />
-                Lanjut ke Pembayaran
-              </Button>
+                {/* Total + CTA */}
+                <div className="flex flex-col items-end gap-1">
+                  <p className="text-[10px] uppercase tracking-wider text-charcoal/60 font-semibold">Total</p>
+                  <p className="text-xl font-bold text-gold drop-shadow-sm">
+                    Rp {(selectedPkg.price * quantity).toLocaleString('id-ID')}
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleProceed}
+                  disabled={(availability[selectedPkg.id] ?? 0) === 0}
+                  className="bg-charcoal hover:bg-charcoal/90 text-gold font-semibold px-6 sm:px-8 py-4 sm:py-5 shadow-lg shadow-charcoal/30 transition-all hover:scale-[1.02] active:scale-95"
+                >
+                  <Ticket className="w-4 h-4 mr-2" />
+                  Lanjut ke Pembayaran
+                </Button>
+              </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {/* Info card about scan cooldown */}
