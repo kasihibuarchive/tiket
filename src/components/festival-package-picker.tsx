@@ -92,46 +92,62 @@ export function FestivalPackagePicker({
 
   const selectedPkg = packages.find(p => p.id === selectedPkgId) || null
 
-  // Fetch availability per package (count AVAILABLE seats across the package's applicable days)
+  // ─── AVAILABILITY ────────────────────────────────────────────────
+  // CONCEPT: Availability is PER-TICKET, not PER-SEAT.
+  //   - 1 tiket FULL Pass (4 days) = reserves 1 seat in EACH of the 4 days.
+  //   - 1 tiket MULTI (Day 2+3) = reserves 1 seat in Day 2 AND 1 seat in Day 3.
+  //   - 1 tiket SINGLE (Day 2) = reserves 1 seat in Day 2.
+  //
+  // So max tiket sellable = MIN of available seats across the package's applicable days.
+  // (The bottleneck day determines how many multi-day tickets can be sold.)
+  //
+  // We DO NOT sum seats across days — that would over-count.
+  // We DO NOT show per-day breakdown — availability is a single "tiket" number.
   const [availability, setAvailability] = useState<Record<string, number>>({})
   useEffect(() => {
     async function fetchAvailability() {
       try {
-        // Fetch seats grouped by zone name (= price category name) — only AVAILABLE
         const res = await fetch(`/api/events/${eventId}/seats?admin=1`)
         if (!res.ok) return
         const data = await res.json()
-        const seats = data.seats || []
-        // For each package, count available seats in its zone (matched by priceCategoryName)
+        const seats: any[] = data.seats || []
+
         const avail: Record<string, number> = {}
         for (const pkg of packages) {
-          // Match by zone name (= price category name in our auto-built GA config)
-          // Two scenarios for day matching:
-          //  - parsedDayIds has entries → seat must belong to one of those days
-          //  - parsedDayIds is empty (FULL with no showDates, or REGULAR) → count all matching seats
-          const dayIds = pkg.parsedDayIds
-          const matching = seats.filter((s: any) => {
-            if (s.zoneName !== pkg.name) return false
-            if (s.status !== 'AVAILABLE') return false
-            // Day matching: if package has specific days, seat must match one
-            if (dayIds.length > 0) {
-              // Seat must have an eventShowDateId that's in dayIds
-              // If seat has null eventShowDateId (legacy/single-day), skip it
-              return s.eventShowDateId && dayIds.includes(s.eventShowDateId)
+          // Resolve the package's effective applicable days.
+          // - If applicableDayIds is set → use it as-is.
+          // - If FULL with no applicableDayIds → expand to ALL show dates.
+          // - If SINGLE/MULTI with no applicableDayIds → fallback to first 1 / 2 days.
+          let effectiveDayIds = pkg.parsedDayIds.slice()
+          if (effectiveDayIds.length === 0) {
+            if (pkg.packageType === 'FULL') {
+              effectiveDayIds = showDates.map(sd => sd.id)
+            } else if (pkg.packageType === 'SINGLE' && showDates[0]) {
+              effectiveDayIds = [showDates[0].id]
+            } else if (pkg.packageType === 'MULTI' && showDates.length >= 2) {
+              effectiveDayIds = [showDates[0].id, showDates[1].id]
+            } else if (showDates[0]) {
+              // Fallback: assign to first day so we at least show something
+              effectiveDayIds = [showDates[0].id]
             }
-            // No specific days → count all seats in this zone regardless of eventShowDateId
-            return true
-          })
-          // Capacity per day = min available across applicable days
-          // (each ticket covers all applicable days, so limit is the day with lowest availability)
-          if (dayIds.length > 0) {
-            const perDayCounts = dayIds.map(dayId =>
-              matching.filter((s: any) => s.eventShowDateId === dayId).length
-            )
-            avail[pkg.id] = Math.min(...perDayCounts)
-          } else {
-            avail[pkg.id] = matching.length
           }
+
+          if (effectiveDayIds.length === 0) {
+            // Truly no show dates — show 0 rather than mislead with sum
+            avail[pkg.id] = 0
+            continue
+          }
+
+          // Count AVAILABLE seats in this zone, per applicable day.
+          // 1 tiket = 1 seat per day → max sellable = min across days.
+          const perDayCounts = effectiveDayIds.map(dayId =>
+            seats.filter(s =>
+              s.zoneName === pkg.name &&
+              s.status === 'AVAILABLE' &&
+              s.eventShowDateId === dayId
+            ).length
+          )
+          avail[pkg.id] = Math.min(...perDayCounts)
         }
         setAvailability(avail)
       } catch (err) {
@@ -139,7 +155,7 @@ export function FestivalPackagePicker({
       }
     }
     if (packages.length > 0) fetchAvailability()
-  }, [eventId, packages])
+  }, [eventId, packages, showDates])
 
   const packageIcon = (pkgType: string | null | undefined) => {
     if (pkgType === 'FULL') return Crown
