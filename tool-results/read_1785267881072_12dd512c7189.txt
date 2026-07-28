@@ -1,0 +1,2002 @@
+     1→'use client'
+     2→
+     3→import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+     4→import { useParams } from 'next/navigation'
+     5→import { Card, CardContent } from '@/components/ui/card'
+     6→import { Button } from '@/components/ui/button'
+     7→import { Badge } from '@/components/ui/badge'
+     8→import { Separator } from '@/components/ui/separator'
+     9→import {
+    10→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue
+    11→} from '@/components/ui/select'
+    12→import { cn } from '@/lib/utils'
+    13→import {
+    14→  Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
+    15→  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, LockOpen, Ticket, MinusCircle,
+    16→  AlertTriangle,
+    17→} from 'lucide-react'
+    18→import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
+    19→import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+    20→import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
+    21→
+    22→const CATEGORY_CONFIG: Record<string, { icon: typeof Crown; label: string; defaultColor: string }> = {
+    23→  VIP: { icon: Crown, label: 'VIP', defaultColor: '#C8A951' },
+    24→  Regular: { icon: Lock, label: 'Regular', defaultColor: '#8B8680' },
+    25→  Student: { icon: Crown, label: 'Student', defaultColor: '#7BA7A5' },
+    26→}
+    27→
+    28→const SEAT_W = 28
+    29→const SEAT_GAP = 3
+    30→const LABEL_W = 24 // w-6 = 24px row label area
+    31→
+    32→interface SeatData {
+    33→  id: string
+    34→  seatCode: string
+    35→  status: string
+    36→  row: string
+    37→  col: number
+    38→  priceCategoryId: string | null
+    39→  priceCategory: { id: string; name: string; price: number; colorCode: string } | null
+    40→  eventShowDateId?: string | null
+    41→}
+    42→
+    43→interface PriceCategoryData {
+    44→  id: string
+    45→  name: string
+    46→  price: number
+    47→  colorCode: string
+    48→}
+    49→
+    50→interface ShowDateData {
+    51→  id: string
+    52→  date: string
+    53→  openGate: string | null
+    54→  label: string | null
+    55→}
+    56→
+    57→interface EventInfo {
+    58→  id: string
+    59→  title: string
+    60→  seatMapId: string | null
+    61→  seatType?: string
+    62→  seatMapSeatType?: string | null
+    63→  showDates?: ShowDateData[]
+    64→  layoutImage?: string | null
+    65→  gaZoneConfig?: string | null
+    66→}
+    67→
+    68→interface GaZoneDef {
+    69→  name: string
+    70→  capacity: number
+    71→  price: number
+    72→  color: string
+    73→  priceCategoryName: string
+    74→  notes?: string
+    75→}
+    76→
+    77→// ─── GA Zone Management Panel (always shown for GA events) ──
+    78→function GaZoneManagementPanel({
+    79→  eventId,
+    80→  eventInfo,
+    81→  gaZonesDef,
+    82→  setGaZonesDef,
+    83→  layoutImage,
+    84→  layoutImagePreview,
+    85→  setLayoutImage,
+    86→  setLayoutImagePreview,
+    87→  isUploading,
+    88→  setIsUploading,
+    89→  isSavingZones,
+    90→  setIsSavingZones,
+    91→  isGeneratingFromZones,
+    92→  setIsGeneratingFromZones,
+    93→  newZone,
+    94→  setNewZone,
+    95→  priceCategories,
+    96→  fileInputRef,
+    97→  existingZoneSummary,
+    98→  existingSeatsCount,
+    99→  showDates,
+   100→  onRefresh,
+   101→}: {
+   102→  eventId: string
+   103→  eventInfo: EventInfo | null
+   104→  gaZonesDef: GaZoneDef[]
+   105→  setGaZonesDef: React.Dispatch<React.SetStateAction<GaZoneDef[]>>
+   106→  layoutImage: string | null
+   107→  layoutImagePreview: string | null
+   108→  setLayoutImage: React.Dispatch<React.SetStateAction<string | null>>
+   109→  setLayoutImagePreview: React.Dispatch<React.SetStateAction<string | null>>
+   110→  isUploading: boolean
+   111→  setIsUploading: React.Dispatch<React.SetStateAction<boolean>>
+   112→  isSavingZones: boolean
+   113→  setIsSavingZones: React.Dispatch<React.SetStateAction<boolean>>
+   114→  isGeneratingFromZones: boolean
+   115→  setIsGeneratingFromZones: React.Dispatch<React.SetStateAction<boolean>>
+   116→  newZone: GaZoneDef
+   117→  setNewZone: React.Dispatch<React.SetStateAction<GaZoneDef>>
+   118→  priceCategories: PriceCategoryData[]
+   119→  fileInputRef: React.RefObject<HTMLInputElement | null>
+   120→  existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number; invitation: number; unavailable: number }>
+   121→  existingSeatsCount?: number
+   122→  showDates?: ShowDateData[]
+   123→  onRefresh?: () => void
+   124→}) {
+   125→  const hasExistingSeats = (existingSeatsCount ?? 0) > 0
+   126→
+   127→  // ─── Reservation state ──────────────────────────────────────────────
+   128→  const [reserveQty, setReserveQty] = useState<Record<string, number>>({})
+   129→  const [isReserving, setIsReserving] = useState<Record<string, boolean>>({})
+   130→  const [isReleasing, setIsReleasing] = useState<Record<string, boolean>>({})
+   131→  const [isZoneLocking, setIsZoneLocking] = useState<Record<string, boolean>>({})
+   132→
+   133→  async function handleZoneLock(zoneName: string) {
+   134→    if (!confirm(`Kunci zona "${zoneName}"?\nSemua kursi tersedia akan ditutup dari penjualan.`)) return
+   135→    setIsZoneLocking(prev => ({ ...prev, [zoneName]: true }))
+   136→    try {
+   137→      const res = await fetch(`/api/admin/events/${eventId}/zone-lock`, {
+   138→        method: 'POST',
+   139→        headers: { 'Content-Type': 'application/json' },
+   140→        body: JSON.stringify({ zoneName }),
+   141→      })
+   142→      const data = await res.json()
+   143→      if (res.ok) {
+   144→        alert(data.message)
+   145→        onRefresh?.()
+   146→      } else {
+   147→        alert(data.error || 'Gagal mengunci zona')
+   148→      }
+   149→    } catch {
+   150→      alert('Gagal mengunci zona')
+   151→    } finally {
+   152→      setIsZoneLocking(prev => ({ ...prev, [zoneName]: false }))
+   153→    }
+   154→  }
+   155→
+   156→  async function handleZoneUnlock(zoneName: string) {
+   157→    if (!confirm(`Buka kunci zona "${zoneName}"?\nSemua kursi yang ditutup akan tersedia kembali.`)) return
+   158→    setIsZoneLocking(prev => ({ ...prev, [zoneName]: true }))
+   159→    try {
+   160→      const res = await fetch(`/api/admin/events/${eventId}/zone-lock?zoneName=${encodeURIComponent(zoneName)}`, {
+   161→        method: 'DELETE',
+   162→      })
+   163→      const data = await res.json()
+   164→      if (res.ok) {
+   165→        alert(data.message)
+   166→        onRefresh?.()
+   167→      } else {
+   168→        alert(data.error || 'Gagal membuka zona')
+   169→      }
+   170→    } catch {
+   171→      alert('Gagal membuka zona')
+   172→    } finally {
+   173→      setIsZoneLocking(prev => ({ ...prev, [zoneName]: false }))
+   174→    }
+   175→  }
+   176→  async function handleReserve(zoneName: string) {
+   177→    const qty = reserveQty[zoneName] || 0
+   178→    if (qty < 1) {
+   179→      alert('Masukkan jumlah slot yang ingin direservasi')
+   180→      return
+   181→    }
+   182→    setIsReserving(prev => ({ ...prev, [zoneName]: true }))
+   183→    try {
+   184→      const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation`, {
+   185→        method: 'POST',
+   186→        headers: { 'Content-Type': 'application/json' },
+   187→        body: JSON.stringify({ zoneName, quantity: qty }),
+   188→      })
+   189→      const data = await res.json()
+   190→      if (res.ok) {
+   191→        alert(data.message)
+   192→        setReserveQty(prev => ({ ...prev, [zoneName]: 0 }))
+   193→        onRefresh?.()
+   194→      } else {
+   195→        alert(data.error || 'Gagal reservasi slot undangan')
+   196→      }
+   197→    } catch {
+   198→      alert('Gagal reservasi slot undangan')
+   199→    } finally {
+   200→      setIsReserving(prev => ({ ...prev, [zoneName]: false }))
+   201→    }
+   202→  }
+   203→
+   204→  async function handleRelease(zoneName: string) {
+   205→    const qty = reserveQty[zoneName] || 0
+   206→    if (qty < 1) {
+   207→      alert('Masukkan jumlah slot yang ingin dilepas')
+   208→      return
+   209→    }
+   210→    setIsReleasing(prev => ({ ...prev, [zoneName]: true }))
+   211→    try {
+   212→      const res = await fetch(`/api/admin/events/${eventId}/reserve-invitation?zoneName=${encodeURIComponent(zoneName)}&quantity=${qty}`, {
+   213→        method: 'DELETE',
+   214→      })
+   215→      const data = await res.json()
+   216→      if (res.ok) {
+   217→        alert(data.message)
+   218→        setReserveQty(prev => ({ ...prev, [zoneName]: 0 }))
+   219→        onRefresh?.()
+   220→      } else {
+   221→        alert(data.error || 'Gagal melepas slot undangan')
+   222→      }
+   223→    } catch {
+   224→      alert('Gagal melepas slot undangan')
+   225→    } finally {
+   226→      setIsReleasing(prev => ({ ...prev, [zoneName]: false }))
+   227→    }
+   228→  }
+   229→
+   230→  // ─── Image upload handler ───────────────────────────────────────────
+   231→  async function handleImageUpload(e: React.ChangeEvent<HTMLInputElement>) {
+   232→    const file = e.target.files?.[0]
+   233→    if (!file) return
+   234→
+   235→    // Check file size (max 5MB)
+   236→    if (file.size > 5 * 1024 * 1024) {
+   237→      alert('Ukuran file maksimal 5MB')
+   238→      return
+   239→    }
+   240→
+   241→    const reader = new FileReader()
+   242→    reader.onload = async (ev) => {
+   243→      const base64 = ev.target?.result as string
+   244→      setLayoutImagePreview(base64)
+   245→
+   246→      setIsUploading(true)
+   247→      try {
+   248→        const res = await fetch(`/api/admin/events/${eventId}`, {
+   249→          method: 'PUT',
+   250→          headers: { 'Content-Type': 'application/json' },
+   251→          body: JSON.stringify({ layoutImage: base64 }),
+   252→        })
+   253→        if (res.ok) {
+   254→          setLayoutImage(base64)
+   255→        } else {
+   256→          alert('Gagal mengupload gambar')
+   257→          setLayoutImagePreview(layoutImage)
+   258→        }
+   259→      } catch {
+   260→        alert('Gagal mengupload gambar')
+   261→        setLayoutImagePreview(layoutImage)
+   262→      } finally {
+   263→        setIsUploading(false)
+   264→      }
+   265→    }
+   266→    reader.readAsDataURL(file)
+   267→  }
+   268→
+   269→  async function handleRemoveImage() {
+   270→    setIsUploading(true)
+   271→    try {
+   272→      const res = await fetch(`/api/admin/events/${eventId}`, {
+   273→        method: 'PUT',
+   274→        headers: { 'Content-Type': 'application/json' },
+   275→        body: JSON.stringify({ layoutImage: null }),
+   276→      })
+   277→      if (res.ok) {
+   278→        setLayoutImage(null)
+   279→        setLayoutImagePreview(null)
+   280→      } else {
+   281→        alert('Gagal menghapus gambar')
+   282→      }
+   283→    } catch {
+   284→      alert('Gagal menghapus gambar')
+   285→    } finally {
+   286→      setIsUploading(false)
+   287→    }
+   288→  }
+   289→
+   290→  // ─── Zone management handlers ───────────────────────────────────────
+   291→  function handleAddZone() {
+   292→    if (!newZone.name.trim()) {
+   293→      alert('Nama zona wajib diisi')
+   294→      return
+   295→    }
+   296→    if (newZone.capacity <= 0) {
+   297→      alert('Kapasitas harus lebih dari 0')
+   298→      return
+   299→    }
+   300→    if (gaZonesDef.some(z => z.name.toLowerCase() === newZone.name.trim().toLowerCase())) {
+   301→      alert('Nama zona sudah digunakan')
+   302→      return
+   303→    }
+   304→    setGaZonesDef([...gaZonesDef, { ...newZone, name: newZone.name.trim() }])
+   305→    setNewZone({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '', notes: '' })
+   306→  }
+   307→
+   308→  function handleRemoveZone(index: number) {
+   309→    setGaZonesDef(gaZonesDef.filter((_, i) => i !== index))
+   310→  }
+   311→
+   312→  // ─── Sync zones from price categories ───────────────────────────────
+   313→  // Rebuilds gaZonesDef from current priceCategories. Preserves notes &
+   314→  // capacity for zones that already exist (matched by name).
+   315→  function handleSyncFromCategories() {
+   316→    if (priceCategories.length === 0) {
+   317→      alert('Belum ada kategori harga di event ini. Tambahkan kategori di halaman Events terlebih dahulu.')
+   318→      return
+   319→    }
+   320→    const confirmMsg = `Sync zona dari ${priceCategories.length} kategori harga?\n\n` +
+   321→      `• Zona yang sudah ada: harga & warna diperbarui, KAPASITAS DIPERTAHANKAN sesuai adjust lo\n` +
+   322→      `• Zona baru: dibuat dengan kapasitas default 100 (bisa di-adjust setelah sync)\n` +
+   323→      `• Zona yang gak match kategori mana pun: tetap dipertahankan\n\n` +
+   324→      `Kategori:\n${priceCategories.map(pc => `• ${pc.name} — Rp ${pc.price.toLocaleString('id-ID')}`).join('\n')}`
+   325→    if (!confirm(confirmMsg)) return
+   326→
+   327→    const next: GaZoneDef[] = []
+   328→    const usedZoneNames = new Set<string>()
+   329→
+   330→    // 1. For each price category, ensure a matching zone exists
+   331→    for (const pc of priceCategories) {
+   332→      const existing = gaZonesDef.find(z =>
+   333→        z.name.toLowerCase() === pc.name.toLowerCase() ||
+   334→        (z.priceCategoryName || '').toLowerCase() === pc.name.toLowerCase()
+   335→      )
+   336→      next.push({
+   337→        name: pc.name,
+   338→        capacity: existing?.capacity ?? 100,
+   339→        price: pc.price,
+   340→        color: pc.colorCode,
+   341→        priceCategoryName: pc.name,
+   342→        notes: existing?.notes || '',
+   343→      })
+   344→      usedZoneNames.add(pc.name.toLowerCase())
+   345→    }
+   346→
+   347→    // 2. Keep zones that don't match any price category (admin-added custom zones)
+   348→    for (const z of gaZonesDef) {
+   349→      const matched = priceCategories.some(pc =>
+   350→        pc.name.toLowerCase() === z.name.toLowerCase() ||
+   351→        pc.name.toLowerCase() === (z.priceCategoryName || '').toLowerCase()
+   352→      )
+   353→      if (!matched) next.push(z)
+   354→    }
+   355→
+   356→    setGaZonesDef(next)
+   357→    alert(`✓ Synced ${priceCategories.length} zona dari kategori harga. Klik "Simpan Zona" untuk menyimpan.`)
+   358→  }
+   359→
+   360→  async function handleSaveZones() {
+   361→    setIsSavingZones(true)
+   362→    try {
+   363→      const res = await fetch(`/api/admin/events/${eventId}`, {
+   364→        method: 'PUT',
+   365→        headers: { 'Content-Type': 'application/json' },
+   366→        body: JSON.stringify({ gaZoneConfig: JSON.stringify(gaZonesDef) }),
+   367→      })
+   368→      if (res.ok) {
+   369→        alert('Zona berhasil disimpan!')
+   370→      } else {
+   371→        alert('Gagal menyimpan zona')
+   372→      }
+   373→    } catch {
+   374→      alert('Gagal menyimpan zona')
+   375→    } finally {
+   376→      setIsSavingZones(false)
+   377→    }
+   378→  }
+   379→
+   380→  async function handleGenerateSeats() {
+   381→    if (gaZonesDef.length === 0) {
+   382→      alert('Tambahkan minimal 1 zona terlebih dahulu')
+   383→      return
+   384→    }
+   385→    const totalCapacity = gaZonesDef.reduce((sum, z) => sum + z.capacity, 0)
+   386→
+   387→    let confirmMsg = `Generate ${totalCapacity} kursi dari ${gaZonesDef.length} zona?\n\nZona:\n${gaZonesDef.map(z => `• ${z.name}: ${z.capacity} kursi`).join('\n')}`
+   388→
+   389→    // Warn if seats already exist
+   390→    if (hasExistingSeats) {
+   391→      confirmMsg = `⚠️ PERHATIAN!\nEvent ini sudah punya ${existingSeatsCount} kursi.\n\nKursi lama akan DIHAPUS dan diganti dengan yang baru.\n\n${confirmMsg}\n\nYAKIN ingin melanjutkan?`
+   392→    }
+   393→
+   394→    const confirmed = confirm(confirmMsg)
+   395→    if (!confirmed) return
+   396→
+   397→    // Save zones first, then generate
+   398→    setIsSavingZones(true)
+   399→    try {
+   400→      const saveRes = await fetch(`/api/admin/events/${eventId}`, {
+   401→        method: 'PUT',
+   402→        headers: { 'Content-Type': 'application/json' },
+   403→        body: JSON.stringify({ gaZoneConfig: JSON.stringify(gaZonesDef) }),
+   404→      })
+   405→      if (!saveRes.ok) {
+   406→        alert('Gagal menyimpan zona')
+   407→        return
+   408→      }
+   409→    } catch {
+   410→      alert('Gagal menyimpan zona')
+   411→      return
+   412→    } finally {
+   413→      setIsSavingZones(false)
+   414→    }
+   415→
+   416→    setIsGeneratingFromZones(true)
+   417→    try {
+   418→      const res = await fetch(`/api/admin/events/${eventId}/generate-seats`, {
+   419→        method: 'POST',
+   420→        headers: { 'Content-Type': 'application/json' },
+   421→        body: JSON.stringify({ useGaZoneConfig: true }),
+   422→      })
+   423→      if (res.ok) {
+   424→        const data = await res.json()
+   425→        alert(data.message)
+   426→        // Reload to show generated seats
+   427→        window.location.reload()
+   428→      } else {
+   429→        const data = await res.json()
+   430→        alert(data.error || 'Gagal generate kursi')
+   431→      }
+   432→    } catch {
+   433→      alert('Gagal generate kursi')
+   434→    } finally {
+   435→      setIsGeneratingFromZones(false)
+   436→    }
+   437→  }
+   438→
+   439→  const totalCapacity = gaZonesDef.reduce((sum, z) => sum + z.capacity, 0)
+   440→
+   441→  return (
+   442→    <div className="space-y-6">
+   443→      {/* Header */}
+   444→      <div>
+   445→        <h1 className="font-serif text-2xl font-bold text-charcoal">GA Zone Setup</h1>
+   446→        <p className="text-sm text-muted-foreground mt-1">
+   447→          {eventInfo?.title && <span className="font-medium">{eventInfo.title}</span>}
+   448→          {' — Konfigurasi zona General Admission'}
+   449→        </p>
+   450→      </div>
+   451→
+   452→      {/* 1. Layout Image Upload */}
+   453→      <Card className="border-gold/20">
+   454→        <CardContent className="p-6">
+   455→          <div className="flex items-center gap-2 mb-4">
+   456→            <ImagePlus className="w-4 h-4 text-gold" />
+   457→            <h2 className="font-serif text-lg font-semibold text-charcoal">Layout Image</h2>
+   458→            <span className="text-xs text-muted-foreground">(Opsional)</span>
+   459→          </div>
+   460→
+   461→          {(layoutImagePreview || layoutImage) ? (
+   462→            <div className="space-y-3">
+   463→              <div className="relative rounded-lg overflow-hidden border border-border/50 bg-gray-50">
+   464→                <img
+   465→                  src={layoutImagePreview || layoutImage || ''}
+   466→                  alt="Layout"
+   467→                  className="max-h-64 w-full object-contain"
+   468→                />
+   469→              </div>
+   470→              <div className="flex gap-2">
+   471→                <Button
+   472→                  variant="outline"
+   473→                  size="sm"
+   474→                  onClick={() => fileInputRef.current?.click()}
+   475→                  disabled={isUploading}
+   476→                >
+   477→                  <Upload className="w-3.5 h-3.5 mr-1.5" />
+   478→                  Ganti Gambar
+   479→                </Button>
+   480→                <Button
+   481→                  variant="outline"
+   482→                  size="sm"
+   483→                  onClick={handleRemoveImage}
+   484→                  disabled={isUploading}
+   485→                  className="text-red-500 border-red-200 hover:bg-red-50"
+   486→                >
+   487→                  <TrashIcon className="w-3.5 h-3.5 mr-1.5" />
+   488→                  Hapus Gambar
+   489→                </Button>
+   490→                {isUploading && <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />}
+   491→              </div>
+   492→            </div>
+   493→          ) : (
+   494→            <div
+   495→              onClick={() => fileInputRef.current?.click()}
+   496→              className="border-2 border-dashed border-border/60 rounded-lg p-8 text-center cursor-pointer hover:border-gold/40 hover:bg-gold/5 transition-all"
+   497→            >
+   498→              <Upload className="w-8 h-8 text-muted-foreground/50 mx-auto mb-2" />
+   499→              <p className="text-sm text-muted-foreground">
+   500→                Klik untuk upload gambar layout venue
+   501→              </p>
+   502→              <p className="text-xs text-muted-foreground/50 mt-1">
+   503→                PNG, JPG, SVG — Maks. 5MB
+   504→              </p>
+   505→            </div>
+   506→          )}
+   507→
+   508→          <input
+   509→            ref={fileInputRef}
+   510→            type="file"
+   511→            accept="image/*"
+   512→            className="hidden"
+   513→            onChange={handleImageUpload}
+   514→          />
+   515→        </CardContent>
+   516→      </Card>
+   517→
+   518→      {/* 2. Manual Zone Definition */}
+   519→      <Card className="border-gold/20">
+   520→        <CardContent className="p-6">
+   521→          <div className="flex items-center justify-between mb-4">
+   522→            <div className="flex items-center gap-2">
+   523→              <Zap className="w-4 h-4 text-gold" />
+   524→              <h2 className="font-serif text-lg font-semibold text-charcoal">Definisi Zona</h2>
+   525→            </div>
+   526→            <div className="flex items-center gap-2">
+   527→              <Button
+   528→                size="sm"
+   529→                variant="outline"
+   530→                onClick={handleSyncFromCategories}
+   531→                disabled={isSavingZones || priceCategories.length === 0}
+   532→                className="border-emerald-400 text-emerald-700 hover:bg-emerald-50 text-xs"
+   533→                title="Auto-generate zona dari kategori harga yang ada di event"
+   534→              >
+   535→                <RefreshCw className="w-3 h-3 mr-1.5" />
+   536→                Sync dari Kategori
+   537→              </Button>
+   538→              <Button
+   539→                size="sm"
+   540→                onClick={handleSaveZones}
+   541→                disabled={isSavingZones || gaZonesDef.length === 0}
+   542→                className="bg-gold hover:bg-gold/90 text-charcoal font-semibold text-xs"
+   543→              >
+   544→                {isSavingZones ? (
+   545→                  <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+   546→                ) : (
+   547→                  <Save className="w-3 h-3 mr-1.5" />
+   548→                )}
+   549→                Simpan Zona
+   550→              </Button>
+   551→            </div>
+   552→          </div>
+   553→
+   554→          {/* Auto-synced indicator */}
+   555→          {gaZonesDef.length > 0 && priceCategories.length > 0 && (
+   556→            <div className="mb-3 text-[11px] text-muted-foreground bg-emerald-50/50 border border-emerald-200/50 rounded px-3 py-1.5 flex items-center gap-1.5">
+   557→              <Ticket className="w-3 h-3 text-emerald-600" />
+   558→              <span>
+   559→                <span className="font-medium text-emerald-700">{priceCategories.length} kategori harga</span> terdeteksi.
+   560→                Klik <span className="font-medium">Sync dari Kategori</span> untuk memperbarui zona mengikuti perubahan kategori harga di halaman Events.
+   561→              </span>
+   562→            </div>
+   563→          )}
+   564→
+   565→          {/* Existing zones */}
+   566→          {gaZonesDef.length > 0 && (
+   567→            <div className="space-y-2 mb-4 max-h-96 overflow-y-auto pr-2 -mr-2 thin-scrollbar">
+   568→              {gaZonesDef.map((zone, idx) => (
+   569→                <div
+   570→                  key={idx}
+   571→                  className="p-3 rounded-lg border border-border/50 bg-white"
+   572→                >
+   573→                  <div className="flex items-center gap-3">
+   574→                    <div
+   575→                      className="w-4 h-4 rounded-sm shrink-0"
+   576→                      style={{ backgroundColor: zone.color }}
+   577→                    />
+   578→                    <div className="flex-1 min-w-0">
+   579→                      <span className="font-medium text-sm text-charcoal">{zone.name}</span>
+   580→                      {zone.priceCategoryName && (
+   581→                        <Badge variant="secondary" className="text-[10px] ml-2">
+   582→                          {zone.priceCategoryName}
+   583→                        </Badge>
+   584→                      )}
+   585→                    </div>
+   586→
+   587→                    {/* Inline capacity editor — adjustable after sync */}
+   588→                    <div className="flex items-center gap-1.5" title="Adjust kapasitas zona ini">
+   589→                      <Button
+   590→                        variant="ghost"
+   591→                        size="sm"
+   592→                        onClick={() => {
+   593→                          const updated = [...gaZonesDef]
+   594→                          const newCap = Math.max(1, (zone.capacity || 1) - 10)
+   595→                          updated[idx] = { ...updated[idx], capacity: newCap }
+   596→                          setGaZonesDef(updated)
+   597→                        }}
+   598→                        className="h-7 w-7 p-0 text-muted-foreground hover:text-charcoal"
+   599→                        title="Kurangi 10"
+   600→                      >
+   601→                        <MinusCircle className="w-3.5 h-3.5" />
+   602→                      </Button>
+   603→                      <input
+   604→                        type="number"
+   605→                        min={1}
+   606→                        value={zone.capacity}
+   607→                        onChange={(e) => {
+   608→                          const updated = [...gaZonesDef]
+   609→                          const val = Math.max(1, parseInt(e.target.value) || 1)
+   610→                          updated[idx] = { ...updated[idx], capacity: val }
+   611→                          setGaZonesDef(updated)
+   612→                        }}
+   613→                        className="w-16 h-7 px-2 text-xs text-center rounded border border-border/50 bg-white focus:outline-none focus:ring-1 focus:ring-gold/30 focus:border-gold/50"
+   614→                      />
+   615→                      <span className="text-xs text-muted-foreground mr-1">kursi</span>
+   616→                      <Button
+   617→                        variant="ghost"
+   618→                        size="sm"
+   619→                        onClick={() => {
+   620→                          const updated = [...gaZonesDef]
+   621→                          const newCap = (zone.capacity || 0) + 10
+   622→                          updated[idx] = { ...updated[idx], capacity: newCap }
+   623→                          setGaZonesDef(updated)
+   624→                        }}
+   625→                        className="h-7 w-7 p-0 text-muted-foreground hover:text-charcoal"
+   626→                        title="Tambah 10"
+   627→                      >
+   628→                        <Plus className="w-3.5 h-3.5" />
+   629→                      </Button>
+   630→                    </div>
+   631→
+   632→                    <span className="text-xs font-medium text-charcoal min-w-[80px] text-right">
+   633→                      Rp {zone.price.toLocaleString('id-ID')}
+   634→                    </span>
+   635→                    <Button
+   636→                      variant="ghost"
+   637→                      size="sm"
+   638→                      onClick={() => handleRemoveZone(idx)}
+   639→                      className="text-red-400 hover:text-red-600 h-7 w-7 p-0"
+   640→                    >
+   641→                      <TrashIcon className="w-3.5 h-3.5" />
+   642→                    </Button>
+   643→                  </div>
+   644→                  {/* Notes inline edit */}
+   645→                  <div className="mt-2 ml-7">
+   646→                    <input
+   647→                      type="text"
+   648→                      value={zone.notes || ''}
+   649→                      onChange={(e) => {
+   650→                        const updated = [...gaZonesDef]
+   651→                        updated[idx] = { ...updated[idx], notes: e.target.value }
+   652→                        setGaZonesDef(updated)
+   653→                      }}
+   654→                      placeholder="Catatan zona (muncul di halaman pembelian)..."
+   655→                      className="w-full h-7 px-2 text-xs rounded border border-border/50 bg-gray-50/50 focus:outline-none focus:ring-1 focus:ring-gold/30 focus:border-gold/50"
+   656→                    />
+   657→                  </div>
+   658→                </div>
+   659→              ))}
+   660→              <div className="text-xs text-muted-foreground pt-1 flex items-center gap-2">
+   661→                <span>
+   662→                  Total Kapasitas: <span className="font-semibold text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi
+   663→                </span>
+   664→                <span className="text-[10px] text-emerald-600">✓ Bisa di-adjust kapan saja sebelum klik "Simpan Zona"</span>
+   665→              </div>
+   666→            </div>
+   667→          )}
+   668→
+   669→          {/* Add new zone form */}
+   670→          <div className="border border-dashed border-border/60 rounded-lg p-4">
+   671→            <p className="text-xs font-medium text-muted-foreground mb-3">Tambah Zona Baru</p>
+   672→            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+   673→              <div>
+   674→                <label className="text-xs text-muted-foreground mb-1 block">Nama Zona</label>
+   675→                <input
+   676→                  type="text"
+   677→                  value={newZone.name}
+   678→                  onChange={(e) => setNewZone({ ...newZone, name: e.target.value })}
+   679→                  placeholder="cth: VIP, Festival A"
+   680→                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+   681→                />
+   682→              </div>
+   683→              <div>
+   684→                <label className="text-xs text-muted-foreground mb-1 block">Kapasitas</label>
+   685→                <input
+   686→                  type="number"
+   687→                  value={newZone.capacity}
+   688→                  onChange={(e) => setNewZone({ ...newZone, capacity: parseInt(e.target.value) || 0 })}
+   689→                  placeholder="100"
+   690→                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+   691→                />
+   692→              </div>
+   693→              <div>
+   694→                <label className="text-xs text-muted-foreground mb-1 block">Harga (Rp)</label>
+   695→                <input
+   696→                  type="number"
+   697→                  value={newZone.price}
+   698→                  onChange={(e) => setNewZone({ ...newZone, price: parseInt(e.target.value) || 0 })}
+   699→                  placeholder="85000"
+   700→                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+   701→                />
+   702→              </div>
+   703→              <div>
+   704→                <label className="text-xs text-muted-foreground mb-1 block">Warna</label>
+   705→                <div className="flex items-center gap-2">
+   706→                  <input
+   707→                    type="color"
+   708→                    value={newZone.color}
+   709→                    onChange={(e) => setNewZone({ ...newZone, color: e.target.value })}
+   710→                    className="w-8 h-8 rounded cursor-pointer border border-border"
+   711→                  />
+   712→                  <span className="text-xs text-muted-foreground">{newZone.color}</span>
+   713→                </div>
+   714→              </div>
+   715→              <div>
+   716→                <label className="text-xs text-muted-foreground mb-1 block">Kategori Harga</label>
+   717→                <Select
+   718→                  value={newZone.priceCategoryName}
+   719→                  onValueChange={(val) => setNewZone({ ...newZone, priceCategoryName: val })}
+   720→                >
+   721→                  <SelectTrigger className="h-8 text-sm">
+   722→                    <SelectValue placeholder="Pilih kategori" />
+   723→                  </SelectTrigger>
+   724→                  <SelectContent>
+   725→                    {priceCategories.map((pc) => (
+   726→                      <SelectItem key={pc.id} value={pc.name}>
+   727→                        <div className="flex items-center gap-2">
+   728→                          <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: pc.colorCode }} />
+   729→                          {pc.name}
+   730→                        </div>
+   731→                      </SelectItem>
+   732→                    ))}
+   733→                  </SelectContent>
+   734→                </Select>
+   735→              </div>
+   736→              <div className="sm:col-span-2 lg:col-span-1">
+   737→                <label className="text-xs text-muted-foreground mb-1 block">Catatan Zona</label>
+   738→                <input
+   739→                  type="text"
+   740→                  value={newZone.notes || ''}
+   741→                  onChange={(e) => setNewZone({ ...newZone, notes: e.target.value })}
+   742→                  placeholder="cth: Area tanpa atap, wajib pakai sepatu"
+   743→                  className="w-full h-8 px-3 text-sm rounded-md border border-border bg-white focus:outline-none focus:ring-2 focus:ring-gold/30 focus:border-gold"
+   744→                />
+   745→              </div>
+   746→              <div className="flex items-end">
+   747→                <Button
+   748→                  variant="outline"
+   749→                  size="sm"
+   750→                  onClick={handleAddZone}
+   751→                  className="w-full"
+   752→                >
+   753→                  <Plus className="w-3.5 h-3.5 mr-1.5" />
+   754→                  Tambah Zona
+   755→                </Button>
+   756→              </div>
+   757→            </div>
+   758→          </div>
+   759→        </CardContent>
+   760→      </Card>
+   761→
+   762→      {/* 3. Existing Seats Summary (shown when seats already generated) */}
+   763→      {hasExistingSeats && existingZoneSummary && (
+   764→        <Card className="border-gold/20">
+   765→          <CardContent className="p-6">
+   766→            <div className="flex items-center gap-2 mb-4">
+   767→              <Users className="w-4 h-4 text-gold" />
+   768→              <h2 className="font-serif text-lg font-semibold text-charcoal">Status Kursi Saat Ini</h2>
+   769→              <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700">
+   770→                {existingSeatsCount?.toLocaleString('id-ID')} kursi
+   771→              </Badge>
+   772→            </div>
+   773→            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+   774→              {Object.entries(existingZoneSummary).map(([zoneName, stats]) => {
+   775→                const isZoneLocked = (stats.unavailable || 0) > 0 && stats.available === 0
+   776→                return (
+   777→                  <div key={zoneName} className={cn(
+   778→                    "rounded-lg border p-3",
+   779→                    isZoneLocked ? "border-gray-400 bg-gray-50/50" : "border-border/50 bg-white"
+   780→                  )}>
+   781→                    <div className="flex items-center gap-2">
+   782→                      <p className="text-sm font-semibold text-charcoal">{zoneName}</p>
+   783→                      {isZoneLocked && (
+   784→                        <Badge variant="secondary" className="text-[9px] bg-gray-200 text-gray-600 px-1.5 py-0">
+   785→                          <Lock className="w-2.5 h-2.5 mr-0.5" />TERKUNCI
+   786→                        </Badge>
+   787→                      )}
+   788→                    </div>
+   789→                  <div className="grid grid-cols-5 gap-2 mt-2">
+   790→                    <div>
+   791→                      <p className="text-lg font-bold text-emerald-600">{stats.available}</p>
+   792→                      <p className="text-[10px] text-muted-foreground">Tersedia</p>
+   793→                    </div>
+   794→                    <div>
+   795→                      <p className="text-lg font-bold text-red-500">{stats.sold}</p>
+   796→                      <p className="text-[10px] text-muted-foreground">Terjual</p>
+   797→                    </div>
+   798→                    <div>
+   799→                      <p className="text-lg font-bold text-purple-600">{stats.invitation}</p>
+   800→                      <p className="text-[10px] text-muted-foreground">Undangan</p>
+   801→                    </div>
+   802→                    <div>
+   803→                      <p className="text-lg font-bold text-gray-500">{stats.unavailable || 0}</p>
+   804→                      <p className="text-[10px] text-muted-foreground">Ditutup</p>
+   805→                    </div>
+   806→                    <div>
+   807→                      <p className="text-lg font-bold text-gray-500">{stats.unavailable || 0}</p>
+   808→                      <p className="text-[10px] text-muted-foreground">Ditutup</p>
+   809→                    </div>
+   810→                  </div>
+   811→                  {/* Progress bar */}
+   812→                  <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden flex">
+   813→                    <div
+   814→                      className="h-full bg-emerald-500 rounded-l-full transition-all"
+   815→                      style={{ width: `${stats.total > 0 ? (stats.available / stats.total) * 100 : 0}%` }}
+   816→                    />
+   817→                    <div
+   818→                      className="h-full bg-red-400 transition-all"
+   819→                      style={{ width: `${stats.total > 0 ? (stats.sold / stats.total) * 100 : 0}%` }}
+   820→                    />
+   821→                    <div
+   822→                      className="h-full bg-purple-400 transition-all"
+   823→                      style={{ width: `${stats.total > 0 ? (stats.invitation / stats.total) * 100 : 0}%` }}
+   824→                    />
+   825→                    <div
+   826→                      className="h-full bg-amber-400 transition-all"
+   827→                      style={{ width: `${stats.total > 0 ? (stats.locked / stats.total) * 100 : 0}%` }}
+   828→                    />
+   829→                    <div
+   830→                      className="h-full bg-gray-400 rounded-r-full transition-all"
+   831→                      style={{ width: `${stats.total > 0 ? ((stats.unavailable || 0) / stats.total) * 100 : 0}%` }}
+   832→                    />
+   833→                  </div>
+   834→                  <p className="text-[10px] text-muted-foreground mt-1">
+   835→                    {stats.total > 0 ? Math.round((stats.available / stats.total) * 100) : 0}% tersisa
+   836→                  </p>
+   837→
+   838→                  {/* Lock / Unlock Zone */}
+   839→                  <div className="mt-3 pt-3 border-t border-border/30">
+   840→                    <div className="flex items-center gap-2 flex-wrap">
+   841→                      {isZoneLocked ? (
+   842→                        <Button
+   843→                          size="sm"
+   844→                          variant="outline"
+   845→                          onClick={() => handleZoneUnlock(zoneName)}
+   846→                          disabled={isZoneLocking[zoneName]}
+   847→                          className="h-7 text-[10px] px-2 bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+   848→                        >
+   849→                          {isZoneLocking[zoneName] ? (
+   850→                            <Loader2 className="w-3 h-3 animate-spin" />
+   851→                          ) : (
+   852→                            <LockOpen className="w-3 h-3 mr-0.5" />
+   853→                          )}
+   854→                          Buka Penjualan
+   855→                        </Button>
+   856→                      ) : (
+   857→                        <Button
+   858→                          size="sm"
+   859→                          variant="outline"
+   860→                          onClick={() => handleZoneLock(zoneName)}
+   861→                          disabled={isZoneLocking[zoneName] || stats.available === 0}
+   862→                          className="h-7 text-[10px] px-2 bg-red-50 border-red-200 text-red-600 hover:bg-red-100 hover:text-red-700"
+   863→                        >
+   864→                          {isZoneLocking[zoneName] ? (
+   865→                            <Loader2 className="w-3 h-3 animate-spin" />
+   866→                          ) : (
+   867→                            <Lock className="w-3 h-3 mr-0.5" />
+   868→                          )}
+   869→                          Kunci Penjualan
+   870→                        </Button>
+   871→                      )}
+   872→                    </div>
+   873→                  </div>
+   874→
+   875→                  {/* Reservasi Undangan (hidden when zone is locked) */}
+   876→                  {!isZoneLocked && (
+   877→                  <div className="mt-3 pt-3 border-t border-border/30">
+   878→                    <div className="flex items-center gap-1 mb-2">
+   879→                      <Ticket className="w-3 h-3 text-purple-500" />
+   880→                      <span className="text-[10px] font-medium text-muted-foreground">Reservasi Undangan</span>
+   881→                    </div>
+   882→                    <div className="flex items-center gap-2">
+   883→                      <input
+   884→                        type="number"
+   885→                        min={0}
+   886→                        max={stats.available}
+   887→                        value={reserveQty[zoneName] || ''}
+   888→                        onChange={(e) => setReserveQty(prev => ({ ...prev, [zoneName]: Math.max(0, parseInt(e.target.value) || 0) }))}
+   889→                        placeholder="0"
+   890→                        className="w-16 h-7 px-2 text-xs rounded border border-border bg-white text-center focus:outline-none focus:ring-1 focus:ring-purple-400"
+   891→                      />
+   892→                      <Button
+   893→                        size="sm"
+   894→                        variant="outline"
+   895→                        onClick={() => handleReserve(zoneName)}
+   896→                        disabled={isReserving[zoneName] || !reserveQty[zoneName] || reserveQty[zoneName] < 1}
+   897→                        className="h-7 text-[10px] px-2 bg-purple-50 border-purple-200 text-purple-700 hover:bg-purple-100 hover:text-purple-800"
+   898→                      >
+   899→                        {isReserving[zoneName] ? (
+   900→                          <Loader2 className="w-3 h-3 animate-spin" />
+   901→                        ) : (
+   902→                          '+ Reservasi'
+   903→                        )}
+   904→                      </Button>
+   905→                      {stats.invitation > 0 && (
+   906→                        <Button
+   907→                          size="sm"
+   908→                          variant="outline"
+   909→                          onClick={() => handleRelease(zoneName)}
+   910→                          disabled={isReleasing[zoneName] || !reserveQty[zoneName] || reserveQty[zoneName] < 1}
+   911→                          className="h-7 text-[10px] px-2 bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 hover:text-amber-800"
+   912→                        >
+   913→                          {isReleasing[zoneName] ? (
+   914→                            <Loader2 className="w-3 h-3 animate-spin" />
+   915→                          ) : (
+   916→                            <MinusCircle className="w-3 h-3 mr-0.5" />
+   917→                          )}
+   918→                          Lepas
+   919→                        </Button>
+   920→                      )}
+   921→                    </div>
+   922→                    <p className="text-[9px] text-muted-foreground/70 mt-1">
+   923→                      Tersedia: {stats.available} slot &middot; Undangan: {stats.invitation} slot
+   924→                    </p>
+   925→                  </div>
+   926→                  )}
+   927→                </div>
+   928→              )})}
+   929→            </div>
+   930→          </CardContent>
+   931→        </Card>
+   932→      )}
+   933→
+   934→      {/* 4. Generate / Regenerate Seats */}
+   935→      <Card className={cn("border-gold/20", hasExistingSeats ? "bg-amber-50/50 border-amber-200" : "bg-gold/5")}>
+   936→        <CardContent className="p-6">
+   937→          <div className="flex items-center justify-between">
+   938→            <div>
+   939→              <div className="flex items-center gap-2 mb-1">
+   940→                <Zap className="w-4 h-4 text-gold" />
+   941→                <h2 className="font-serif text-lg font-semibold text-charcoal">
+   942→                  {hasExistingSeats ? 'Regenerate Kursi' : 'Generate Kursi'}
+   943→                </h2>
+   944→              </div>
+   945→              <p className="text-sm text-muted-foreground">
+   946→                {gaZonesDef.length > 0 ? (
+   947→                  <>
+   948→                    <span className="font-medium text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi dari{' '}
+   949→                    <span className="font-medium text-charcoal">{gaZonesDef.length}</span> zona akan di-generate.
+   950→                    {hasExistingSeats && (
+   951→                      <span className="text-amber-600 font-medium"> (kursi lama akan dihapus)</span>
+   952→                    )}
+   953→                  </>
+   954→                ) : (
+   955→                  'Tambahkan minimal 1 zona untuk generate kursi.'
+   956→                )}
+   957→              </p>
+   958→            </div>
+   959→            <Button
+   960→              size="lg"
+   961→              onClick={handleGenerateSeats}
+   962→              disabled={isGeneratingFromZones || gaZonesDef.length === 0}
+   963→              className={cn(
+   964→                "font-semibold",
+   965→                hasExistingSeats
+   966→                  ? "bg-amber-500 hover:bg-amber-600 text-white"
+   967→                  : "bg-gold hover:bg-gold/90 text-charcoal"
+   968→              )}
+   969→            >
+   970→              {isGeneratingFromZones ? (
+   971→                <>
+   972→                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   973→                  Generating...
+   974→                </>
+   975→              ) : hasExistingSeats ? (
+   976→                <>
+   977→                  <RotateCcw className="w-4 h-4 mr-2" />
+   978→                  Regenerate
+   979→                </>
+   980→              ) : (
+   981→                <>
+   982→                  <Zap className="w-4 h-4 mr-2" />
+   983→                  Generate Kursi
+   984→                </>
+   985→              )}
+   986→            </Button>
+   987→          </div>
+   988→        </CardContent>
+   989→      </Card>
+   990→
+   991→      {/* ─── Consolidate Seats (for events generated under old per-day model) ── */}
+   992→      {/* Shows when event has seats with eventShowDateId set (legacy duplication) */}
+   993→      {hasExistingSeats && (
+   994→        <Card className="border-amber-300 bg-amber-50/50">
+   995→          <CardContent className="p-6">
+   996→            <div className="flex items-center justify-between gap-4">
+   997→              <div className="flex-1">
+   998→                <div className="flex items-center gap-2 mb-1">
+   999→                  <AlertTriangle className="w-4 h-4 text-amber-600" />
+  1000→                  <h2 className="font-serif text-lg font-semibold text-charcoal">Konsolidasi Kursi (Single Pool)</h2>
+  1001→                </div>
+  1002→                <p className="text-sm text-muted-foreground">
+  1003→                  Model baru: <strong>1 tiket = 1 seat</strong>. Multi-day cuma metadata di price category
+  1004→                  (<code className="text-[10px] bg-amber-100 px-1 rounded">applicableDayIds</code>),
+  1005→                  bukan duplikat kursi per hari. Klik tombol ini untuk:
+  1006→                </p>
+  1007→                <ul className="text-xs text-muted-foreground mt-2 ml-4 list-disc space-y-0.5">
+  1008→                  <li>Hapus kursi duplikat (same seatCode di multiple days) — keep yang AVAILABLE</li>
+  1009→                  <li>Clear <code className="text-[10px] bg-amber-100 px-1 rounded">eventShowDateId</code> di semua kursi yang tersisa</li>
+  1010→                  <li>Hasil: 1 pool of seats per zone, availability = count seat di zone itu</li>
+  1011→                </ul>
+  1012→                <p className="text-[11px] text-amber-700 mt-2">
+  1013→                  ⚠️ Backup DB dulu sebelum run. Kursi SOLD tetap dipertahankan (prioritas: AVAILABLE &gt; LOCKED &gt; SOLD).
+  1014→                </p>
+  1015→              </div>
+  1016→              <Button
+  1017→                size="lg"
+  1018→                variant="outline"
+  1019→                onClick={async () => {
+  1020→                  // Dry run first to show user what will happen
+  1021→                  try {
+  1022→                    const dryRes = await fetch(`/api/admin/events/${eventId}/fix-seats`, {
+  1023→                      method: 'POST',
+  1024→                      headers: { 'Content-Type': 'application/json' },
+  1025→                      body: JSON.stringify({ dryRun: true }),
+  1026→                    })
+  1027→                    const dryData = await dryRes.json()
+  1028→                    if (!dryRes.ok) {
+  1029→                      alert(dryData.error || 'Gagal cek kursi')
+  1030→                      return
+  1031→                    }
+  1032→                    if (!dryData.needsFix) {
+  1033→                      alert(dryData.message || 'Sudah aman, tidak perlu konsolidasi.')
+  1034→                      return
+  1035→                    }
+  1036→                    const confirmMsg = `${dryData.message}\n\nLanjutkan konsolidasi?\n\n⚠️ Backup DB dulu kalau ragu.`
+  1037→                    if (!confirm(confirmMsg)) return
+  1038→
+  1039→                    const res = await fetch(`/api/admin/events/${eventId}/fix-seats`, {
+  1040→                      method: 'POST',
+  1041→                      headers: { 'Content-Type': 'application/json' },
+  1042→                      body: JSON.stringify({ dryRun: false }),
+  1043→                    })
+  1044→                    const data = await res.json()
+  1045→                    if (res.ok) {
+  1046→                      alert(data.message)
+  1047→                      window.location.reload()
+  1048→                    } else {
+  1049→                      alert(data.error || 'Gagal konsolidasi kursi')
+  1050→                    }
+  1051→                  } catch {
+  1052→                    alert('Gagal terhubung ke server')
+  1053→                  }
+  1054→                }}
+  1055→                className="border-amber-500 text-amber-700 hover:bg-amber-100 font-semibold shrink-0"
+  1056→              >
+  1057→                <AlertTriangle className="w-4 h-4 mr-2" />
+  1058→                Konsolidasi Kursi
+  1059→              </Button>
+  1060→            </div>
+  1061→          </CardContent>
+  1062→        </Card>
+  1063→      )}
+  1064→
+  1065→      {/* Back link */}
+  1066→      <div className="text-center pt-4">
+  1067→        <a href="/admin/events" className="text-gold underline text-sm inline-block">
+  1068→          ← Kembali ke Events
+  1069→        </a>
+  1070→      </div>
+  1071→    </div>
+  1072→  )
+  1073→}
+  1074→
+  1075→export default function SeatEditorPage() {
+  1076→  const params = useParams()
+  1077→  const eventId = params.id as string
+  1078→
+  1079→  const [allSeats, setAllSeats] = useState<SeatData[]>([])
+  1080→  const [priceCategories, setPriceCategories] = useState<PriceCategoryData[]>([])
+  1081→  const [eventInfo, setEventInfo] = useState<EventInfo | null>(null)
+  1082→  const [layoutData, setLayoutData] = useState<any>(null)
+  1083→  const [selectedSeatCodes, setSelectedSeatCodes] = useState<Set<string>>(new Set())
+  1084→  const [isLoading, setIsLoading] = useState(true)
+  1085→  const [showDates, setShowDates] = useState<ShowDateData[]>([])
+  1086→  const [selectedShowDateIdx, setSelectedShowDateIdx] = useState(-1) // -1 = all days
+  1087→  const [isSaving, setIsSaving] = useState(false)
+  1088→  const [isDeletingSeats, setIsDeletingSeats] = useState(false)
+  1089→  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  1090→
+  1091→  // ─── GA Zone Config state ──────────────────────────────────────────
+  1092→  const [gaZonesDef, setGaZonesDef] = useState<GaZoneDef[]>([])
+  1093→  const [layoutImage, setLayoutImage] = useState<string | null>(null)
+  1094→  const [layoutImagePreview, setLayoutImagePreview] = useState<string | null>(null)
+  1095→  const [isUploading, setIsUploading] = useState(false)
+  1096→  const [isSavingZones, setIsSavingZones] = useState(false)
+  1097→  const [isGeneratingFromZones, setIsGeneratingFromZones] = useState(false)
+  1098→  const [newZone, setNewZone] = useState<GaZoneDef>({ name: '', capacity: 100, price: 0, color: '#22c55e', priceCategoryName: '', notes: '' })
+  1099→  const fileInputRef = useRef<HTMLInputElement>(null)
+  1100→
+  1101→  const isDraggingRef = useRef(false)
+  1102→  const dragModeRef = useRef<'select' | 'deselect'>('select')
+  1103→
+  1104→  // Active show date
+  1105→  const activeShowDate = selectedShowDateIdx >= 0 && showDates[selectedShowDateIdx]
+  1106→    ? showDates[selectedShowDateIdx]
+  1107→    : null
+  1108→
+  1109→  // Group seats by showDateId for "Semua Hari" divider view
+  1110→  const seatsByDate = useMemo(() => {
+  1111→    if (activeShowDate) return null // Single day mode — no grouping needed
+  1112→    if (showDates.length <= 1) return null // Only 1 day — no divider needed
+  1113→    const groups = new Map<string | null, SeatData[]>()
+  1114→    for (const s of allSeats) {
+  1115→      const key = s.eventShowDateId || null
+  1116→      if (!groups.has(key)) groups.set(key, [])
+  1117→      groups.get(key)!.push(s)
+  1118→    }
+  1119→    return groups
+  1120→  }, [allSeats, activeShowDate, showDates.length])
+  1121→
+  1122→  // Filter seats based on selected day — ONLY match explicit showDateId, no orphan fallback
+  1123→  const seats = useMemo(() => {
+  1124→    if (!activeShowDate) return allSeats
+  1125→    return allSeats.filter(s => s.eventShowDateId === activeShowDate.id)
+  1126→  }, [allSeats, activeShowDate])
+  1127→
+  1128→  useEffect(() => {
+  1129→    async function fetchData() {
+  1130→      try {
+  1131→        const [seatsRes, eventRes] = await Promise.all([
+  1132→          fetch(`/api/events/${eventId}/seats?admin=1`),
+  1133→          fetch(`/api/admin/events/${eventId}`),
+  1134→        ])
+  1135→
+  1136→        if (seatsRes.ok) {
+  1137→          const data = await seatsRes.json()
+  1138→          setAllSeats(data.seats || [])
+  1139→          setPriceCategories(data.priceCategories || [])
+  1140→        }
+  1141→
+  1142→        if (eventRes.ok) {
+  1143→          const data = await eventRes.json()
+  1144→          const ev = data.event || null
+  1145→          // Populate show dates
+  1146→          if (ev?.showDates && ev.showDates.length > 1) {
+  1147→            setShowDates(ev.showDates)
+  1148→            setSelectedShowDateIdx(0)
+  1149→          }
+  1150→          // Load GA zone config and layout image
+  1151→          if (ev?.gaZoneConfig) {
+  1152→            try {
+  1153→              setGaZonesDef(JSON.parse(ev.gaZoneConfig))
+  1154→            } catch { /* ignore */ }
+  1155→          }
+  1156→          if (ev?.layoutImage) {
+  1157→            setLayoutImage(ev.layoutImage)
+  1158→            setLayoutImagePreview(ev.layoutImage)
+  1159→          }
+  1160→          // Fetch layoutData from the seat map
+  1161→          let seatMapSeatType: string | null = null
+  1162→          if (ev?.seatMapId) {
+  1163→            try {
+  1164→              const mapRes = await fetch(`/api/admin/seat-maps/${ev.seatMapId}`)
+  1165→              if (mapRes.ok) {
+  1166→                const mapData = await mapRes.json()
+  1167→                if (mapData.seatMap?.layoutData) {
+  1168→                  setLayoutData(mapData.seatMap.layoutData)
+  1169→                }
+  1170→                if (mapData.seatMap?.seatType) {
+  1171→                  seatMapSeatType = mapData.seatMap.seatType
+  1172→                }
+  1173→              }
+  1174→            } catch { /* ignore */ }
+  1175→          }
+  1176→          // Set eventInfo with all data including seatMapSeatType
+  1177→          setEventInfo(ev ? { ...ev, seatMapSeatType } : null)
+  1178→        }
+  1179→      } catch (err) {
+  1180→        console.error('Failed to fetch seats:', err)
+  1181→      } finally {
+  1182→        setIsLoading(false)
+  1183→      }
+  1184→    }
+  1185→
+  1186→    if (eventId) fetchData()
+  1187→  }, [eventId])
+  1188→
+  1189→  // Re-fetch seats when active show date changes
+  1190→  useEffect(() => {
+  1191→    if (!eventId) return
+  1192→    const url = activeShowDate
+  1193→      ? `/api/events/${eventId}/seats?showDateId=${activeShowDate.id}`
+  1194→      : `/api/events/${eventId}/seats`
+  1195→    let cancelled = false
+  1196→    fetch(url)
+  1197→      .then(res => res.ok ? res.json() : { seats: [], priceCategories: [] })
+  1198→      .then(data => {
+  1199→        if (cancelled) return
+  1200→        setAllSeats(data.seats || [])
+  1201→        if (data.priceCategories) setPriceCategories(data.priceCategories)
+  1202→      })
+  1203→      .catch(() => {})
+  1204→    return () => { cancelled = true }
+  1205→  }, [activeShowDate?.id, eventId])
+  1206→
+  1207→  // ─── Parse layoutData for flat grid rendering (1:1 with seat map editor) ──
+  1208→  const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
+  1209→
+  1210→  // Component-level canvas mode flag (shared across renderFlatGridInner and JSX)
+  1211→  const isCanvasMode = !!(parsedLayout?.canvasSeats && parsedLayout.canvasSeats.length > 0)
+  1212→
+  1213→  // ─── Stage & Objects coordinate mapping (canvas → admin grid) ──
+  1214→  const stageLayout = useMemo(() => {
+  1215→    if (!parsedLayout) return null
+  1216→    const { gridSize, displayRows, stagePosition, canvasSeatBounds: csb, cols } = parsedLayout
+  1217→    const CELL_TOTAL = SEAT_W + SEAT_GAP
+  1218→    const guestGridW = cols * CELL_TOTAL
+  1219→    const guestGridH = displayRows.length * CELL_TOTAL
+  1220→    const hasBounds = !!csb && cols > 0 && displayRows.length > 0
+  1221→    const hasCustomStagePos = stagePosition && typeof stagePosition.x === 'number'
+  1222→    const stageType = parsedLayout.stageType || 'PROSCENIUM'
+  1223→    const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
+  1224→    const stageSize = isInsetStage ? 'md' : 'lg'
+  1225→
+  1226→    // Helper: transform canvas (cx, cy, cw, ch) → guest (gx, gy, gw, gh)
+  1227→    function toGuest(cx: number, cy: number, cw: number, ch: number) {
+  1228→      if (!csb) return { x: cx, y: cy, w: cw, h: ch }
+  1229→      return {
+  1230→        x: LABEL_W + ((cx - csb.originX) / csb.spanX) * guestGridW,
+  1231→        y: ((cy - csb.originY) / csb.spanY) * guestGridH,
+  1232→        w: (cw / csb.spanX) * guestGridW,
+  1233→        h: (ch / csb.spanY) * guestGridH,
+  1234→      }
+  1235→    }
+  1236→
+  1237→    // Calculate paddingTop for elements above the seat grid
+  1238→    let stageGuest = hasCustomStagePos && hasBounds
+  1239→      ? toGuest(stagePosition.x, stagePosition.y, stagePosition.width, stagePosition.height)
+  1240→      : null
+  1241→    const allGuestYs: number[] = []
+  1242→    if (stageGuest) allGuestYs.push(stageGuest.y)
+  1243→    if (parsedLayout.objects) {
+  1244→      for (const obj of parsedLayout.objects) {
+  1245→        if (typeof obj.x === 'number' && typeof obj.y === 'number' && hasBounds) {
+  1246→          const g = toGuest(obj.x, obj.y, obj.pixelW || 60, obj.pixelH || 30)
+  1247→          allGuestYs.push(g.y)
+  1248→        }
+  1249→      }
+  1250→    }
+  1251→    const minGuestY = allGuestYs.length > 0 ? Math.min(...allGuestYs) : 0
+  1252→    const paddingTop = minGuestY < 0 ? Math.ceil(-minGuestY) + 4 : 0
+  1253→
+  1254→    // Re-calculate stage guest position with paddingTop offset
+  1255→    if (stageGuest && paddingTop > 0) {
+  1256→      stageGuest = { ...stageGuest, y: stageGuest.y + paddingTop }
+  1257→    }
+  1258→
+  1259→    return {
+  1260→      stageType,
+  1261→      isInsetStage,
+  1262→      stageSize,
+  1263→      hasCustomStagePos: !!hasCustomStagePos && hasBounds,
+  1264→      stageGuest,
+  1265→      paddingTop,
+  1266→      canvasSeatBounds: csb,
+  1267→      cols,
+  1268→      displayRowsCount: displayRows.length,
+  1269→    }
+  1270→  }, [parsedLayout])
+  1271→
+  1272→  // Build seat lookup by seatCode
+  1273→  const seatLookup = useMemo(() => {
+  1274→    const map = new Map<string, SeatData>()
+  1275→    for (const seat of seats) {
+  1276→      map.set(seat.seatCode, seat)
+  1277→    }
+  1278→    return map
+  1279→  }, [seats])
+  1280→
+  1281→  // ─── Build dynamic row layout (fallback for GA / no layoutData) ──────
+  1282→  const rowLayout = useMemo(() => {
+  1283→    if (seats.length === 0) return []
+  1284→    if (parsedLayout) return [] // Use parsedLayout instead
+  1285→
+  1286→    const rowMap = new Map<string, SeatData[]>()
+  1287→    for (const seat of seats) {
+  1288→      if (!rowMap.has(seat.row)) rowMap.set(seat.row, [])
+  1289→      rowMap.get(seat.row)!.push(seat)
+  1290→    }
+  1291→
+  1292→    const rowEntries = [...rowMap.entries()].sort((a, b) => {
+  1293→      if (a[0].length === 1 && b[0].length === 1) return a[0].localeCompare(b[0])
+  1294→      return (a[1][0]?.col || 0) - (b[1][0]?.col || 0)
+  1295→    })
+  1296→
+  1297→    return rowEntries.map(([rowName, rowSeats]) => {
+  1298→      const sorted = [...rowSeats].sort((a, b) => a.col - b.col)
+  1299→      return { rowName, seats: sorted, totalSeats: sorted.length }
+  1300→    })
+  1301→  }, [seats, parsedLayout])
+  1302→
+  1303→  // ─── Check if GA (General Admission) type ───────────────────────────
+  1304→  const gaZones = parsedLayout?.isGA ? (parsedLayout.gaZones || []) : []
+  1305→  const isGA = useMemo(() => {
+  1306→    if (parsedLayout?.isGA && gaZones.length > 0) return true
+  1307→    if (parsedLayout) return false
+  1308→    if (seats.length === 0) return false
+  1309→    const uniqueRows = new Set(seats.map(s => s.row))
+  1310→    return uniqueRows.size <= 5 && seats.length / uniqueRows.size > 10
+  1311→  }, [seats, parsedLayout, gaZones.length])
+  1312→
+  1313→  // Clear selection when switching days
+  1314→  useEffect(() => {
+  1315→    setSelectedSeatCodes(new Set())
+  1316→    setHasUnsavedChanges(false)
+  1317→  }, [selectedShowDateIdx])
+  1318→
+  1319→  // ─── Mouse handlers ─────────────────────────────────────────────────
+  1320→  const handleMouseDown = useCallback((seat: SeatData) => {
+  1321→    if (selectedSeatCodes.has(seat.seatCode)) {
+  1322→      dragModeRef.current = 'deselect'
+  1323→      setSelectedSeatCodes((prev) => {
+  1324→        const next = new Set(prev)
+  1325→        next.delete(seat.seatCode)
+  1326→        return next
+  1327→      })
+  1328→    } else {
+  1329→      dragModeRef.current = 'select'
+  1330→      setSelectedSeatCodes((prev) => new Set(prev).add(seat.seatCode))
+  1331→    }
+  1332→    isDraggingRef.current = true
+  1333→  }, [selectedSeatCodes])
+  1334→
+  1335→  const handleMouseEnter = useCallback((seat: SeatData) => {
+  1336→    if (!isDraggingRef.current) return
+  1337→
+  1338→    if (dragModeRef.current === 'select') {
+  1339→      setSelectedSeatCodes((prev) => new Set(prev).add(seat.seatCode))
+  1340→    } else {
+  1341→      setSelectedSeatCodes((prev) => {
+  1342→        const next = new Set(prev)
+  1343→        next.delete(seat.seatCode)
+  1344→        return next
+  1345→      })
+  1346→    }
+  1347→  }, [])
+  1348→
+  1349→  const handleMouseUp = useCallback(() => {
+  1350→    isDraggingRef.current = false
+  1351→  }, [])
+  1352→
+  1353→  useEffect(() => {
+  1354→    window.addEventListener('mouseup', handleMouseUp)
+  1355→    return () => window.removeEventListener('mouseup', handleMouseUp)
+  1356→  }, [handleMouseUp])
+  1357→
+  1358→  const clearSelection = () => setSelectedSeatCodes(new Set())
+  1359→
+  1360→  const selectAll = () => {
+  1361→    setSelectedSeatCodes(new Set(seats.map((s) => s.seatCode)))
+  1362→  }
+  1363→
+  1364→  // ─── Seat operations (local state only — use Simpan button to persist) ─
+  1365→  function assignPriceCategory(priceCategoryId: string) {
+  1366→    if (selectedSeatCodes.size === 0) return
+  1367→    setAllSeats((prev) =>
+  1368→      prev.map((s) =>
+  1369→        selectedSeatCodes.has(s.seatCode)
+  1370→          ? { ...s, priceCategoryId, priceCategory: priceCategories.find((pc) => pc.id === priceCategoryId) || null }
+  1371→          : s
+  1372→      )
+  1373→    )
+  1374→    setHasUnsavedChanges(true)
+  1375→    clearSelection()
+  1376→  }
+  1377→
+  1378→  function setSeatStatus(status: string) {
+  1379→    if (selectedSeatCodes.size === 0) return
+  1380→    setAllSeats((prev) =>
+  1381→      prev.map((s) =>
+  1382→        selectedSeatCodes.has(s.seatCode) ? { ...s, status } : s
+  1383→      )
+  1384→    )
+  1385→    setHasUnsavedChanges(true)
+  1386→    clearSelection()
+  1387→  }
+  1388→
+  1389→  // ─── Save all changes to server ───────────────────────────────────
+  1390→  async function saveAllChanges() {
+  1391→    setIsSaving(true)
+  1392→    try {
+  1393→      const res = await fetch(`/api/admin/events/${eventId}/seats`, {
+  1394→        method: 'PUT',
+  1395→        headers: { 'Content-Type': 'application/json' },
+  1396→        body: JSON.stringify({
+  1397→          showDateId: activeShowDate?.id || undefined,
+  1398→          seats: seats.map((s) => ({
+  1399→            seatCode: s.seatCode,
+  1400→            status: s.status,
+  1401→            priceCategoryId: s.priceCategoryId,
+  1402→          })),
+  1403→        }),
+  1404→      })
+  1405→      if (res.ok) {
+  1406→        setHasUnsavedChanges(false)
+  1407→      } else {
+  1408→        alert('Gagal menyimpan. Coba lagi.')
+  1409→      }
+  1410→    } catch (err) {
+  1411→      console.error('Save error:', err)
+  1412→      alert('Gagal menyimpan. Coba lagi.')
+  1413→    } finally {
+  1414→      setIsSaving(false)
+  1415→    }
+  1416→  }
+  1417→
+  1418→  // ─── Delete & Regenerate ────────────────────────────────────────────
+  1419→  async function handleDeleteAndRegenerate() {
+  1420→    const confirmed = confirm(
+  1421→      `Hapus semua ${seats.length} kursi?\n\nEvent akan kembali ke keadaan belum generate kursi. Kamu bisa generate ulang dari halaman Events.`
+  1422→    )
+  1423→    if (!confirmed) return
+  1424→
+  1425→    setIsDeletingSeats(true)
+  1426→    try {
+  1427→      const res = await fetch(`/api/admin/events/${eventId}/seats`, { method: 'DELETE' })
+  1428→      if (res.ok) {
+  1429→        setAllSeats([])
+  1430→        setSelectedSeatCodes(new Set())
+  1431→      } else {
+  1432→        const data = await res.json()
+  1433→        alert(data.error || 'Gagal menghapus kursi')
+  1434→      }
+  1435→    } catch (err) {
+  1436→      console.error('Delete error:', err)
+  1437→    } finally {
+  1438→      setIsDeletingSeats(false)
+  1439→    }
+  1440→  }
+  1441→
+  1442→  // ─── Seat styling ───────────────────────────────────────────────────
+  1443→  const getSeatStyle = (seat: SeatData) => {
+  1444→    const isSelected = selectedSeatCodes.has(seat.seatCode)
+  1445→
+  1446→    switch (seat.status) {
+  1447→      case 'SOLD':
+  1448→        return 'bg-seat-sold text-white'
+  1449→      case 'LOCKED_TEMPORARY':
+  1450→        return 'bg-seat-locked text-white'
+  1451→      case 'INVITATION':
+  1452→        return 'bg-seat-invitation text-white'
+  1453→      case 'UNAVAILABLE':
+  1454→        return 'bg-gray-300 opacity-40'
+  1455→      default:
+  1456→        if (isSelected) return 'bg-gold text-charcoal ring-2 ring-gold ring-offset-1'
+  1457→        return 'bg-white border-2'
+  1458→    }
+  1459→  }
+  1460→
+  1461→  const getSeatBorderColor = (seat: SeatData) => {
+  1462→    if (seat.status !== 'AVAILABLE' || selectedSeatCodes.has(seat.seatCode)) return 'transparent'
+  1463→    return seat.priceCategory?.colorCode || '#C8A951'
+  1464→  }
+  1465→
+  1466→  // ─── Build row layout from seat data (fallback when no parsedLayout) ──
+  1467→  function buildRowLayout(seatList: SeatData[]) {
+  1468→    if (seatList.length === 0) return []
+  1469→    const rowMap = new Map<string, SeatData[]>()
+  1470→    for (const seat of seatList) {
+  1471→      if (!rowMap.has(seat.row)) rowMap.set(seat.row, [])
+  1472→      rowMap.get(seat.row)!.push(seat)
+  1473→    }
+  1474→    const rowEntries = [...rowMap.entries()].sort((a, b) => {
+  1475→      if (a[0].length === 1 && b[0].length === 1) return a[0].localeCompare(b[0])
+  1476→      return (a[1][0]?.col || 0) - (b[1][0]?.col || 0)
+  1477→    })
+  1478→    return rowEntries.map(([rowName, rowSeats]) => {
+  1479→      const sorted = [...rowSeats].sort((a, b) => a.col - b.col)
+  1480→      return { rowName, seats: sorted, totalSeats: sorted.length }
+  1481→    })
+  1482→  }
+  1483→
+  1484→  // ─── Render flat grid from layoutData (reusable for multi-day divider) ─
+  1485→  function renderFlatGridInner(lookup: Map<string, SeatData>) {
+  1486→    if (!parsedLayout) return null
+  1487→    const { gridSize, rowLabels: lLabels, rowSeatMap, embeddedRows, displayRows, sections, canvasSeats, fullCanvasBounds } = parsedLayout
+  1488→    const { cols } = gridSize
+  1489→    const aisleColumns = parsedLayout.aisleColumns || []
+  1490→
+  1491→    // Check if we should use canvas-based rendering
+  1492→    const useCanvasMode = !!canvasSeats && canvasSeats.length > 0
+  1493→
+  1494→    // ─── Canvas Mode: preserve empty space like guest view ─────────────
+  1495→    if (useCanvasMode) {
+  1496→      return (
+  1497→        <CanvasSeatLayout
+  1498→          parsedLayout={parsedLayout}
+  1499→          seatLookup={lookup as Map<string, any>}
+  1500→          renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+  1501→            const isSelected = selectedSeatCodes.has(seatData.seatCode)
+  1502→            const num = canvasSeat.seatNum
+  1503→            return (
+  1504→              <button
+  1505→                key={key}
+  1506→                onMouseDown={(e) => { if (e.button === 0) handleMouseDown(seatData) }}
+  1507→                onMouseEnter={() => handleMouseEnter(seatData)}
+  1508→                className={cn(
+  1509→                  'absolute rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-100 select-none cursor-pointer',
+  1510→                  seatData.status === 'SOLD' && 'bg-seat-sold text-white',
+  1511→                  seatData.status === 'LOCKED_TEMPORARY' && 'bg-seat-locked text-white',
+  1512→                  seatData.status === 'INVITATION' && 'bg-seat-invitation text-white',
+  1513→                  seatData.status === 'UNAVAILABLE' && 'bg-gray-300 opacity-40',
+  1514→                  isSelected && 'bg-gold text-charcoal ring-2 ring-gold ring-offset-1',
+  1515→                  !isSelected && seatData.status === 'AVAILABLE' && 'bg-white border-2',
+  1516→                )}
+  1517→                style={{
+  1518→                  left: scaledX,
+  1519→                  top: scaledY,
+  1520→                  width: size,
+  1521→                  height: size,
+  1522→                  ...(seatData.status === 'AVAILABLE' && !isSelected
+  1523→                    ? { borderColor: getSeatBorderColor(seatData) }
+  1524→                    : {}),
+  1525→                }}
+  1526→                title={`${canvasSeat.seatCode} | ${seatData.priceCategory?.name || '-'} | ${seatData.status}`}
+  1527→              >
+  1528→                {seatData.status === 'SOLD' && <Check className="w-3 h-3" />}
+  1529→                {seatData.status === 'LOCKED_TEMPORARY' && <Lock className="w-3 h-3" />}
+  1530→                {seatData.status === 'UNAVAILABLE' && <X className="w-3 h-3" />}
+  1531→                {seatData.status === 'INVITATION' && <Crown className="w-3 h-3" />}
+  1532→                {(seatData.status === 'AVAILABLE' || isSelected) && num}
+  1533→              </button>
+  1534→            )
+  1535→          }}
+  1536→          renderEmpty={(x, y, size, key) => (
+  1537→            <div
+  1538→              key={key}
+  1539→              className="absolute"
+  1540→              style={{ left: x, top: y, width: size, height: size }}
+  1541→            />
+  1542→          )}
+  1543→        />
+  1544→      )
+  1545→    }
+  1546→
+  1547→    // Build reverse map: target row → source rows
+  1548→    const embeddedInto: Record<number, number[]> = {}
+  1549→    for (const [srcStr, tgt] of Object.entries(embeddedRows)) {
+  1550→      const src = parseInt(srcStr)
+  1551→      if (!embeddedInto[tgt]) embeddedInto[tgt] = []
+  1552→      embeddedInto[tgt].push(src)
+  1553→    }
+  1554→
+  1555→    // Build grid lookup: displayRow → col → { seatCode, seatNum }
+  1556→    const gridLookup = new Map<number, Map<number, { seatCode: string; seatNum: number }>>()
+  1557→    for (const ri of displayRows) {
+  1558→      const colMap = new Map<number, { seatCode: string; seatNum: number }>()
+  1559→      const rowSeats = rowSeatMap.get(ri) || []
+  1560→      for (const s of rowSeats) {
+  1561→        const label = lLabels[ri] || String.fromCharCode(65 + ri)
+  1562→        colMap.set(s.c, { seatCode: `${label}-${s.seatNum}`, seatNum: s.seatNum })
+  1563→      }
+  1564→      const srcRows = embeddedInto[ri] || []
+  1565→      for (const srcRi of srcRows) {
+  1566→        const srcSeats = rowSeatMap.get(srcRi) || []
+  1567→        const srcLabel = lLabels[srcRi] || String.fromCharCode(65 + srcRi)
+  1568→        for (const s of srcSeats) {
+  1569→          colMap.set(s.c, { seatCode: `${srcLabel}-${s.seatNum}`, seatNum: s.seatNum })
+  1570→        }
+  1571→      }
+  1572→      gridLookup.set(ri, colMap)
+  1573→    }
+  1574→
+  1575→    const CELL_TOTAL = SEAT_W + SEAT_GAP
+  1576→    const gridW = cols * CELL_TOTAL - SEAT_GAP + 60
+  1577→    const middleRowIndex = stageLayout?.isInsetStage && !stageLayout?.hasCustomStagePos
+  1578→      ? Math.floor(displayRows.length / 2) : -1
+  1579→
+  1580→    const getRowColor = (rowIdx: number) => {
+  1581→      const section = sections.find(s => rowIdx >= s.fromRow && rowIdx <= s.toRow)
+  1582→      if (section) return CATEGORY_CONFIG[section.name]?.defaultColor || section.colorCode
+  1583→      return '#8B8680'
+  1584→    }
+  1585→
+  1586→    return (
+  1587→      <>
+  1588→        {displayRows.map((ri, idx) => {
+  1589→          const label = lLabels[ri] || String.fromCharCode(65 + ri)
+  1590→          const colMap = gridLookup.get(ri) || new Map()
+  1591→          const rowColor = getRowColor(ri)
+  1592→
+  1593→          return (
+  1594→            <React.Fragment key={ri}>
+  1595→              {/* Inset stage (BLACK_BOX / ARENA) in middle of rows — only if no custom position */}
+  1596→              {stageLayout?.isInsetStage && !stageLayout?.hasCustomStagePos && idx === middleRowIndex && (
+  1597→                <div className="flex justify-center my-2">
+  1598→                  <StageRenderer
+  1599→                    stageType={stageLayout.stageType}
+  1600→                    size={stageLayout.stageSize}
+  1601→                    thrustWidth={parsedLayout.thrustWidth}
+  1602→                    thrustDepth={parsedLayout.thrustDepth}
+  1603→                  />
+  1604→                </div>
+  1605→              )}
+  1606→              <div
+  1607→                className="flex items-center mb-[3px]"
+  1608→                style={{ height: SEAT_W }}
+  1609→              >
+  1610→                <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+  1611→                  {label}
+  1612→                </div>
+  1613→                <div className="flex items-center" style={{ gap: SEAT_GAP, height: SEAT_W }}>
+  1614→                  {Array.from({ length: cols }, (_, ci) => {
+  1615→                    const c = ci
+  1616→                    if (aisleColumns.includes(c)) {
+  1617→                      return (
+  1618→                        <div key={c} className="shrink-0 bg-border/30 rounded-full mx-0.5" style={{ width: 2, height: SEAT_W * 0.6 }} />
+  1619→                      )
+  1620→                    }
+  1621→                    const seatInfo = colMap.get(c)
+  1622→                    if (seatInfo) {
+  1623→                      const seatData = lookup.get(seatInfo.seatCode)
+  1624→                      return renderSeatButton(seatData, seatInfo.seatCode, seatInfo.seatNum)
+  1625→                    }
+  1626→                    return <div key={c} style={{ width: SEAT_W, height: SEAT_W }} className="shrink-0" />
+  1627→                  })}
+  1628→                </div>
+  1629→                <div className="w-6 text-center text-xs font-semibold font-serif shrink-0" style={{ color: rowColor }}>
+  1630→                  {label}
+  1631→                </div>
+  1632→              </div>
+  1633→            </React.Fragment>
+  1634→          )
+  1635→        })}
+  1636→      </>
+  1637→    )
+  1638→  }
+  1639→
+  1640→  // ─── Render seat button ─────────────────────────────────────────────
+  1641→  const renderSeatButton = (seat: SeatData | undefined, seatCode?: string, displayNum?: number) => {
+  1642→    if (!seat) {
+  1643→      // Empty placeholder — position in layoutData but no seat generated
+  1644→      return (
+  1645→        <div
+  1646→          key={seatCode || 'empty'}
+  1647→          style={{ width: SEAT_W, height: SEAT_W }}
+  1648→          className="shrink-0 rounded-md bg-gray-100/50 border border-dashed border-gray-200/60 flex items-center justify-center text-[8px] text-gray-300"
+  1649→        >
+  1650→          {displayNum}
+  1651→        </div>
+  1652→      )
+  1653→    }
+  1654→    const num = displayNum ?? seat.col
+  1655→    const seatCodeFinal = seatCode || seat.seatCode
+  1656→    return (
+  1657→      <button
+  1658→        key={seat.id}
+  1659→        onMouseDown={(e) => { if (e.button === 0) handleMouseDown(seat) }}
+  1660→        onMouseEnter={() => handleMouseEnter(seat)}
+  1661→        className={cn(
+  1662→          'shrink-0 rounded-md flex items-center justify-center text-[9px] sm:text-[10px] font-medium transition-all duration-100 select-none cursor-pointer',
+  1663→          getSeatStyle(seat)
+  1664→        )}
+  1665→        style={{
+  1666→          width: SEAT_W,
+  1667→          height: SEAT_W,
+  1668→          ...(seat.status === 'AVAILABLE' && !selectedSeatCodes.has(seat.seatCode)
+  1669→            ? { borderColor: getSeatBorderColor(seat) }
+  1670→            : {}),
+  1671→        }}
+  1672→        title={`${seat.seatCode} | ${seat.priceCategory?.name || '-'} | ${seat.status}`}
+  1673→      >
+  1674→        {seat.status === 'SOLD' && <Check className="w-3 h-3" />}
+  1675→        {seat.status === 'LOCKED_TEMPORARY' && <Lock className="w-3 h-3" />}
+  1676→        {seat.status === 'UNAVAILABLE' && <X className="w-3 h-3" />}
+  1677→        {seat.status === 'INVITATION' && <Crown className="w-3 h-3" />}
+  1678→        {(seat.status === 'AVAILABLE' || selectedSeatCodes.has(seat.seatCode)) && num}
+  1679→      </button>
+  1680→    )
+  1681→  }
+  1682→
+  1683→  // ─── Loading & Empty states ─────────────────────────────────────────
+  1684→  if (isLoading) {
+  1685→    return (
+  1686→      <div className="flex items-center justify-center py-20">
+  1687→        <Loader2 className="w-6 h-6 text-gold animate-spin" />
+  1688→      </div>
+  1689→    )
+  1690→  }
+  1691→
+  1692→  // ─── Determine if this event is GA type ──
+  1693→  // GA if: event has seatType GENERAL_ADMISSION, OR has manual zone config,
+  1694→  // OR the linked seat map is GA type (event.seatType may be null)
+  1695→  const effectiveSeatType = eventInfo?.seatType || eventInfo?.seatMapSeatType
+  1696→  const isEventGA = effectiveSeatType === 'GENERAL_ADMISSION' || !!eventInfo?.gaZoneConfig
+  1697→
+  1698→  // ─── For GA events: ALWAYS show the GA Zone Management Panel ────────
+  1699→  // regardless of whether seats already exist or not.
+  1700→  if (isEventGA) {
+  1701→    // Build zone summary from existing seats (grouped by zoneName)
+  1702→    const zoneSummary = new Map<string, { total: number; available: number; sold: number; locked: number; invitation: number; unavailable: number }>()
+  1703→    for (const s of allSeats) {
+  1704→      const zone = s.zoneName || 'Tanpa Zona'
+  1705→      if (!zoneSummary.has(zone)) zoneSummary.set(zone, { total: 0, available: 0, sold: 0, locked: 0, invitation: 0, unavailable: 0 })
+  1706→      const z = zoneSummary.get(zone)!
+  1707→      z.total++
+  1708→      if (s.status === 'AVAILABLE') z.available++
+  1709→      else if (s.status === 'SOLD') z.sold++
+  1710→      else if (s.status === 'LOCKED_TEMPORARY') z.locked++
+  1711→      else if (s.status === 'INVITATION') z.invitation++
+  1712→      else if (s.status === 'UNAVAILABLE') z.unavailable++
+  1713→    }
+  1714→
+  1715→    return <GaZoneManagementPanel
+  1716→      eventId={eventId}
+  1717→      eventInfo={eventInfo}
+  1718→      gaZonesDef={gaZonesDef}
+  1719→      setGaZonesDef={setGaZonesDef}
+  1720→      layoutImage={layoutImage}
+  1721→      layoutImagePreview={layoutImagePreview}
+  1722→      setLayoutImage={setLayoutImage}
+  1723→      setLayoutImagePreview={setLayoutImagePreview}
+  1724→      isUploading={isUploading}
+  1725→      setIsUploading={setIsUploading}
+  1726→      isSavingZones={isSavingZones}
+  1727→      setIsSavingZones={setIsSavingZones}
+  1728→      isGeneratingFromZones={isGeneratingFromZones}
+  1729→      setIsGeneratingFromZones={setIsGeneratingFromZones}
+  1730→      newZone={newZone}
+  1731→      setNewZone={setNewZone}
+  1732→      priceCategories={priceCategories}
+  1733→      fileInputRef={fileInputRef}
+  1734→      existingZoneSummary={Object.fromEntries(zoneSummary)}
+  1735→      existingSeatsCount={allSeats.length}
+  1736→      showDates={showDates}
+  1737→      onRefresh={() => window.location.reload()}
+  1738→    />
+  1739→  }
+  1740→
+  1741→  // ─── Non-GA events: show "no seats" message if empty ───────────────
+  1742→  if (allSeats.length === 0) {
+  1743→    return (
+  1744→      <div className="text-center py-20">
+  1745→        <p className="text-muted-foreground">Belum ada kursi untuk event ini.</p>
+  1746→        <p className="text-xs text-muted-foreground/50 mt-1">Generate kursi dari halaman Events terlebih dahulu.</p>
+  1747→        <a href="/admin/events" className="text-gold underline text-sm mt-4 inline-block">
+  1748→          ← Kembali ke Events
+  1749→        </a>
+  1750→      </div>
+  1751→    )
+  1752→  }
+  1753→
+  1754→  return (
+  1755→    <div className="space-y-6">
+  1756→      {/* Header - Sticky */}
+  1757→      <div className="flex items-center justify-between sticky top-0 z-10 bg-[#F8F6F3] py-2 -mt-2">
+  1758→        <div>
+  1759→          <h1 className="font-serif text-2xl font-bold text-charcoal">Seat Map Editor</h1>
+  1760→          {isEventGA && eventInfo?.layoutImage && (
+  1761→            <div className="mt-3 rounded-lg overflow-hidden border border-border/50 inline-block">
+  1762→              <img src={eventInfo.layoutImage} alt="Layout" className="max-h-40 object-contain" />
+  1763→            </div>
+  1764→          )}
+  1765→          <p className="text-sm text-muted-foreground mt-1">
+  1766→            {eventInfo?.title && <span className="font-medium">{eventInfo.title}</span>}
+  1767→            {' — '}
+  1768→            {seats.length} kursi
+  1769→            {allSeats.length !== seats.length && <span className="text-muted-foreground/60"> (dari {allSeats.length} total)</span>}
+  1770→            {selectedSeatCodes.size > 0
+  1771→              ? ` — ${selectedSeatCodes.size} dipilih`
+  1772→              : ' — Klik dan drag untuk memilih'}
+  1773→          </p>
+  1774→          {/* Multi-day tabs */}
+  1775→          {showDates.length > 1 && (
+  1776→            <div className="flex flex-wrap gap-2 mt-3">
+  1777→              <button
+  1778→                onClick={() => setSelectedShowDateIdx(-1)}
+  1779→                className={cn(
+  1780→                  'px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+  1781→                  selectedShowDateIdx === -1
+  1782→                    ? 'bg-gold text-charcoal'
+  1783→                    : 'bg-muted text-muted-foreground hover:bg-muted/80'
+  1784→                )}
+  1785→              >
+  1786→                Semua Hari
+  1787→              </button>
+  1788→              {showDates.map((sd, idx) => (
+  1789→                <button
+  1790→                  key={sd.id || idx}
+  1791→                  onClick={() => setSelectedShowDateIdx(idx)}
+  1792→                  className={cn(
+  1793→                    'px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+  1794→                    idx === selectedShowDateIdx
+  1795→                      ? 'bg-gold text-charcoal'
+  1796→                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+  1797→                  )}
+  1798→                >
+  1799→                  {sd.label || `Hari ${idx + 1}`}
+  1800→                </button>
+  1801→              ))}
+  1802→            </div>
+  1803→          )}
+  1804→        </div>
+  1805→        <div className="flex items-center gap-2">
+  1806→          {hasUnsavedChanges && (
+  1807→            <span className="text-xs text-amber-600 font-medium hidden sm:inline">● Ada perubahan belum disimpan</span>
+  1808→          )}
+  1809→          <Button
+  1810→            size="sm"
+  1811→            onClick={saveAllChanges}
+  1812→            disabled={isSaving || !hasUnsavedChanges}
+  1813→            className={cn(
+  1814→              "text-sm",
+  1815→              hasUnsavedChanges
+  1816→                ? "bg-gold hover:bg-gold/90 text-charcoal font-semibold"
+  1817→                : "bg-muted text-muted-foreground"
+  1818→            )}
+  1819→          >
+  1820→            {isSaving ? (
+  1821→              <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+  1822→            ) : (
+  1823→              <Save className="w-3.5 h-3.5 mr-1.5" />
+  1824→            )}
+  1825→            Simpan
+  1826→          </Button>
+  1827→          <Button variant="outline" size="sm" onClick={selectAll}>
+  1828→            <Check className="w-3 h-3 mr-1" />
+  1829→            Pilih Semua
+  1830→          </Button>
+  1831→          <Button variant="outline" size="sm" onClick={clearSelection} disabled={selectedSeatCodes.size === 0}>
+  1832→            <RotateCcw className="w-3 h-3 mr-1" />
+  1833→            Reset
+  1834→          </Button>
+  1835→        </div>
+  1836→      </div>
+  1837→
+  1838→      {/* Toolbar */}
+  1839→      {selectedSeatCodes.size > 0 && (
+  1840→        <Card className="border-gold/20 animate-fade-in">
+  1841→          <CardContent className="p-4">
+  1842→            <div className="flex flex-wrap items-center gap-3">
+  1843→              <span className="text-sm font-medium text-charcoal">
+  1844→                Assign ke:
+  1845→              </span>
+  1846→              <Select onValueChange={assignPriceCategory}>
+  1847→                <SelectTrigger className="w-40 h-8 text-sm">
+  1848→                  <SelectValue placeholder="Kategori Harga" />
+  1849→                </SelectTrigger>
+  1850→                <SelectContent>
+  1851→                  {priceCategories.map((pc) => (
+  1852→                    <SelectItem key={pc.id} value={pc.id}>
+  1853→                      <div className="flex items-center gap-2">
+  1854→                        <div className="w-3 h-3 rounded-sm" style={{ backgroundColor: pc.colorCode }} />
+  1855→                        {pc.name} (Rp {pc.price.toLocaleString('id-ID')})
+  1856→                      </div>
+  1857→                    </SelectItem>
+  1858→                  ))}
+  1859→                </SelectContent>
+  1860→              </Select>
+  1861→
+  1862→              <Separator orientation="vertical" className="h-6" />
+  1863→
+  1864→              <Button
+  1865→                variant="outline"
+  1866→                size="sm"
+  1867→                onClick={() => setSeatStatus('INVITATION')}
+  1868→                className="text-xs"
+  1869→              >
+  1870→                <Crown className="w-3 h-3 mr-1" />
+  1871→                Undangan
+  1872→              </Button>
+  1873→              <Button
+  1874→                variant="outline"
+  1875→                size="sm"
+  1876→                onClick={() => setSeatStatus('UNAVAILABLE')}
+  1877→                className="text-xs"
+  1878→              >
+  1879→                <X className="w-3 h-3 mr-1" />
+  1880→                Tidak Tersedia
+  1881→              </Button>
+  1882→              <Button
+  1883→                variant="outline"
+  1884→                size="sm"
+  1885→                onClick={() => setSeatStatus('AVAILABLE')}
+  1886→                className="text-xs"
+  1887→              >
+  1888→                Tersedia
+  1889→              </Button>
+  1890→            </div>
+  1891→          </CardContent>
+  1892→        </Card>
+  1893→      )}
+  1894→
+  1895→      {/* Seat Grid — Dynamic Layout from actual data */}
+  1896→      <div className="bg-white rounded-xl p-6 border border-border/50">
+  1897→        <div className="max-w-4xl mx-auto">
+  1898→          {/* Stage — only for grid mode (canvas mode renders its own stage inside CanvasSeatLayout) */}
+  1899→          {!isCanvasMode && stageLayout && !stageLayout.hasCustomStagePos && !stageLayout.isInsetStage && (
+  1900→            <StageRenderer
+  1901→              stageType={stageLayout.stageType}
+  1902→              size={stageLayout.stageSize}
+  1903→              thrustWidth={parsedLayout?.thrustWidth}
+  1904→              thrustDepth={parsedLayout?.thrustDepth}
+  1905→            />
+  1906→          )}
+  1907→
+  1908→          {/* ─── Multi-Day Divider View (Semua Hari) ───*/}
+  1909→          {seatsByDate && showDates.length > 1 && !activeShowDate ? (
+  1910→            <div className="space-y-8 mt-4">
+  1911→              {showDates.map((sd, dayIdx) => {
+  1912→                const daySeats = allSeats.filter(s => s.eventShowDateId === sd.id || (!s.eventShowDateId && dayIdx === 0))
+  1913→                const dayLookup = new Map<string, SeatData>()
+  1914→                for (const s of daySeats) dayLookup.set(s.seatCode, s)
+  1915→                const dayAvailable = daySeats.filter(s => s.status === 'AVAILABLE').length
+  1916→                const daySold = daySeats.filter(s => s.status === 'SOLD').length
+  1917→
+  1918→                return (
+  1919→                  <div key={sd.id || dayIdx}>
+  1920→                    {/* Day divider header */}
+  1921→                    <div className="flex items-center gap-3 mb-4">
+  1922→                      <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+  1923→                      <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-charcoal text-gold">
+  1924→                        <CalendarDays className="w-3.5 h-3.5" />
+  1925→                        <span className="text-xs font-semibold">{sd.label || `Hari ${dayIdx + 1}`}</span>
+  1926→                        <Separator orientation="vertical" className="h-3 bg-gold/30" />
+  1927→                        <span className="text-[10px] text-gold/70">{daySeats.length} kursi</span>
+  1928→                        <span className="text-[10px] text-gold/50">•</span>
+  1929→                        <span className="text-[10px] text-emerald-400">{dayAvailable} tersedia</span>
+  1930→                        <span className="text-[10px] text-gold/50">•</span>
+  1931→                        <span className="text-[10px] text-red-400">{daySold} terjual</span>
+  1932→                      </div>
+  1933→                      <div className="h-px flex-1 bg-gradient-to-r from-transparent via-border to-transparent" />
+  1934→                    </div>
+  1935→
+  1936→                    {/* Day grid */}
+  1937→                    <div className="overflow-x-auto pb-2">
+  1938→                      <div className="min-w-[320px]">
+  1939→                        {parsedLayout ? (
+  1940→                          <div className={cn(
+  1941→                            isCanvasMode
+  1942→                              ? 'overflow-x-auto flex justify-center'
+  1943→                              : 'relative mx-auto w-fit flex flex-col items-center',
+  1944→                          )} style={!isCanvasMode ? { minWidth: (() => {
+  1945→                            const CELL_TOTAL = SEAT_W + SEAT_GAP
+  1946→                            const ec = parsedLayout.gridSize.cols
+  1947→                            return ec * CELL_TOTAL - SEAT_GAP + 60
+  1948→                          })() } : undefined}>
+  1949→                            {!isCanvasMode && stageLayout && stageLayout.hasCustomStagePos && stageLayout.stageGuest && (
+  1950→                              <div
+  1951→                                className="absolute pointer-events-none"
+  1952→                                style={{
+  1953→                                  left: stageLayout.stageGuest.x,
+  1954→                                  top: stageLayout.stageGuest.y,
+  1955→                                  width: stageLayout.stageGuest.w,
+  1956→                                  height: stageLayout.stageGuest.h,
+  1957→                                  zIndex: 10,
+  1958→                                }}
+  1959→                              >
+  1960→                                <StageRenderer
+  1961→                                  stageType={stageLayout.stageType}
+  1962→                                  size={stageLayout.stageSize}
+  1963→                                  thrustWidth={parsedLayout?.thrustWidth}
+  1964→                                  thrustDepth={parsedLayout?.thrustDepth}
+  1965→                                  fillParent
+  1966→                                />
+  1967→                              </div>
+  1968→                            )}
+  1969→                            {renderFlatGridInner(dayLookup)}
+  1970→                          </div>
+  1971→                        ) : (
+  1972→                          <div className="space-y-1">
+  1973→                            {(() => {
+  1974→                              const dayRowLayout = buildRowLayout(daySeats)
+  1975→                              return dayRowLayout.map((row) => (
+  1976→                                <div key={row.rowName} className="flex items-center gap-1 mb-1">
+  1977→                                  <div className="w-6 text-center text-xs font-semibold font-serif text-muted-foreground shrink-0">
+  1978→                                    {row.rowName}
+  1979→                                  </div>
+  1980→                                  <div className="flex gap-1">
+  1981→                                    {row.seats.map((seat: SeatData, i: number) => renderSeatButton(seat, undefined, i + 1))}
+  1982→                                  </div>
+  1983→                                </div>
+  1984→                              ))
+  1985→                            })()}
+  1986→                          </div>
+  1987→                        )}
+  1988→                      </div>
+  1989→                    </div>
+  1990→                  </div>
+  1991→                )
+  1992→              })}
+  1993→            </div>
+  1994→          ) : (
+  1995→          <>
+  1996→          {/* ─── Single Day / Normal Grid ─── */}
+  1997→
+  1998→          {/* Grid */}
+  1999→          <div className="overflow-x-auto pb-4">
+  2000→            <div
+
+[showing lines 1-2000 of 2340; use offset=2001 with limit to continue reading]
