@@ -1014,6 +1014,8 @@ export default function EventDetailPage() {
                       eventId={eventId}
                       priceCategories={event.priceCategories}
                       showDates={event.showDates || []}
+                      hideSeatAvailability={event.hideSeatAvailability}
+                      hideSoldCount={event.hideSoldCount}
                       onProceedToCheckout={(data) => {
                         setFestivalPkg(data)
                         setTotalPrice(data.priceCategory.price * data.quantity)

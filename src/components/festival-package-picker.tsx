@@ -30,6 +30,8 @@ interface FestivalPackagePickerProps {
   eventId: string
   priceCategories: PriceCategoryData[]
   showDates: ShowDateData[]
+  hideSeatAvailability?: boolean
+  hideSoldCount?: boolean
   onProceedToCheckout: (data: {
     priceCategory: PriceCategoryData
     quantity: number
@@ -52,6 +54,8 @@ export function FestivalPackagePicker({
   eventId,
   priceCategories,
   showDates,
+  hideSeatAvailability = false,
+  hideSoldCount = false,
   onProceedToCheckout,
 }: FestivalPackagePickerProps) {
   // Filter to only categories with packageType (festival packages)
@@ -259,17 +263,26 @@ export function FestivalPackagePicker({
                   </div>
                 </div>
 
-                {/* Availability */}
-                <div className="flex items-center justify-between pt-2 border-t border-border/40">
-                  <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                    <Users className="w-3 h-3" />
+                {/* Availability — respect hideSeatAvailability / hideSoldCount */}
+                {!(hideSeatAvailability && (hideSoldCount || isSoldOut)) && (
+                  <div className="flex items-center justify-between pt-2 border-t border-border/40">
                     {isSoldOut ? (
-                      <span className="text-danger font-medium">Habis</span>
+                      <span className="text-[11px] text-danger font-medium flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        Habis
+                      </span>
+                    ) : hideSeatAvailability ? (
+                      <span className="text-[11px] text-muted-foreground italic">
+                        Tersedia
+                      </span>
                     ) : (
-                      <span><span className="font-medium text-charcoal">{avail}</span> tiket tersedia</span>
+                      <span className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <Users className="w-3 h-3" />
+                        <span><span className="font-medium text-charcoal">{avail}</span> tiket tersedia</span>
+                      </span>
                     )}
-                  </span>
-                </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           )
