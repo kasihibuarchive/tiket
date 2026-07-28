@@ -32,6 +32,7 @@ interface EventOption {
   location: string
   seatSummary?: { total: number; available: number; sold: number }
   seatMapId: string | null
+  eventMode?: string | null
 }
 
 interface SeatData {
@@ -49,6 +50,8 @@ interface PriceCategoryData {
   name: string
   price: number
   colorCode: string
+  packageType?: string | null
+  applicableDayIds?: string[] | null
 }
 
 interface ComplimentaryTicket {
@@ -100,6 +103,11 @@ export default function ComplimentaryTicketsPage() {
   const [gaQuantity, setGaQuantity] = useState(1)
   const [gaZone, setGaZone] = useState('')
 
+  // Festival mode state
+  const [eventMode, setEventMode] = useState<string | null>(null)
+  const [selectedFestivalPkgId, setSelectedFestivalPkgId] = useState<string>('')
+  const [festivalQuantity, setFestivalQuantity] = useState(1)
+
   // Submit
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null)
@@ -124,6 +132,35 @@ export default function ComplimentaryTicketsPage() {
 
   const isNumberedSeatMap = eventSeatType === 'NUMBERED' || seatMapInfo?.seatType === 'NUMBERED'
   const isGeneralAdmission = !isNumberedSeatMap || !seatMapInfo
+  const isFestival = eventMode === 'FESTIVAL'
+
+  // Festival packages (PriceCategory with packageType)
+  const festivalPackages = useMemo(() => {
+    if (!isFestival) return []
+    return priceCategories
+      .filter(pc => pc.packageType)
+      .sort((a, b) => {
+        const order: Record<string, number> = { SINGLE: 1, MULTI: 2, FULL: 3 }
+        return (order[a.packageType || ''] || 99) - (order[b.packageType || ''] || 99)
+      })
+  }, [isFestival, priceCategories])
+
+  // Selected festival package
+  const selectedFestivalPkg = useMemo(
+    () => festivalPackages.find(p => p.id === selectedFestivalPkgId) || null,
+    [festivalPackages, selectedFestivalPkgId]
+  )
+
+  // Festival availability: count AVAILABLE seats in this package's zone
+  const festivalAvailability = useMemo(() => {
+    const map: Record<string, number> = {}
+    for (const pkg of festivalPackages) {
+      map[pkg.id] = seats.filter(s =>
+        s.zoneName === pkg.name && s.status === 'AVAILABLE'
+      ).length
+    }
+    return map
+  }, [festivalPackages, seats])
 
   // Seat lookup for canvas mode
   const seatLookup = useMemo(() => {
@@ -233,13 +270,16 @@ export default function ComplimentaryTicketsPage() {
         setPriceCategories(data.priceCategories || [])
       }
 
-      // Fetch event detail to get seatMapId, showDates, seatType, layoutImage
+      // Fetch event detail to get seatMapId, showDates, seatType, layoutImage, eventMode
       const eventRes = await fetch(`/api/events/${eventId}?admin=1`)
       if (eventRes.ok) {
         const eventData = await eventRes.json()
-        // Store seatType and layoutImage for GA detection and display
+        // Store seatType, layoutImage, eventMode for GA/festival detection and display
         setEventSeatType(eventData.seatType || null)
         setEventLayoutImage(eventData.layoutImage || null)
+        setEventMode(eventData.eventMode || null)
+        setSelectedFestivalPkgId('')
+        setFestivalQuantity(1)
         if (eventData.seatMapId) {
           // Fetch seat map info
           const mapRes = await fetch('/api/admin/seat-maps')
@@ -349,8 +389,35 @@ export default function ComplimentaryTicketsPage() {
     }
 
     let seatCodes: string[]
+    let festivalPackage: { priceCategoryId: string; quantity: number } | undefined
 
-    if (isNumberedSeatMap) {
+    if (isFestival) {
+      // ─── FESTIVAL MODE: pick package + quantity ────────────────────
+      if (!selectedFestivalPkg) {
+        setSubmitResult({ success: false, message: 'Pilih paket festival terlebih dahulu.' })
+        return
+      }
+      if (festivalQuantity < 1) {
+        setSubmitResult({ success: false, message: 'Jumlah tiket minimal 1.' })
+        return
+      }
+      const avail = festivalAvailability[selectedFestivalPkg.id] ?? 0
+      if (festivalQuantity > avail) {
+        setSubmitResult({
+          success: false,
+          message: `Tiket tersedia hanya ${avail}. Kurangi jumlah atau pilih paket lain.`,
+        })
+        return
+      }
+      // Seat codes: use package name as prefix (matches zoneName in seat table)
+      seatCodes = Array.from({ length: festivalQuantity }, (_, i) =>
+        `${selectedFestivalPkg.name}-COMP${i + 1}`
+      )
+      festivalPackage = {
+        priceCategoryId: selectedFestivalPkg.id,
+        quantity: festivalQuantity,
+      }
+    } else if (isNumberedSeatMap) {
       if (selectedSeats.length === 0) {
         setSubmitResult({ success: false, message: 'Harap pilih minimal 1 kursi.' })
         return
@@ -381,6 +448,7 @@ export default function ComplimentaryTicketsPage() {
           guestEmail,
           guestPhone,
           showDateId: selectedShowDateId || undefined,
+          festivalPackage,
         }),
       })
 
@@ -398,6 +466,8 @@ export default function ComplimentaryTicketsPage() {
         setSelectedSeats([])
         setGaQuantity(1)
         setGaZone('')
+        setFestivalQuantity(1)
+        setSelectedFestivalPkgId('')
         // Refresh recent tickets
         const recentRes = await fetch('/api/admin/tickets/complimentary')
         if (recentRes.ok) {
@@ -634,8 +704,8 @@ export default function ComplimentaryTicketsPage() {
               Pemilihan Kursi
             </Label>
 
-            {/* Show Date Tabs for multi-day events */}
-            {showDates.length > 1 && (
+            {/* Show Date Tabs for multi-day events (hidden in FESTIVAL mode — package handles days) */}
+            {showDates.length > 1 && !isFestival && (
               <div className="flex items-center gap-2 flex-wrap">
                 <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
                 {showDates.map((sd: any, idx: number) => {
@@ -667,6 +737,141 @@ export default function ComplimentaryTicketsPage() {
               <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
                 <Loader2 className="w-5 h-5 animate-spin text-gold" />
                 Memuat data kursi...
+              </div>
+            ) : isFestival ? (
+              /* ─── FESTIVAL MODE: Package picker ─────────────────── */
+              <div className="space-y-4">
+                <p className="text-xs text-muted-foreground">
+                  Event festival: pilih paket tiket dan jumlah. Tiket komplimen akan mengambil slot dari pool paket terkait.
+                </p>
+
+                {/* Layout image (if any) */}
+                {eventLayoutImage && (
+                  <div className="bg-muted/20 rounded-xl p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Image className="w-3.5 h-3.5 text-gold" />
+                      <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+                    </div>
+                    <div className="w-full rounded-lg overflow-hidden border border-border/30">
+                      <img
+                        src={eventLayoutImage}
+                        alt="Layout venue"
+                        className="w-full h-auto max-h-64 object-contain"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {festivalPackages.length === 0 ? (
+                  <div className="text-xs text-muted-foreground py-4 text-center bg-amber-50/50 border border-amber-200/50 rounded-lg">
+                    Belum ada paket festival untuk event ini. Tambahkan price category dengan packageType di halaman Events.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {/* Package options */}
+                    <Label className="text-xs text-muted-foreground">Paket Tiket <span className="text-danger">*</span></Label>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {festivalPackages.map((pkg) => {
+                        const isSelected = selectedFestivalPkgId === pkg.id
+                        const avail = festivalAvailability[pkg.id] ?? 0
+                        const pkgTypeLabel = pkg.packageType === 'FULL'
+                          ? 'Full Pass'
+                          : pkg.packageType === 'MULTI'
+                            ? 'Multi-Day'
+                            : 'Single Day'
+                        return (
+                          <button
+                            key={pkg.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedFestivalPkgId(pkg.id)
+                              setFestivalQuantity(1)
+                            }}
+                            disabled={avail === 0}
+                            className={cn(
+                              'text-left p-3 rounded-lg border-2 transition-all',
+                              isSelected
+                                ? 'border-gold bg-gold/5 shadow-sm'
+                                : 'border-border/50 bg-white hover:border-gold/30',
+                              avail === 0 && 'opacity-50 cursor-not-allowed'
+                            )}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div
+                                  className="w-3 h-3 rounded-sm shrink-0"
+                                  style={{ backgroundColor: pkg.colorCode }}
+                                />
+                                <span className="font-medium text-sm text-charcoal truncate">{pkg.name}</span>
+                              </div>
+                              <Badge variant="secondary" className="text-[9px] shrink-0">
+                                {pkgTypeLabel}
+                              </Badge>
+                            </div>
+                            <div className="flex items-center justify-between mt-1.5">
+                              <span className="text-xs text-muted-foreground">
+                                Rp {pkg.price.toLocaleString('id-ID')}
+                              </span>
+                              <span className={cn(
+                                'text-[10px] font-medium',
+                                avail === 0 ? 'text-red-500' : 'text-emerald-600'
+                              )}>
+                                {avail === 0 ? 'Habis' : `${avail} tersedia`}
+                              </span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {/* Quantity selector */}
+                    {selectedFestivalPkg && (
+                      <div className="space-y-2 sm:max-w-[200px] pt-2">
+                        <Label className="text-xs text-muted-foreground">Jumlah Tiket <span className="text-danger">*</span></Label>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9"
+                            onClick={() => setFestivalQuantity(q => Math.max(1, q - 1))}
+                            disabled={festivalQuantity <= 1}
+                          >
+                            -
+                          </Button>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={festivalAvailability[selectedFestivalPkg.id] ?? 1}
+                            value={festivalQuantity}
+                            onChange={(e) => {
+                              const max = festivalAvailability[selectedFestivalPkg.id] ?? 1
+                              const v = parseInt(e.target.value) || 1
+                              setFestivalQuantity(Math.min(max, Math.max(1, v)))
+                            }}
+                            className="h-9 text-center bg-white"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-9 w-9"
+                            onClick={() => {
+                              const max = festivalAvailability[selectedFestivalPkg.id] ?? 1
+                              setFestivalQuantity(q => Math.min(max, q + 1))
+                            }}
+                            disabled={festivalQuantity >= (festivalAvailability[selectedFestivalPkg.id] ?? 1)}
+                          >
+                            +
+                          </Button>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Maksimal {festivalAvailability[selectedFestivalPkg.id] ?? 0} tiket (stok tersedia)
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : isNumberedSeatMap ? (
               /* ─── Numbered Seat Map ────────────────────────────── */
@@ -917,7 +1122,11 @@ export default function ComplimentaryTicketsPage() {
           <Separator />
 
           {/* Step 4: Summary */}
-          {(selectedEventId && (selectedSeats.length > 0 || (!isNumberedSeatMap && gaQuantity >= 1))) && (
+          {(selectedEventId && (
+            isFestival
+              ? (!!selectedFestivalPkg && festivalQuantity >= 1)
+              : (selectedSeats.length > 0 || (!isNumberedSeatMap && gaQuantity >= 1))
+          )) && (
             <div className="bg-charcoal/5 rounded-xl p-4 space-y-3">
               <p className="text-sm font-medium text-charcoal">Ringkasan</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
@@ -940,14 +1149,20 @@ export default function ComplimentaryTicketsPage() {
                 <div className="sm:col-span-2">
                   <span className="text-muted-foreground">Kursi:</span>{' '}
                   <div className="flex flex-wrap gap-1.5 mt-1">
-                    {isNumberedSeatMap
-                      ? selectedSeats.map((code) => (
-                          <Badge key={code} className="bg-gold text-white text-[10px]">{code}</Badge>
-                        ))
-                      : Array.from({ length: gaQuantity }, (_, i) => (
-                          <Badge key={i} variant="secondary" className="text-[10px]">
-                            {gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`}
+                    {isFestival && selectedFestivalPkg
+                      ? Array.from({ length: festivalQuantity }, (_, i) => (
+                          <Badge key={i} className="bg-gold/80 text-white text-[10px]">
+                            {selectedFestivalPkg.name}-COMP{i + 1}
                           </Badge>
+                        ))
+                      : isNumberedSeatMap
+                        ? selectedSeats.map((code) => (
+                            <Badge key={code} className="bg-gold text-white text-[10px]">{code}</Badge>
+                          ))
+                        : Array.from({ length: gaQuantity }, (_, i) => (
+                            <Badge key={i} variant="secondary" className="text-[10px]">
+                              {gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`}
+                            </Badge>
                         ))}
                   </div>
                 </div>
@@ -965,7 +1180,11 @@ export default function ComplimentaryTicketsPage() {
                 !guestName ||
                 !guestEmail ||
                 !guestPhone ||
-                (isNumberedSeatMap ? selectedSeats.length === 0 : gaQuantity < 1)
+                (isFestival
+                  ? !selectedFestivalPkg || festivalQuantity < 1
+                  : isNumberedSeatMap
+                    ? selectedSeats.length === 0
+                    : gaQuantity < 1)
               }
               className="bg-charcoal hover:bg-charcoal/90 text-gold min-w-[200px]"
             >

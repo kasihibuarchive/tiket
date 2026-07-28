@@ -80,7 +80,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { eventId, seatCodes, guestName, guestEmail, guestPhone, showDateId } = body
+    const { eventId, seatCodes, guestName, guestEmail, guestPhone, showDateId, festivalPackage } = body
 
     // Validate required fields (guestEmail is optional for OTS tickets)
     if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0 || !guestName) {
@@ -157,35 +157,89 @@ export async function POST(request: NextRequest) {
       })
     } else {
       // ─── GENERAL ADMISSION: Create seats on-the-fly ────────────────
-      for (const code of seatCodes) {
-        // Check if seat code already exists
-        const exists = await db.seat.findFirst({
-          where: { eventId, seatCode: code },
+      // (Festival mode also goes here — isNumbered=false because festival forces GA.
+      //  But for festival, we want to MARK EXISTING AVAILABLE seats in the package's
+      //  zone as INVITATION, NOT create new ones — otherwise we'd inflate the pool
+      //  beyond what admin set in gaZoneConfig.)
+      if (festivalPackage && festivalPackage.priceCategoryId) {
+        // ─── FESTIVAL: take from existing pool ──────────────────────
+        const pc = await db.priceCategory.findUnique({
+          where: { id: festivalPackage.priceCategoryId },
         })
-        if (exists) {
-          if (exists.status !== 'AVAILABLE') {
-            return NextResponse.json(
-              { error: `Kursi ${code} sudah terisi.` },
-              { status: 400 }
-            )
+        if (!pc) {
+          return NextResponse.json(
+            { error: 'PriceCategory tidak ditemukan untuk paket festival ini.' },
+            { status: 400 }
+          )
+        }
+        const qty = Number(festivalPackage.quantity) || 0
+        if (qty < 1) {
+          return NextResponse.json(
+            { error: 'Jumlah tiket minimal 1.' },
+            { status: 400 }
+          )
+        }
+        // Find N AVAILABLE seats in this package's zone (zoneName === pc.name)
+        const availableSeats = await db.seat.findMany({
+          where: {
+            eventId,
+            zoneName: pc.name,
+            status: 'AVAILABLE',
+          },
+          take: qty,
+          orderBy: [{ row: 'asc' }, { col: 'asc' }],
+        })
+        if (availableSeats.length < qty) {
+          return NextResponse.json(
+            { error: `Stok paket "${pc.name}" tidak cukup. Tersedia: ${availableSeats.length}, diminta: ${qty}.` },
+            { status: 400 }
+          )
+        }
+        // Mark them as INVITATION + link to price category
+        await db.seat.updateMany({
+          where: { id: { in: availableSeats.map(s => s.id) } },
+          data: {
+            status: 'INVITATION',
+            priceCategoryId: pc.id,
+            lockedUntil: null,
+            lockedBy: null,
+          },
+        })
+        // Override seatCodes with the actual seat codes we marked
+        seatCodes.length = 0
+        seatCodes.push(...availableSeats.map(s => s.seatCode))
+      } else {
+        // ─── Regular GA: create seats on-the-fly ─────────────────────
+        for (const code of seatCodes) {
+          // Check if seat code already exists
+          const exists = await db.seat.findFirst({
+            where: { eventId, seatCode: code },
+          })
+          if (exists) {
+            if (exists.status !== 'AVAILABLE') {
+              return NextResponse.json(
+                { error: `Kursi ${code} sudah terisi.` },
+                { status: 400 }
+              )
+            }
+            // Mark existing as INVITATION
+            await db.seat.update({
+              where: { id: exists.id },
+              data: { status: 'INVITATION', lockedUntil: null, lockedBy: null },
+            })
+          } else {
+            // Create new GA seat
+            await db.seat.create({
+              data: {
+                eventId,
+                seatCode: code,
+                status: 'INVITATION',
+                row: code.split('-')[0] || 'GA',
+                col: parseInt(code.split('-')[1] || '0') || 0,
+                zoneName: code.split('-')[0] || null,
+              },
+            })
           }
-          // Mark existing as INVITATION
-          await db.seat.update({
-            where: { id: exists.id },
-            data: { status: 'INVITATION', lockedUntil: null, lockedBy: null },
-          })
-        } else {
-          // Create new GA seat
-          await db.seat.create({
-            data: {
-              eventId,
-              seatCode: code,
-              status: 'INVITATION',
-              row: code.split('-')[0] || 'GA',
-              col: parseInt(code.split('-')[1] || '0') || 0,
-              zoneName: code.split('-')[0] || null,
-            },
-          })
         }
       }
     }

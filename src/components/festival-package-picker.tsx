@@ -31,6 +31,7 @@ interface FestivalPackagePickerProps {
   priceCategories: PriceCategoryData[]
   showDates: ShowDateData[]
   gaZoneConfig?: string | null
+  layoutImage?: string | null
   hideSeatAvailability?: boolean
   hideSoldCount?: boolean
   onProceedToCheckout: (data: {
@@ -56,6 +57,7 @@ export function FestivalPackagePicker({
   priceCategories,
   showDates,
   gaZoneConfig,
+  layoutImage,
   hideSeatAvailability = false,
   hideSoldCount = false,
   onProceedToCheckout,
@@ -224,6 +226,23 @@ export function FestivalPackagePicker({
           Tiket bisa di-scan ulang setelah cooldown (anti-share tiket).
         </p>
       </div>
+
+      {/* Layout venue image (uploaded from GA seat editor) */}
+      {layoutImage && (
+        <div className="bg-muted/20 rounded-xl p-3 border border-border/40">
+          <div className="flex items-center gap-2 mb-2">
+            <span className="w-1 h-1 rounded-full bg-gold" />
+            <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+          </div>
+          <div className="w-full rounded-lg overflow-hidden border border-border/30 bg-white">
+            <img
+              src={layoutImage}
+              alt="Layout venue festival"
+              className="w-full h-auto max-h-96 object-contain"
+            />
+          </div>
+        </div>
+      )}
 
       {/* Package cards grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
