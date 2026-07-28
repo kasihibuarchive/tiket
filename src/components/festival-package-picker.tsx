@@ -30,6 +30,7 @@ interface FestivalPackagePickerProps {
   eventId: string
   priceCategories: PriceCategoryData[]
   showDates: ShowDateData[]
+  gaZoneConfig?: string | null
   hideSeatAvailability?: boolean
   hideSoldCount?: boolean
   onProceedToCheckout: (data: {
@@ -54,10 +55,44 @@ export function FestivalPackagePicker({
   eventId,
   priceCategories,
   showDates,
+  gaZoneConfig,
   hideSeatAvailability = false,
   hideSoldCount = false,
   onProceedToCheckout,
 }: FestivalPackagePickerProps) {
+  // Parse gaZoneConfig once — used for:
+  //   1) Per-zone notes lookup by name match
+  //   2) Display order (admin drag-reorder in seat editor)
+  const zoneNotesMap = useMemo(() => {
+    const map = new Map<string, string>()
+    if (!gaZoneConfig) return map
+    try {
+      const zones = JSON.parse(gaZoneConfig)
+      if (Array.isArray(zones)) {
+        for (const z of zones) {
+          if (z?.name && z?.notes) {
+            map.set(String(z.name).toLowerCase(), String(z.notes))
+          }
+        }
+      }
+    } catch { /* ignore */ }
+    return map
+  }, [gaZoneConfig])
+
+  const zoneOrderMap = useMemo(() => {
+    const map = new Map<string, number>()
+    if (!gaZoneConfig) return map
+    try {
+      const zones = JSON.parse(gaZoneConfig)
+      if (Array.isArray(zones)) {
+        zones.forEach((z: any, i: number) => {
+          if (z?.name) map.set(String(z.name).toLowerCase(), i)
+        })
+      }
+    } catch { /* ignore */ }
+    return map
+  }, [gaZoneConfig])
+
   // Filter to only categories with packageType (festival packages)
   const packages = useMemo(() => {
     return priceCategories
@@ -75,11 +110,20 @@ export function FestivalPackagePicker({
         return { ...pc, parsedDayIds: applicableDays }
       })
       .sort((a, b) => {
-        // Sort: SINGLE first, then MULTI, then FULL
+        // Primary: zone order from gaZoneConfig (admin drag-reorder in seat editor)
+        const aOrder = zoneOrderMap.get(a.name.toLowerCase())
+        const bOrder = zoneOrderMap.get(b.name.toLowerCase())
+        if (aOrder !== undefined && bOrder !== undefined) {
+          return aOrder - bOrder
+        }
+        // If only one is in gaZoneConfig, in-config first
+        if (aOrder !== undefined) return -1
+        if (bOrder !== undefined) return 1
+        // Fallback: SINGLE first, then MULTI, then FULL
         const order = { SINGLE: 1, MULTI: 2, FULL: 3 }
         return (order[a.packageType as keyof typeof order] || 99) - (order[b.packageType as keyof typeof order] || 99)
       })
-  }, [priceCategories, showDates])
+  }, [priceCategories, showDates, zoneOrderMap])
 
   // Selected package + quantity state
   const [selectedPkgId, setSelectedPkgId] = useState<string | null>(null)
@@ -262,6 +306,17 @@ export function FestivalPackagePicker({
                     )}
                   </div>
                 </div>
+
+                {/* Zone notes (from seat editor) */}
+                {(() => {
+                  const note = zoneNotesMap.get(pkg.name.toLowerCase()) || ''
+                  if (!note) return null
+                  return (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200/60 rounded-md px-2 py-1.5 leading-snug">
+                      {note}
+                    </p>
+                  )
+                })()}
 
                 {/* Availability — respect hideSeatAvailability / hideSoldCount */}
                 {!(hideSeatAvailability && (hideSoldCount || isSoldOut)) && (

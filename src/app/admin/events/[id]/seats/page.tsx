@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
   ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, LockOpen, Ticket, MinusCircle,
-  AlertTriangle,
+  AlertTriangle, GripVertical, ChevronUp, ChevronDown,
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
@@ -133,6 +133,45 @@ function GaZoneManagementPanel({
   const [isReserving, setIsReserving] = useState<Record<string, boolean>>({})
   const [isReleasing, setIsReleasing] = useState<Record<string, boolean>>({})
   const [isZoneLocking, setIsZoneLocking] = useState<Record<string, boolean>>({})
+
+  // ─── Drag-to-reorder zones state ───────────────────────────────────
+  const [draggedZoneIdx, setDraggedZoneIdx] = useState<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+
+  function handleZoneDragStart(idx: number) {
+    setDraggedZoneIdx(idx)
+  }
+  function handleZoneDragOver(e: React.DragEvent, idx: number) {
+    // Allow drop
+    e.preventDefault()
+    if (dragOverIdx !== idx) setDragOverIdx(idx)
+  }
+  function handleZoneDrop(targetIdx: number) {
+    if (draggedZoneIdx === null || draggedZoneIdx === targetIdx) {
+      setDraggedZoneIdx(null)
+      setDragOverIdx(null)
+      return
+    }
+    const next = [...gaZonesDef]
+    const [moved] = next.splice(draggedZoneIdx, 1)
+    next.splice(targetIdx, 0, moved)
+    setGaZonesDef(next)
+    setDraggedZoneIdx(null)
+    setDragOverIdx(null)
+  }
+  function handleZoneDragEnd() {
+    setDraggedZoneIdx(null)
+    setDragOverIdx(null)
+  }
+  // Manual nudge up/down (keyboard-accessible alternative to drag)
+  function moveZone(idx: number, dir: -1 | 1) {
+    const target = idx + dir
+    if (target < 0 || target >= gaZonesDef.length) return
+    const next = [...gaZonesDef]
+    const [moved] = next.splice(idx, 1)
+    next.splice(target, 0, moved)
+    setGaZonesDef(next)
+  }
 
   async function handleZoneLock(zoneName: string) {
     if (!confirm(`Kunci zona "${zoneName}"?\nSemua kursi tersedia akan ditutup dari penjualan.`)) return
@@ -650,15 +689,34 @@ function GaZoneManagementPanel({
             </div>
           )}
 
-          {/* Existing zones */}
+          {/* Existing zones — drag-to-reorder. Order here = order shown in guest view. */}
           {gaZonesDef.length > 0 && (
             <div className="space-y-2 mb-4 max-h-96 overflow-y-auto pr-2 -mr-2 thin-scrollbar">
               {gaZonesDef.map((zone, idx) => (
                 <div
                   key={idx}
-                  className="p-3 rounded-lg border border-border/50 bg-white"
+                  draggable
+                  onDragStart={() => handleZoneDragStart(idx)}
+                  onDragOver={(e) => handleZoneDragOver(e, idx)}
+                  onDrop={() => handleZoneDrop(idx)}
+                  onDragEnd={handleZoneDragEnd}
+                  className={cn(
+                    "p-3 rounded-lg border bg-white transition-all",
+                    draggedZoneIdx === idx
+                      ? "border-gold opacity-50 shadow-lg"
+                      : "border-border/50",
+                    dragOverIdx === idx && draggedZoneIdx !== idx
+                      && "border-t-gold border-t-2 -mt-1 pt-3"
+                  )}
                 >
                   <div className="flex items-center gap-3">
+                    {/* Drag handle */}
+                    <div
+                      className="cursor-grab active:cursor-grabbing text-muted-foreground/60 hover:text-charcoal shrink-0 flex flex-col items-center"
+                      title="Drag untuk reorder urutan zona (mempengaruhi tampilan guest)"
+                    >
+                      <GripVertical className="w-4 h-4" />
+                    </div>
                     <div
                       className="w-4 h-4 rounded-sm shrink-0"
                       style={{ backgroundColor: zone.color }}
@@ -670,6 +728,31 @@ function GaZoneManagementPanel({
                           {zone.priceCategoryName}
                         </Badge>
                       )}
+                      <span className="text-[9px] text-muted-foreground/60 ml-2">
+                        posisi {idx + 1}
+                      </span>
+                    </div>
+
+                    {/* Reorder arrows — keyboard-accessible alternative */}
+                    <div className="flex flex-col gap-0.5" title="Naik/Turun urutan zona">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => moveZone(idx, -1)}
+                        disabled={idx === 0}
+                        className="h-5 w-7 p-0 text-muted-foreground hover:text-charcoal"
+                      >
+                        <ChevronUp className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => moveZone(idx, 1)}
+                        disabled={idx === gaZonesDef.length - 1}
+                        className="h-5 w-7 p-0 text-muted-foreground hover:text-charcoal"
+                      >
+                        <ChevronDown className="w-3 h-3" />
+                      </Button>
                     </div>
 
                     {/* Inline capacity editor — adjustable after sync */}
@@ -810,11 +893,14 @@ function GaZoneManagementPanel({
                   })()}
                 </div>
               ))}
-              <div className="text-xs text-muted-foreground pt-1 flex items-center gap-2">
+              <div className="text-xs text-muted-foreground pt-1 flex items-center gap-2 flex-wrap">
                 <span>
                   Total Kapasitas: <span className="font-semibold text-charcoal">{totalCapacity.toLocaleString('id-ID')}</span> kursi
                 </span>
                 <span className="text-[10px] text-emerald-600">✓ Bisa di-adjust kapan saja sebelum klik "Simpan Zona"</span>
+                <span className="text-[10px] text-blue-600 w-full">
+                  ↕ Drag zona (grip handle kiri) atau pakai panah ↑↓ untuk atur urutan tampil di halaman guest
+                </span>
               </div>
             </div>
           )}

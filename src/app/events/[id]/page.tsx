@@ -1014,6 +1014,7 @@ export default function EventDetailPage() {
                       eventId={eventId}
                       priceCategories={event.priceCategories}
                       showDates={event.showDates || []}
+                      gaZoneConfig={event.gaZoneConfig}
                       hideSeatAvailability={event.hideSeatAvailability}
                       hideSoldCount={event.hideSoldCount}
                       onProceedToCheckout={(data) => {
