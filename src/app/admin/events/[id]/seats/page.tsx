@@ -12,7 +12,8 @@ import {
 import { cn } from '@/lib/utils'
 import {
   Loader2, Save, Check, X, Lock, Crown, RotateCcw, Trash2, RefreshCw, CalendarDays,
-  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, LockOpen, Ticket, MinusCircle
+  ImagePlus, Pencil, Plus, Trash2 as TrashIcon, Upload, Zap, Users, LockOpen, Ticket, MinusCircle,
+  AlertTriangle,
 } from 'lucide-react'
 import { StageRenderer, ObjectsOverlay } from '@/lib/stage-renderer'
 import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
@@ -985,6 +986,58 @@ function GaZoneManagementPanel({
           </div>
         </CardContent>
       </Card>
+
+      {/* ─── Fix Missing Seats (for multi-day events) ──────────────────── */}
+      {/* Shows when event has seats AND multiple show dates — duplicates seats to days that have 0 seats */}
+      {hasExistingSeats && showDates && showDates.length > 1 && (
+        <Card className="border-blue-300 bg-blue-50/50">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <AlertTriangle className="w-4 h-4 text-blue-600" />
+                  <h2 className="font-serif text-lg font-semibold text-charcoal">Fix Kursi Hari Baru</h2>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Event ini punya <span className="font-medium text-charcoal">{showDates.length} hari pertunjukan</span>.
+                  Klik tombol ini untuk menduplikat kursi ke hari yang belum punya kursi
+                  (misal hari yang baru ditambahkan dari edit event page).
+                  <strong className="text-blue-700"> Aman — tidak menghapus kursi yang sudah ada.</strong>
+                </p>
+              </div>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={async () => {
+                  if (!confirm(`Cek & duplikat kursi ke hari yang kosong?\n\nAman: tidak akan menghapus kursi/sold yang sudah ada. Kursi baru = AVAILABLE (fresh).`)) return
+                  try {
+                    const res = await fetch(`/api/admin/events/${eventId}/fix-seats`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ dryRun: false }),
+                    })
+                    const data = await res.json()
+                    if (res.ok) {
+                      alert(data.message)
+                      if (data.totalCreated > 0) {
+                        window.location.reload()
+                      }
+                    } else {
+                      alert(data.error || 'Gagal fix kursi')
+                    }
+                  } catch {
+                    alert('Gagal terhubung ke server')
+                  }
+                }}
+                className="border-blue-500 text-blue-700 hover:bg-blue-100 font-semibold shrink-0"
+              >
+                <AlertTriangle className="w-4 h-4 mr-2" />
+                Fix Kursi
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Back link */}
       <div className="text-center pt-4">
