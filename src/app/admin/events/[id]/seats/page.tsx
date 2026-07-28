@@ -45,6 +45,8 @@ interface PriceCategoryData {
   name: string
   price: number
   colorCode: string
+  applicableDayIds?: string[] | null
+  packageType?: string | null
 }
 
 interface ShowDateData {
@@ -93,6 +95,7 @@ function GaZoneManagementPanel({
   newZone,
   setNewZone,
   priceCategories,
+  setPriceCategories,
   fileInputRef,
   existingZoneSummary,
   existingSeatsCount,
@@ -116,6 +119,7 @@ function GaZoneManagementPanel({
   newZone: GaZoneDef
   setNewZone: React.Dispatch<React.SetStateAction<GaZoneDef>>
   priceCategories: PriceCategoryData[]
+  setPriceCategories: React.Dispatch<React.SetStateAction<PriceCategoryData[]>>
   fileInputRef: React.RefObject<HTMLInputElement | null>
   existingZoneSummary?: Record<string, { total: number; available: number; sold: number; locked: number; invitation: number; unavailable: number }>
   existingSeatsCount?: number
@@ -224,6 +228,90 @@ function GaZoneManagementPanel({
       alert('Gagal melepas slot undangan')
     } finally {
       setIsReleasing(prev => ({ ...prev, [zoneName]: false }))
+    }
+  }
+
+  // ─── Helper: find matching PriceCategory for a zone ────────────────
+  function findMatchingPC(zone: GaZoneDef): PriceCategoryData | undefined {
+    return priceCategories.find(pc =>
+      pc.name.toLowerCase() === zone.name.toLowerCase() ||
+      pc.name.toLowerCase() === (zone.priceCategoryName || '').toLowerCase()
+    )
+  }
+
+  // ─── Toggle applicable day for a zone's PriceCategory ──────────────
+  // dayId === null  → set to FULL pass (applicableDayIds = null, valid all days)
+  // dayId === string → toggle that day in/out of applicableDayIds
+  const [savingDayForZone, setSavingDayForZone] = useState<Record<string, boolean>>({})
+  async function handleToggleDay(zone: GaZoneDef, dayId: string | null) {
+    const pc = findMatchingPC(zone)
+    if (!pc) {
+      alert('Zona ini belum terhubung ke kategori harga mana pun.\nKlik "Sync dari Kategori" dulu untuk menghubungkan.')
+      return
+    }
+
+    const current = pc.applicableDayIds || null
+    let next: string[] | null
+    if (dayId === null) {
+      // "Semua Hari (FULL)" button
+      next = null
+    } else {
+      const arr = current || []
+      next = arr.includes(dayId)
+        ? arr.filter(id => id !== dayId)
+        : [...arr, dayId]
+      // Don't allow zero days — fall back to FULL
+      if (next.length === 0) next = null
+    }
+
+    // Skip if no change
+    if (
+      (next === null && current === null) ||
+      (next && current && next.length === current.length && next.every(id => current.includes(id)))
+    ) return
+
+    // Derive packageType from applicableDayIds
+    let packageType: string | null = null
+    if (next === null) packageType = 'FULL'
+    else if (next.length === 1) packageType = 'SINGLE'
+    else if (next.length >= 2) packageType = 'MULTI'
+
+    // Optimistic update
+    const prevValue = pc.applicableDayIds
+    setPriceCategories(prev => prev.map(p =>
+      p.id === pc.id ? { ...p, applicableDayIds: next, packageType } : p
+    ))
+    setSavingDayForZone(prev => ({ ...prev, [zone.name]: true }))
+    try {
+      const res = await fetch(`/api/admin/events/${eventId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          priceCategories: [{
+            name: pc.name,
+            price: pc.price,
+            colorCode: pc.colorCode,
+            packageType,
+            applicableDayIds: next === null ? null : JSON.stringify(next),
+          }],
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        alert(data.error || 'Gagal menyimpan hari berlaku')
+        // Revert
+        setPriceCategories(prev => prev.map(p =>
+          p.id === pc.id ? { ...p, applicableDayIds: prevValue } : p
+        ))
+      }
+      // Success: optimistic update already applied, no refetch needed
+    } catch {
+      alert('Gagal menyimpan hari berlaku')
+      setPriceCategories(prev => prev.map(p =>
+        p.id === pc.id ? { ...p, applicableDayIds: prevValue } : p
+      ))
+    } finally {
+      setSavingDayForZone(prev => ({ ...prev, [zone.name]: false }))
     }
   }
 
@@ -655,6 +743,71 @@ function GaZoneManagementPanel({
                       className="w-full h-7 px-2 text-xs rounded border border-border/50 bg-gray-50/50 focus:outline-none focus:ring-1 focus:ring-gold/30 focus:border-gold/50"
                     />
                   </div>
+
+                  {/* Applicable Days picker — only for multi-day events with matching PriceCategory */}
+                  {showDates && showDates.length > 1 && (() => {
+                    const pc = findMatchingPC(zone)
+                    if (!pc) return null
+                    const selected = pc.applicableDayIds || null
+                    const isFull = selected === null
+                    const isSaving = savingDayForZone[zone.name]
+                    return (
+                      <div className="mt-2 ml-7 flex items-start gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-muted-foreground mt-1 shrink-0">
+                          Hari berlaku:
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isSaving}
+                          onClick={() => handleToggleDay(zone, null)}
+                          className={cn(
+                            "text-[10px] px-2 py-0.5 rounded-full border transition-all flex items-center gap-1",
+                            isFull
+                              ? "bg-emerald-500 border-emerald-500 text-white font-medium"
+                              : "bg-white border-border/50 text-muted-foreground hover:border-emerald-300 hover:text-emerald-700"
+                          )}
+                          title="Tiket kategori ini berlaku untuk semua hari pertunjukan"
+                        >
+                          {isFull && <Check className="w-2.5 h-2.5" />}
+                          Semua Hari (FULL)
+                        </button>
+                        {showDates.map(sd => {
+                          const isSelected = selected?.includes(sd.id) || false
+                          const dayLabel = sd.label || `Hari ${showDates.indexOf(sd) + 1}`
+                          const dateLabel = sd.date
+                            ? new Date(sd.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+                            : ''
+                          return (
+                            <button
+                              key={sd.id}
+                              type="button"
+                              disabled={isSaving}
+                              onClick={() => handleToggleDay(zone, sd.id)}
+                              className={cn(
+                                "text-[10px] px-2 py-0.5 rounded-full border transition-all flex items-center gap-1",
+                                isSelected
+                                  ? "bg-gold border-gold text-white font-medium"
+                                  : "bg-white border-border/50 text-muted-foreground hover:border-gold/40 hover:text-gold"
+                              )}
+                              title={`Tanggal: ${sd.date ? new Date(sd.date).toLocaleString('id-ID') : '(no date)'}`}
+                            >
+                              {isSelected && <Check className="w-2.5 h-2.5" />}
+                              {dayLabel}{dateLabel && ` · ${dateLabel}`}
+                            </button>
+                          )
+                        })}
+                        {isSaving && <Loader2 className="w-3 h-3 text-muted-foreground animate-spin ml-1 mt-1" />}
+                        <span className="text-[9px] text-muted-foreground/60 w-full mt-0.5">
+                          {isFull
+                            ? `Berlaku semua ${showDates.length} hari — auto-save saat toggle`
+                            : (selected?.length === 1
+                              ? `SINGLE-DAY — berlaku 1 hari saja — auto-save saat toggle`
+                              : `MULTI-DAY — berlaku ${selected?.length} hari — auto-save saat toggle`
+                            )}
+                        </span>
+                      </div>
+                    )
+                  })()}
                 </div>
               ))}
               <div className="text-xs text-muted-foreground pt-1 flex items-center gap-2">
@@ -1142,10 +1295,12 @@ export default function SeatEditorPage() {
         if (eventRes.ok) {
           const data = await eventRes.json()
           const ev = data.event || null
-          // Populate show dates
-          if (ev?.showDates && ev.showDates.length > 1) {
+          // Always populate showDates (used by Zone Setting day picker too, not just seat grid)
+          if (ev?.showDates) {
             setShowDates(ev.showDates)
-            setSelectedShowDateIdx(0)
+            if (ev.showDates.length > 1) {
+              setSelectedShowDateIdx(0)
+            }
           }
           // Load GA zone config and layout image
           if (ev?.gaZoneConfig) {
@@ -1730,6 +1885,7 @@ export default function SeatEditorPage() {
       newZone={newZone}
       setNewZone={setNewZone}
       priceCategories={priceCategories}
+      setPriceCategories={setPriceCategories}
       fileInputRef={fileInputRef}
       existingZoneSummary={Object.fromEntries(zoneSummary)}
       existingSeatsCount={allSeats.length}

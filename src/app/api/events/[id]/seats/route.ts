@@ -57,7 +57,7 @@ export async function GET(
         }),
         db.priceCategory.findMany({
           where: { eventId: id },
-          select: { id: true, name: true, price: true, colorCode: true },
+          select: { id: true, name: true, price: true, colorCode: true, applicableDayIds: true, packageType: true },
         }),
       ])
 
@@ -75,7 +75,13 @@ export async function GET(
         eventShowDateId: seat.eventShowDateId,
       }))
 
-      return { seats: seatMap, priceCategories }
+      return { seats: seatMap, priceCategories: priceCategories.map(pc => ({
+        ...pc,
+        // Parse applicableDayIds from JSON string to array for frontend
+        applicableDayIds: pc.applicableDayIds
+          ? (() => { try { return JSON.parse(pc.applicableDayIds) as string[] } catch { return null } })()
+          : null,
+      })) }
     })
 
     if (!data) {
