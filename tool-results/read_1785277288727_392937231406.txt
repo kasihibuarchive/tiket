@@ -1,0 +1,1110 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useMemo } from 'react'
+     4→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     5→import { Button } from '@/components/ui/button'
+     6→import { Input } from '@/components/ui/input'
+     7→import { Label } from '@/components/ui/label'
+     8→import { Badge } from '@/components/ui/badge'
+     9→import { Separator } from '@/components/ui/separator'
+    10→import {
+    11→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    12→} from '@/components/ui/table'
+    13→import {
+    14→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    15→} from '@/components/ui/select'
+    16→import {
+    17→  Gift, Send, Loader2, Ticket, Users, X, MapPin, Clock, Mail, Phone,
+    18→  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp, RotateCcw, Calendar, Image,
+    19→} from 'lucide-react'
+    20→import { cn } from '@/lib/utils'
+    21→import { formatShortDate, formatEventDateTime } from '@/lib/date'
+    22→import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+    23→import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
+    24→
+    25→// ─── Types ────────────────────────────────────────────────────────────────────
+    26→
+    27→interface EventOption {
+    28→  id: string
+    29→  title: string
+    30→  category: string
+    31→  showDate: string
+    32→  location: string
+    33→  seatSummary?: { total: number; available: number; sold: number }
+    34→  seatMapId: string | null
+    35→}
+    36→
+    37→interface SeatData {
+    38→  id: string
+    39→  seatCode: string
+    40→  status: string
+    41→  row: string
+    42→  col: number
+    43→  lockedUntil: string | null
+    44→  priceCategory: { id: string; name: string; price: number; colorCode: string } | null
+    45→}
+    46→
+    47→interface PriceCategoryData {
+    48→  id: string
+    49→  name: string
+    50→  price: number
+    51→  colorCode: string
+    52→}
+    53→
+    54→interface ComplimentaryTicket {
+    55→  id: string
+    56→  transactionId: string
+    57→  customerName: string
+    58→  customerEmail: string
+    59→  customerWa: string
+    60→  seatCodes: string
+    61→  eventTitle: string
+    62→  createdAt: string
+    63→  paymentStatus: string
+    64→  emailSent?: boolean
+    65→}
+    66→
+    67→interface SeatMapInfo {
+    68→  id: string
+    69→  name: string
+    70→  seatType: string
+    71→}
+    72→
+    73→// ─── Main Component ───────────────────────────────────────────────────────────
+    74→
+    75→export default function ComplimentaryTicketsPage() {
+    76→  // Events
+    77→  const [events, setEvents] = useState<EventOption[]>([])
+    78→  const [isLoadingEvents, setIsLoadingEvents] = useState(true)
+    79→
+    80→  // Show dates for multi-day events
+    81→  const [showDates, setShowDates] = useState<any[]>([])
+    82→  const [selectedShowDateId, setSelectedShowDateId] = useState<string>('')
+    83→
+    84→  // Seats
+    85→  const [seats, setSeats] = useState<SeatData[]>([])
+    86→  const [priceCategories, setPriceCategories] = useState<PriceCategoryData[]>([])
+    87→  const [isLoadingSeats, setIsLoadingSeats] = useState(false)
+    88→  const [selectedSeats, setSelectedSeats] = useState<string[]>([])
+    89→  const [seatMapInfo, setSeatMapInfo] = useState<SeatMapInfo | null>(null)
+    90→  const [layoutData, setLayoutData] = useState<any>(null)
+    91→  const [eventSeatType, setEventSeatType] = useState<string | null>(null)
+    92→  const [eventLayoutImage, setEventLayoutImage] = useState<string | null>(null)
+    93→  const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
+    94→
+    95→  // Form
+    96→  const [selectedEventId, setSelectedEventId] = useState<string>('')
+    97→  const [guestName, setGuestName] = useState('')
+    98→  const [guestEmail, setGuestEmail] = useState('')
+    99→  const [guestPhone, setGuestPhone] = useState('')
+   100→  const [gaQuantity, setGaQuantity] = useState(1)
+   101→  const [gaZone, setGaZone] = useState('')
+   102→
+   103→  // Submit
+   104→  const [isSubmitting, setIsSubmitting] = useState(false)
+   105→  const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null)
+   106→
+   107→  // Stats
+   108→  const [totalComplimentary, setTotalComplimentary] = useState(0)
+   109→
+   110→  // Recent tickets
+   111→  const [recentTickets, setRecentTickets] = useState<ComplimentaryTicket[]>([])
+   112→  const [isLoadingRecent, setIsLoadingRecent] = useState(true)
+   113→
+   114→  // Resend email state
+   115→  const [resendingId, setResendingId] = useState<string | null>(null)
+   116→  const [resendResult, setResendResult] = useState<{ id: string; success: boolean; message: string } | null>(null)
+   117→
+   118→  // ─── Derived values ─────────────────────────────────────────────────────
+   119→
+   120→  const selectedEvent = useMemo(
+   121→    () => events.find((e) => e.id === selectedEventId) || null,
+   122→    [events, selectedEventId]
+   123→  )
+   124→
+   125→  const isNumberedSeatMap = eventSeatType === 'NUMBERED' || seatMapInfo?.seatType === 'NUMBERED'
+   126→  const isGeneralAdmission = !isNumberedSeatMap || !seatMapInfo
+   127→
+   128→  // Seat lookup for canvas mode
+   129→  const seatLookup = useMemo(() => {
+   130→    const map = new Map<string, SeatData>()
+   131→    for (const seat of seats) {
+   132→      map.set(seat.seatCode, seat)
+   133→    }
+   134→    return map
+   135→  }, [seats])
+   136→
+   137→  // Check if canvas mode is available
+   138→  const useCanvasMode = !!(parsedLayout?.canvasSeats && parsedLayout.canvasSeats.length > 0)
+   139→
+   140→  // Group seats by row for the mini map
+   141→  const seatsByRow = useMemo(() => {
+   142→    const groups: Record<string, SeatData[]> = {}
+   143→    for (const seat of seats) {
+   144→      if (!groups[seat.row]) groups[seat.row] = []
+   145→      groups[seat.row].push(seat)
+   146→    }
+   147→    // Sort each row by column
+   148→    for (const row of Object.keys(groups)) {
+   149→      groups[row].sort((a, b) => a.col - b.col)
+   150→    }
+   151→    return groups
+   152→  }, [seats])
+   153→
+   154→  const sortedRowKeys = useMemo(
+   155→    () => Object.keys(seatsByRow).sort(),
+   156→    [seatsByRow]
+   157→  )
+   158→
+   159→  const availableSeatsCount = useMemo(
+   160→    () => seats.filter((s) => s.status === 'AVAILABLE').length,
+   161→    [seats]
+   162→  )
+   163→
+   164→  // Zones for GA
+   165→  const zones = useMemo(() => {
+   166→    const zoneSet = new Set<string>()
+   167→    seats.forEach((s) => {
+   168→      if (s.status === 'AVAILABLE' && (s as any).zoneName) {
+   169→        zoneSet.add((s as any).zoneName)
+   170→      }
+   171→    })
+   172→    return Array.from(zoneSet).sort()
+   173→  }, [seats])
+   174→
+   175→  // ─── Fetch events ───────────────────────────────────────────────────────
+   176→
+   177→  useEffect(() => {
+   178→    async function fetchEvents() {
+   179→      try {
+   180→        const res = await fetch('/api/admin/events')
+   181→        if (res.ok) {
+   182→          const data = await res.json()
+   183→          setEvents(data.events || [])
+   184→        }
+   185→      } catch (err) {
+   186→        console.error('Failed to fetch events:', err)
+   187→      } finally {
+   188→        setIsLoadingEvents(false)
+   189→      }
+   190→    }
+   191→    fetchEvents()
+   192→  }, [])
+   193→
+   194→  // ─── Fetch recent complimentary tickets ─────────────────────────────────
+   195→
+   196→  useEffect(() => {
+   197→    async function fetchRecentTickets() {
+   198→      try {
+   199→        const res = await fetch('/api/admin/tickets/complimentary')
+   200→        if (res.ok) {
+   201→          const data = await res.json()
+   202→          setRecentTickets(data.tickets || [])
+   203→          setTotalComplimentary(data.total || 0)
+   204→        }
+   205→      } catch (err) {
+   206→        console.error('Failed to fetch recent complimentary tickets:', err)
+   207→      } finally {
+   208→        setIsLoadingRecent(false)
+   209→      }
+   210→    }
+   211→    fetchRecentTickets()
+   212→  }, [])
+   213→
+   214→  // ─── Fetch seats when event is selected ─────────────────────────────────
+   215→
+   216→  const fetchSeatsForEvent = useCallback(async (eventId: string, showDateFilter?: string) => {
+   217→    setIsLoadingSeats(true)
+   218→    setSelectedSeats([])
+   219→    setSeatMapInfo(null)
+   220→    setLayoutData(null)
+   221→    setEventSeatType(null)
+   222→    setEventLayoutImage(null)
+   223→    setGaQuantity(1)
+   224→    setGaZone('')
+   225→
+   226→    try {
+   227→      // Fetch seats with optional showDateId filter
+   228→      const seatsUrl = `/api/events/${eventId}/seats?admin=1${showDateFilter ? `&showDateId=${showDateFilter}` : ''}`
+   229→      const seatsRes = await fetch(seatsUrl)
+   230→      if (seatsRes.ok) {
+   231→        const data = await seatsRes.json()
+   232→        setSeats(data.seats || [])
+   233→        setPriceCategories(data.priceCategories || [])
+   234→      }
+   235→
+   236→      // Fetch event detail to get seatMapId, showDates, seatType, layoutImage
+   237→      const eventRes = await fetch(`/api/events/${eventId}?admin=1`)
+   238→      if (eventRes.ok) {
+   239→        const eventData = await eventRes.json()
+   240→        // Store seatType and layoutImage for GA detection and display
+   241→        setEventSeatType(eventData.seatType || null)
+   242→        setEventLayoutImage(eventData.layoutImage || null)
+   243→        if (eventData.seatMapId) {
+   244→          // Fetch seat map info
+   245→          const mapRes = await fetch('/api/admin/seat-maps')
+   246→          if (mapRes.ok) {
+   247→            const mapsData = await mapRes.json()
+   248→            const map = (mapsData.seatMaps || []).find((m: any) => m.id === eventData.seatMapId)
+   249→            if (map) {
+   250→              setSeatMapInfo({ id: map.id, name: map.name, seatType: map.seatType })
+   251→              setLayoutData(map.layoutData || null)
+   252→            }
+   253→          }
+   254→        }
+   255→        // Populate show dates for multi-day events
+   256→        if (eventData.showDates && eventData.showDates.length > 0) {
+   257→          setShowDates(eventData.showDates)
+   258→          if (!showDateFilter) {
+   259→            setSelectedShowDateId(eventData.showDates[0].id)
+   260→          }
+   261→        } else {
+   262→          setShowDates([])
+   263→          setSelectedShowDateId('')
+   264→        }
+   265→      }
+   266→    } catch (err) {
+   267→      console.error('Failed to fetch seats:', err)
+   268→    } finally {
+   269→      setIsLoadingSeats(false)
+   270→    }
+   271→  }, [])
+   272→
+   273→  useEffect(() => {
+   274→    if (selectedEventId) {
+   275→      fetchSeatsForEvent(selectedEventId)
+   276→    } else {
+   277→      setSeats([])
+   278→      setSelectedSeats([])
+   279→      setSeatMapInfo(null)
+   280→      setShowDates([])
+   281→      setSelectedShowDateId('')
+   282→    }
+   283→  }, [selectedEventId, fetchSeatsForEvent])
+   284→
+   285→  // Re-fetch seats when show date changes
+   286→  useEffect(() => {
+   287→    if (selectedEventId && selectedShowDateId) {
+   288→      fetchSeatsForEvent(selectedEventId, selectedShowDateId)
+   289→    }
+   290→  }, [selectedShowDateId])
+   291→
+   292→  // ─── Seat selection ─────────────────────────────────────────────────────
+   293→
+   294→  function toggleSeat(seatCode: string) {
+   295→    setSelectedSeats((prev) =>
+   296→      prev.includes(seatCode)
+   297→        ? prev.filter((s) => s !== seatCode)
+   298→        : [...prev, seatCode]
+   299→    )
+   300→  }
+   301→
+   302→  function removeSeat(seatCode: string) {
+   303→    setSelectedSeats((prev) => prev.filter((s) => s !== seatCode))
+   304→  }
+   305→
+   306→  // ─── Get seat color ─────────────────────────────────────────────────────
+   307→
+   308→  function getSeatColorClass(seat: SeatData): string {
+   309→    if (seat.status !== 'AVAILABLE') return 'bg-gray-300 text-gray-500 cursor-not-allowed'
+   310→    if (selectedSeats.includes(seat.seatCode)) return 'bg-gold text-white cursor-pointer hover:bg-gold-dark shadow-sm ring-2 ring-gold/50'
+   311→    return 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+   312→  }
+   313→
+   314→  // ─── Resend email ───────────────────────────────────────────────────────
+   315→
+   316→  async function handleResendEmail(ticketId: string, transactionId: string) {
+   317→    setResendingId(ticketId)
+   318→    setResendResult(null)
+   319→
+   320→    try {
+   321→      const res = await fetch('/api/usher/resend-email', {
+   322→        method: 'POST',
+   323→        headers: { 'Content-Type': 'application/json' },
+   324→        body: JSON.stringify({ transactionId }),
+   325→      })
+   326→
+   327→      const data = await res.json()
+   328→
+   329→      if (res.ok) {
+   330→        setResendResult({ id: ticketId, success: true, message: 'E-tiket berhasil dikirim ulang!' })
+   331→      } else {
+   332→        setResendResult({ id: ticketId, success: false, message: data.error || 'Gagal mengirim ulang.' })
+   333→      }
+   334→    } catch {
+   335→      setResendResult({ id: ticketId, success: false, message: 'Terjadi kesalahan jaringan.' })
+   336→    } finally {
+   337→      setResendingId(null)
+   338→      // Auto-hide after 5 seconds
+   339→      setTimeout(() => setResendResult(null), 5000)
+   340→    }
+   341→  }
+   342→
+   343→  // ─── Submit ─────────────────────────────────────────────────────────────
+   344→
+   345→  async function handleSubmit() {
+   346→    if (!selectedEventId || !guestName || !guestEmail || !guestPhone) {
+   347→      setSubmitResult({ success: false, message: 'Harap lengkapi semua field yang wajib diisi.' })
+   348→      return
+   349→    }
+   350→
+   351→    let seatCodes: string[]
+   352→
+   353→    if (isNumberedSeatMap) {
+   354→      if (selectedSeats.length === 0) {
+   355→        setSubmitResult({ success: false, message: 'Harap pilih minimal 1 kursi.' })
+   356→        return
+   357→      }
+   358→      seatCodes = selectedSeats
+   359→    } else {
+   360→      if (gaQuantity < 1) {
+   361→        setSubmitResult({ success: false, message: 'Jumlah tiket minimal 1.' })
+   362→        return
+   363→      }
+   364→      // Generate GA seat codes
+   365→      seatCodes = Array.from({ length: gaQuantity }, (_, i) =>
+   366→        gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`
+   367→      )
+   368→    }
+   369→
+   370→    setIsSubmitting(true)
+   371→    setSubmitResult(null)
+   372→
+   373→    try {
+   374→      const res = await fetch('/api/admin/tickets/complimentary', {
+   375→        method: 'POST',
+   376→        headers: { 'Content-Type': 'application/json' },
+   377→        body: JSON.stringify({
+   378→          eventId: selectedEventId,
+   379→          seatCodes,
+   380→          guestName,
+   381→          guestEmail,
+   382→          guestPhone,
+   383→          showDateId: selectedShowDateId || undefined,
+   384→        }),
+   385→      })
+   386→
+   387→      const data = await res.json()
+   388→
+   389→      if (res.ok) {
+   390→        setSubmitResult({
+   391→          success: true,
+   392→          message: `Tiket komplimen berhasil dibuat! Transaction ID: ${data.transactionId}`,
+   393→        })
+   394→        // Reset form
+   395→        setGuestName('')
+   396→        setGuestEmail('')
+   397→        setGuestPhone('')
+   398→        setSelectedSeats([])
+   399→        setGaQuantity(1)
+   400→        setGaZone('')
+   401→        // Refresh recent tickets
+   402→        const recentRes = await fetch('/api/admin/tickets/complimentary')
+   403→        if (recentRes.ok) {
+   404→          const recentData = await recentRes.json()
+   405→          setRecentTickets(recentData.tickets || [])
+   406→          setTotalComplimentary(recentData.total || 0)
+   407→        }
+   408→      } else {
+   409→        setSubmitResult({
+   410→          success: false,
+   411→          message: data.error || 'Gagal membuat tiket komplimen.',
+   412→        })
+   413→      }
+   414→    } catch (err) {
+   415→      setSubmitResult({
+   416→        success: false,
+   417→        message: 'Terjadi kesalahan jaringan. Silakan coba lagi.',
+   418→      })
+   419→    } finally {
+   420→      setIsSubmitting(false)
+   421→    }
+   422→  }
+   423→
+   424→  // ─── Parse seat codes from JSON string ──────────────────────────────────
+   425→
+   426→  function parseSeatCodes(codes: string): string[] {
+   427→    if (!codes) return []
+   428→    try {
+   429→      return JSON.parse(codes)
+   430→    } catch {
+   431→      return codes.split(',').map((s) => s.trim()).filter(Boolean)
+   432→    }
+   433→  }
+   434→
+   435→  // ─── Render ─────────────────────────────────────────────────────────────
+   436→
+   437→  return (
+   438→    <div className="space-y-6">
+   439→      {/* Header */}
+   440→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   441→        <div className="flex items-center gap-3">
+   442→          <div className="w-10 h-10 rounded-lg bg-gold/10 flex items-center justify-center">
+   443→            <Gift className="w-5 h-5 text-gold" />
+   444→          </div>
+   445→          <div>
+   446→            <h1 className="font-serif text-2xl font-bold text-charcoal">Tiket Komplimen</h1>
+   447→            <p className="text-sm text-muted-foreground mt-0.5">Buat tiket gratis untuk tamu undangan</p>
+   448→          </div>
+   449→        </div>
+   450→      </div>
+   451→
+   452→      {/* Stats Card */}
+   453→      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   454→        <Card className="border-border/50">
+   455→          <CardContent className="p-4 flex items-center gap-4">
+   456→            <div className="w-12 h-12 rounded-xl bg-gold/10 flex items-center justify-center flex-shrink-0">
+   457→              <Ticket className="w-6 h-6 text-gold" />
+   458→            </div>
+   459→            <div>
+   460→              <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Tiket Komplimen</p>
+   461→              <p className="text-2xl font-bold text-charcoal mt-0.5">
+   462→                {isLoadingRecent ? (
+   463→                  <Loader2 className="w-6 h-6 text-gold animate-spin inline" />
+   464→                ) : (
+   465→                  totalComplimentary
+   466→                )}
+   467→              </p>
+   468→            </div>
+   469→          </CardContent>
+   470→        </Card>
+   471→        <Card className="border-border/50">
+   472→          <CardContent className="p-4 flex items-center gap-4">
+   473→            <div className="w-12 h-12 rounded-xl bg-charcoal/5 flex items-center justify-center flex-shrink-0">
+   474→              <Users className="w-6 h-6 text-charcoal/60" />
+   475→            </div>
+   476→            <div>
+   477→              <p className="text-xs text-muted-foreground uppercase tracking-wider">Tamu Undangan</p>
+   478→              <p className="text-2xl font-bold text-charcoal mt-0.5">
+   479→                {isLoadingRecent ? (
+   480→                  <Loader2 className="w-6 h-6 text-gold animate-spin inline" />
+   481→                ) : (
+   482→                  recentTickets.length > 0
+   483→                    ? new Set(recentTickets.map((t) => t.customerEmail)).size
+   484→                    : 0
+   485→                )}
+   486→              </p>
+   487→            </div>
+   488→          </CardContent>
+   489→        </Card>
+   490→      </div>
+   491→
+   492→      {/* Form Card */}
+   493→      <Card className="border-border/50">
+   494→        <CardHeader className="pb-4">
+   495→          <CardTitle className="font-serif text-lg text-charcoal flex items-center gap-2">
+   496→            <Send className="w-4 h-4 text-gold" />
+   497→            Buat Tiket Komplimen Baru
+   498→          </CardTitle>
+   499→        </CardHeader>
+   500→        <CardContent className="space-y-6">
+   501→          {/* Submit Result Message */}
+   502→          {submitResult && (
+   503→            <div
+   504→              className={`flex items-start gap-3 p-4 rounded-lg text-sm ${
+   505→                submitResult.success
+   506→                  ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+   507→                  : 'bg-red-50 border border-red-200 text-red-800'
+   508→              }`}
+   509→            >
+   510→              {submitResult.success ? (
+   511→                <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+   512→              ) : (
+   513→                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+   514→              )}
+   515→              <p>{submitResult.message}</p>
+   516→              <button
+   517→                onClick={() => setSubmitResult(null)}
+   518→                className="ml-auto flex-shrink-0 hover:opacity-70"
+   519→              >
+   520→                <X className="w-4 h-4" />
+   521→              </button>
+   522→            </div>
+   523→          )}
+   524→
+   525→          {/* Step 1: Event Selection */}
+   526→          <div className="space-y-2">
+   527→            <Label className="text-sm font-medium flex items-center gap-2">
+   528→              Pilih Event <span className="text-danger">*</span>
+   529→            </Label>
+   530→            {isLoadingEvents ? (
+   531→              <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+   532→                <Loader2 className="w-4 h-4 animate-spin text-gold" />
+   533→                Memuat daftar event...
+   534→              </div>
+   535→            ) : (
+   536→              <Select value={selectedEventId} onValueChange={setSelectedEventId}>
+   537→                <SelectTrigger className="w-full bg-white">
+   538→                  <SelectValue placeholder="Pilih event..." />
+   539→                </SelectTrigger>
+   540→                <SelectContent>
+   541→                  {events.map((event) => (
+   542→                    <SelectItem key={event.id} value={event.id}>
+   543→                      <div className="flex flex-col">
+   544→                        <span className="font-medium">{event.title}</span>
+   545→                        <span className="text-xs text-muted-foreground">
+   546→                          {formatShortDate(event.showDate)} · {event.location}
+   547→                        </span>
+   548→                      </div>
+   549→                    </SelectItem>
+   550→                  ))}
+   551→                </SelectContent>
+   552→              </Select>
+   553→            )}
+   554→
+   555→            {/* Selected event info */}
+   556→            {selectedEvent && (
+   557→              <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-muted-foreground">
+   558→                <Badge variant="secondary" className="text-xs">
+   559→                  {selectedEvent.category}
+   560→                </Badge>
+   561→                <span className="flex items-center gap-1">
+   562→                  <Clock className="w-3 h-3" />
+   563→                  {formatEventDateTime(selectedEvent.showDate)}
+   564→                </span>
+   565→                <span className="flex items-center gap-1">
+   566→                  <MapPin className="w-3 h-3" />
+   567→                  {selectedEvent.location}
+   568→                </span>
+   569→                {selectedEvent.seatSummary && (
+   570→                  <span className="flex items-center gap-1">
+   571→                    <Ticket className="w-3 h-3" />
+   572→                    {selectedEvent.seatSummary.available} kursi tersedia
+   573→                  </span>
+   574→                )}
+   575→              </div>
+   576→            )}
+   577→          </div>
+   578→
+   579→          <Separator />
+   580→
+   581→          {/* Step 2: Guest Information */}
+   582→          <div className="space-y-4">
+   583→            <Label className="text-sm font-medium">Informasi Tamu</Label>
+   584→
+   585→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   586→              <div className="space-y-2">
+   587→                <Label className="text-xs text-muted-foreground flex items-center gap-1">
+   588→                  <Users className="w-3 h-3" />
+   589→                  Nama Tamu <span className="text-danger">*</span>
+   590→                </Label>
+   591→                <Input
+   592→                  value={guestName}
+   593→                  onChange={(e) => setGuestName(e.target.value)}
+   594→                  placeholder="Contoh: Bapak Joko Widodo"
+   595→                  className="bg-white"
+   596→                />
+   597→              </div>
+   598→              <div className="space-y-2">
+   599→                <Label className="text-xs text-muted-foreground flex items-center gap-1">
+   600→                  <Mail className="w-3 h-3" />
+   601→                  Email Tamu <span className="text-danger">*</span>
+   602→                </Label>
+   603→                <Input
+   604→                  type="email"
+   605→                  value={guestEmail}
+   606→                  onChange={(e) => setGuestEmail(e.target.value)}
+   607→                  placeholder="tamu@email.com"
+   608→                  className="bg-white"
+   609→                />
+   610→              </div>
+   611→            </div>
+   612→
+   613→            <div className="space-y-2 sm:max-w-md">
+   614→              <Label className="text-xs text-muted-foreground flex items-center gap-1">
+   615→                <Phone className="w-3 h-3" />
+   616→                No. WhatsApp <span className="text-danger">*</span>
+   617→              </Label>
+   618→              <Input
+   619→                type="tel"
+   620→                value={guestPhone}
+   621→                onChange={(e) => setGuestPhone(e.target.value)}
+   622→                placeholder="08xxxxxxxxxx"
+   623→                className="bg-white"
+   624→              />
+   625→            </div>
+   626→          </div>
+   627→
+   628→          <Separator />
+   629→
+   630→          {/* Step 3: Seat Selection */}
+   631→          <div className="space-y-4">
+   632→            <Label className="text-sm font-medium flex items-center gap-2">
+   633→              <Ticket className="w-4 h-4 text-gold" />
+   634→              Pemilihan Kursi
+   635→            </Label>
+   636→
+   637→            {/* Show Date Tabs for multi-day events */}
+   638→            {showDates.length > 1 && (
+   639→              <div className="flex items-center gap-2 flex-wrap">
+   640→                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+   641→                {showDates.map((sd: any, idx: number) => {
+   642→                  const sdLabel = sd.label || `Hari ${idx + 1}`
+   643→                  const sdDate = new Date(sd.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+   644→                  return (
+   645→                    <button
+   646→                      key={sd.id}
+   647→                      onClick={() => setSelectedShowDateId(sd.id)}
+   648→                      className={cn(
+   649→                        'px-3 py-1 rounded-full text-xs font-medium transition-all border',
+   650→                        selectedShowDateId === sd.id
+   651→                          ? 'bg-gold text-white border-gold'
+   652→                          : 'bg-white text-muted-foreground border-border hover:border-gold/50'
+   653→                      )}
+   654→                    >
+   655→                      {sdLabel} ({sdDate})
+   656→                    </button>
+   657→                  )
+   658→                })}
+   659→              </div>
+   660→            )}
+   661→
+   662→            {!selectedEventId ? (
+   663→              <div className="text-sm text-muted-foreground py-6 text-center bg-muted/30 rounded-lg">
+   664→                Pilih event terlebih dahulu untuk melihat pilihan kursi.
+   665→              </div>
+   666→            ) : isLoadingSeats ? (
+   667→              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+   668→                <Loader2 className="w-5 h-5 animate-spin text-gold" />
+   669→                Memuat data kursi...
+   670→              </div>
+   671→            ) : isNumberedSeatMap ? (
+   672→              /* ─── Numbered Seat Map ────────────────────────────── */
+   673→              <div className="space-y-4">
+   674→                <div className="flex items-center justify-between">
+   675→                  <p className="text-xs text-muted-foreground">
+   676→                    Kursi tersedia: <span className="font-semibold text-charcoal">{availableSeatsCount}</span>
+   677→                  </p>
+   678→                  {selectedSeats.length > 0 && (
+   679→                    <Badge className="bg-gold text-white text-xs">
+   680→                      {selectedSeats.length} dipilih
+   681→                    </Badge>
+   682→                  )}
+   683→                </div>
+   684→
+   685→                {/* Mini Seat Map */}
+   686→                <div className="bg-muted/20 rounded-xl p-4 overflow-x-auto">
+   687→                  {useCanvasMode && parsedLayout ? (
+   688→                    /* ─── Canvas Mode: preserve empty space like guest view ─── */
+   689→                    <div className="flex justify-center">
+   690→                      <CanvasSeatLayout
+   691→                        parsedLayout={parsedLayout}
+   692→                        seatLookup={seatLookup as Map<string, any>}
+   693→                        renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+   694→                          const isAvailable = seatData.status === 'AVAILABLE'
+   695→                          const isSelected = selectedSeats.includes(canvasSeat.seatCode)
+   696→                          return (
+   697→                            <button
+   698→                              key={key}
+   699→                              onClick={() => isAvailable ? toggleSeat(canvasSeat.seatCode) : undefined}
+   700→                              disabled={!isAvailable}
+   701→                              className={cn(
+   702→                                'absolute rounded text-[10px] font-medium flex items-center justify-center transition-all',
+   703→                                isSelected
+   704→                                  ? 'bg-gold text-white shadow-sm ring-2 ring-gold/50 cursor-pointer'
+   705→                                  : isAvailable
+   706→                                    ? 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+   707→                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+   708→                              )}
+   709→                              style={{
+   710→                                left: scaledX,
+   711→                                top: scaledY,
+   712→                                width: size,
+   713→                                height: size,
+   714→                              }}
+   715→                              title={`${canvasSeat.seatCode} - ${seatData.status}`}
+   716→                            >
+   717→                              {canvasSeat.seatNum}
+   718→                            </button>
+   719→                          )
+   720→                        }}
+   721→                        renderEmpty={(x, y, size, key) => (
+   722→                          <div
+   723→                            key={key}
+   724→                            className="absolute"
+   725→                            style={{ left: x, top: y, width: size, height: size }}
+   726→                          />
+   727→                        )}
+   728→                      />
+   729→                    </div>
+   730→                  ) : (
+   731→                    /* ─── Fallback: Simple row-based mini map ─────────────── */
+   732→                    <>
+   733→                    <div className="text-center mb-3">
+   734→                      <div className="bg-charcoal text-white text-[10px] uppercase tracking-widest px-6 py-1.5 rounded-full inline-block">
+   735→                        Panggung
+   736→                      </div>
+   737→                    </div>
+   738→
+   739→                    <div className="mx-auto w-full flex flex-col items-center">
+   740→                      {sortedRowKeys.map((row) => (
+   741→                        <div key={row} className="flex items-center gap-2 mb-1.5">
+   742→                          <span className="w-6 text-xs font-mono font-semibold text-charcoal/60 text-right">
+   743→                            {row}
+   744→                          </span>
+   745→                          <div className="flex gap-1 flex-1">
+   746→                            {seatsByRow[row].map((seat) => (
+   747→                              <button
+   748→                                key={seat.id}
+   749→                                onClick={() =>
+   750→                                  seat.status === 'AVAILABLE'
+   751→                                    ? toggleSeat(seat.seatCode)
+   752→                                    : undefined
+   753→                                }
+   754→                                disabled={seat.status !== 'AVAILABLE'}
+   755→                                className={`
+   756→                                  w-8 h-8 rounded text-[10px] font-mono font-medium
+   757→                                  flex items-center justify-center transition-all
+   758→                                  ${getSeatColorClass(seat)}
+   759→                                `}
+   760→                                title={`${seat.seatCode} - ${seat.status}${seat.priceCategory ? ` (${seat.priceCategory.name})` : ''}`}
+   761→                              >
+   762→                                {seat.col}
+   763→                              </button>
+   764→                            ))}
+   765→                          </div>
+   766→                          <span className="w-6 text-xs font-mono font-semibold text-charcoal/60">
+   767→                            {row}
+   768→                          </span>
+   769→                        </div>
+   770→                      ))}
+   771→                    </div>
+   772→                    </>
+   773→                  )}
+   774→
+   775→                  {/* Legend */}
+   776→                  <div className="flex items-center justify-center gap-4 mt-4 text-[10px] text-muted-foreground">
+   777→                    <div className="flex items-center gap-1.5">
+   778→                      <div className="w-4 h-4 rounded bg-emerald-100 border border-emerald-200" />
+   779→                      Tersedia
+   780→                    </div>
+   781→                    <div className="flex items-center gap-1.5">
+   782→                      <div className="w-4 h-4 rounded bg-gold border border-gold-dark" />
+   783→                      Dipilih
+   784→                    </div>
+   785→                    <div className="flex items-center gap-1.5">
+   786→                      <div className="w-4 h-4 rounded bg-gray-300" />
+   787→                      Terisi
+   788→                    </div>
+   789→                  </div>
+   790→                </div>
+   791→
+   792→                {/* Selected Seat Badges */}
+   793→                {selectedSeats.length > 0 && (
+   794→                  <div className="space-y-2">
+   795→                    <p className="text-xs text-muted-foreground">Kursi yang dipilih:</p>
+   796→                    <div className="flex flex-wrap gap-2">
+   797→                      {selectedSeats.map((code) => (
+   798→                        <Badge
+   799→                          key={code}
+   800→                          className="bg-gold text-white text-xs cursor-pointer hover:bg-gold-dark transition-colors"
+   801→                          onClick={() => removeSeat(code)}
+   802→                        >
+   803→                          {code}
+   804→                          <X className="w-3 h-3 ml-1" />
+   805→                        </Badge>
+   806→                      ))}
+   807→                    </div>
+   808→                  </div>
+   809→                )}
+   810→              </div>
+   811→            ) : (
+   812→              /* ─── General Admission ─────────────────────────────── */
+   813→              <div className="space-y-4">
+   814→                <p className="text-xs text-muted-foreground">
+   815→                  Event ini menggunakan sistem General Admission. Masukkan jumlah tiket yang diinginkan.
+   816→                </p>
+   817→
+   818→                {/* Layout Image for GA events */}
+   819→                {eventLayoutImage && (
+   820→                  <div className="bg-muted/20 rounded-xl p-3">
+   821→                    <div className="flex items-center gap-2 mb-2">
+   822→                      <Image className="w-3.5 h-3.5 text-gold" />
+   823→                      <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+   824→                    </div>
+   825→                    <div className="w-full rounded-lg overflow-hidden border border-border/30">
+   826→                      <img
+   827→                        src={eventLayoutImage}
+   828→                        alt="Layout venue"
+   829→                        className="w-full h-auto max-h-64 object-contain"
+   830→                      />
+   831→                    </div>
+   832→                  </div>
+   833→                )}
+   834→
+   835→                {zones.length > 0 && (
+   836→                  <div className="space-y-2 sm:max-w-md">
+   837→                    <Label className="text-xs text-muted-foreground">Zone / Nama Area</Label>
+   838→                    <Select value={gaZone} onValueChange={setGaZone}>
+   839→                      <SelectTrigger className="w-full bg-white">
+   840→                        <SelectValue placeholder="Pilih zone..." />
+   841→                      </SelectTrigger>
+   842→                      <SelectContent>
+   843→                        {zones.map((z) => (
+   844→                          <SelectItem key={z} value={z}>
+   845→                            {z}
+   846→                          </SelectItem>
+   847→                        ))}
+   848→                      </SelectContent>
+   849→                    </Select>
+   850→                  </div>
+   851→                )}
+   852→
+   853→                {zones.length === 0 && (
+   854→                  <div className="space-y-2 sm:max-w-md">
+   855→                    <Label className="text-xs text-muted-foreground">Zone / Nama Area (opsional)</Label>
+   856→                    <Input
+   857→                      value={gaZone}
+   858→                      onChange={(e) => setGaZone(e.target.value)}
+   859→                      placeholder="Contoh: VIP, Festival Kiri"
+   860→                      className="bg-white"
+   861→                    />
+   862→                  </div>
+   863→                )}
+   864→
+   865→                <div className="space-y-2 sm:max-w-[200px]">
+   866→                  <Label className="text-xs text-muted-foreground">Jumlah Tiket <span className="text-danger">*</span></Label>
+   867→                  <div className="flex items-center gap-2">
+   868→                    <Button
+   869→                      type="button"
+   870→                      variant="outline"
+   871→                      size="icon"
+   872→                      className="h-9 w-9"
+   873→                      onClick={() => setGaQuantity((q) => Math.max(1, q - 1))}
+   874→                      disabled={gaQuantity <= 1}
+   875→                    >
+   876→                      -
+   877→                    </Button>
+   878→                    <Input
+   879→                      type="number"
+   880→                      min={1}
+   881→                      max={100}
+   882→                      value={gaQuantity}
+   883→                      onChange={(e) => setGaQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+   884→                      className="h-9 text-center bg-white"
+   885→                    />
+   886→                    <Button
+   887→                      type="button"
+   888→                      variant="outline"
+   889→                      size="icon"
+   890→                      className="h-9 w-9"
+   891→                      onClick={() => setGaQuantity((q) => Math.min(100, q + 1))}
+   892→                      disabled={gaQuantity >= 100}
+   893→                    >
+   894→                      +
+   895→                    </Button>
+   896→                  </div>
+   897→                  <p className="text-[10px] text-muted-foreground">
+   898→                    Kode kursi akan di-generate otomatis (e.g. {gaZone ? `${gaZone}-` : 'GA-'}1, {gaZone ? `${gaZone}-` : 'GA-'}2, ...)
+   899→                  </p>
+   900→                </div>
+   901→
+   902→                {/* Preview */}
+   903→                <div className="bg-muted/20 rounded-lg p-3 text-xs">
+   904→                  <p className="font-medium text-charcoal mb-1">Preview:</p>
+   905→                  <div className="flex flex-wrap gap-1.5">
+   906→                    {Array.from({ length: gaQuantity }, (_, i) => (
+   907→                      <Badge key={i} variant="secondary" className="text-[10px]">
+   908→                        {gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`}
+   909→                      </Badge>
+   910→                    ))}
+   911→                  </div>
+   912→                </div>
+   913→              </div>
+   914→            )}
+   915→          </div>
+   916→
+   917→          <Separator />
+   918→
+   919→          {/* Step 4: Summary */}
+   920→          {(selectedEventId && (selectedSeats.length > 0 || (!isNumberedSeatMap && gaQuantity >= 1))) && (
+   921→            <div className="bg-charcoal/5 rounded-xl p-4 space-y-3">
+   922→              <p className="text-sm font-medium text-charcoal">Ringkasan</p>
+   923→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+   924→                <div>
+   925→                  <span className="text-muted-foreground">Event:</span>{' '}
+   926→                  <span className="font-medium">{selectedEvent?.title}</span>
+   927→                </div>
+   928→                <div>
+   929→                  <span className="text-muted-foreground">Tamu:</span>{' '}
+   930→                  <span className="font-medium">{guestName || '-'}</span>
+   931→                </div>
+   932→                <div>
+   933→                  <span className="text-muted-foreground">Email:</span>{' '}
+   934→                  <span className="font-medium">{guestEmail || '-'}</span>
+   935→                </div>
+   936→                <div>
+   937→                  <span className="text-muted-foreground">WhatsApp:</span>{' '}
+   938→                  <span className="font-medium">{guestPhone || '-'}</span>
+   939→                </div>
+   940→                <div className="sm:col-span-2">
+   941→                  <span className="text-muted-foreground">Kursi:</span>{' '}
+   942→                  <div className="flex flex-wrap gap-1.5 mt-1">
+   943→                    {isNumberedSeatMap
+   944→                      ? selectedSeats.map((code) => (
+   945→                          <Badge key={code} className="bg-gold text-white text-[10px]">{code}</Badge>
+   946→                        ))
+   947→                      : Array.from({ length: gaQuantity }, (_, i) => (
+   948→                          <Badge key={i} variant="secondary" className="text-[10px]">
+   949→                            {gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`}
+   950→                          </Badge>
+   951→                        ))}
+   952→                  </div>
+   953→                </div>
+   954→              </div>
+   955→            </div>
+   956→          )}
+   957→
+   958→          {/* Submit */}
+   959→          <div className="flex justify-end pt-2">
+   960→            <Button
+   961→              onClick={handleSubmit}
+   962→              disabled={
+   963→                isSubmitting ||
+   964→                !selectedEventId ||
+   965→                !guestName ||
+   966→                !guestEmail ||
+   967→                !guestPhone ||
+   968→                (isNumberedSeatMap ? selectedSeats.length === 0 : gaQuantity < 1)
+   969→              }
+   970→              className="bg-charcoal hover:bg-charcoal/90 text-gold min-w-[200px]"
+   971→            >
+   972→              {isSubmitting ? (
+   973→                <>
+   974→                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   975→                  Mengirim...
+   976→                </>
+   977→              ) : (
+   978→                <>
+   979→                  <Send className="w-4 h-4 mr-2" />
+   980→                  Kirim Tiket Komplimen
+   981→                </>
+   982→              )}
+   983→            </Button>
+   984→          </div>
+   985→        </CardContent>
+   986→      </Card>
+   987→
+   988→      {/* Recent Complimentary Tickets */}
+   989→      <Card className="border-border/50">
+   990→        <CardHeader className="pb-4">
+   991→          <CardTitle className="font-serif text-lg text-charcoal flex items-center gap-2">
+   992→            <Clock className="w-4 h-4 text-gold" />
+   993→            Tiket Komplimen Terbaru
+   994→          </CardTitle>
+   995→        </CardHeader>
+   996→        <CardContent className="p-0">
+   997→          {isLoadingRecent ? (
+   998→            <div className="flex items-center justify-center py-12">
+   999→              <Loader2 className="w-6 h-6 text-gold animate-spin" />
+  1000→            </div>
+  1001→          ) : recentTickets.length === 0 ? (
+  1002→            <div className="text-center py-12">
+  1003→              <Gift className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+  1004→              <p className="text-sm text-muted-foreground">Belum ada tiket komplimen yang dibuat</p>
+  1005→            </div>
+  1006→          ) : (
+  1007→            <div className="overflow-x-auto">
+  1008→              <Table>
+  1009→                <TableHeader>
+  1010→                  <TableRow>
+  1011→                    <TableHead className="text-xs">Transaction ID</TableHead>
+  1012→                    <TableHead className="text-xs">Nama Tamu</TableHead>
+  1013→                    <TableHead className="text-xs">Event</TableHead>
+  1014→                    <TableHead className="text-xs">Kursi</TableHead>
+  1015→                    <TableHead className="text-xs">Dibuat</TableHead>
+  1016→                    <TableHead className="text-xs text-center">Status</TableHead>
+  1017→                    <TableHead className="text-xs text-center">Aksi</TableHead>
+  1018→                  </TableRow>
+  1019→                </TableHeader>
+  1020→                <TableBody>
+  1021→                  {recentTickets.map((ticket) => {
+  1022→                    const seatCodes = parseSeatCodes(ticket.seatCodes)
+  1023→                    return (
+  1024→                      <TableRow key={ticket.id}>
+  1025→                        <TableCell>
+  1026→                          <span className="font-mono text-xs font-semibold text-gold">
+  1027→                            {ticket.transactionId}
+  1028→                          </span>
+  1029→                        </TableCell>
+  1030→                        <TableCell>
+  1031→                          <div>
+  1032→                            <p className="text-sm font-medium">{ticket.customerName}</p>
+  1033→                            <p className="text-[10px] text-muted-foreground">{ticket.customerEmail}</p>
+  1034→                          </div>
+  1035→                        </TableCell>
+  1036→                        <TableCell>
+  1037→                          <p className="text-xs font-medium">{ticket.eventTitle}</p>
+  1038→                        </TableCell>
+  1039→                        <TableCell>
+  1040→                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+  1041→                            {seatCodes.length <= 3
+  1042→                              ? seatCodes.map((code) => (
+  1043→                                  <Badge key={code} variant="secondary" className="text-[10px]">
+  1044→                                    {code}
+  1045→                                  </Badge>
+  1046→                                ))
+  1047→                              : (
+  1048→                                  <>
+  1049→                                    {seatCodes.slice(0, 3).map((code) => (
+  1050→                                      <Badge key={code} variant="secondary" className="text-[10px]">
+  1051→                                        {code}
+  1052→                                      </Badge>
+  1053→                                    ))}
+  1054→                                    <Badge variant="outline" className="text-[10px]">
+  1055→                                      +{seatCodes.length - 3}
+  1056→                                    </Badge>
+  1057→                                  </>
+  1058→                                )}
+  1059→                          </div>
+  1060→                        </TableCell>
+  1061→                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+  1062→                          {formatShortDate(ticket.createdAt)}
+  1063→                        </TableCell>
+  1064→                        <TableCell className="text-center">
+  1065→                          {ticket.emailSent ? (
+  1066→                            <Badge className="bg-emerald-100 text-emerald-700 text-[10px] border-emerald-200">
+  1067→                              <CheckCircle2 className="w-3 h-3 mr-1" />
+  1068→                              TERKIRIM
+  1069→                            </Badge>
+  1070→                          ) : (
+  1071→                            <Badge className="bg-red-100 text-red-700 text-[10px] border-red-200">
+  1072→                              <XCircle className="w-3 h-3 mr-1" />
+  1073→                              GAGAL
+  1074→                            </Badge>
+  1075→                          )}
+  1076→                        </TableCell>
+  1077→                        <TableCell className="text-center">
+  1078→                          <Button
+  1079→                            size="sm"
+  1080→                            variant="outline"
+  1081→                            className="h-7 text-[10px] gap-1"
+  1082→                            onClick={() => handleResendEmail(ticket.id, ticket.transactionId)}
+  1083→                            disabled={resendingId === ticket.id}
+  1084→                          >
+  1085→                            {resendingId === ticket.id ? (
+  1086→                              <Loader2 className="w-3 h-3 animate-spin" />
+  1087→                            ) : (
+  1088→                              <RotateCcw className="w-3 h-3" />
+  1089→                            )}
+  1090→                            Kirim Ulang
+  1091→                          </Button>
+  1092→                          {resendResult?.id === ticket.id && (
+  1093→                            <p className={`text-[10px] mt-1 ${resendResult.success ? 'text-emerald-600' : 'text-red-600'}`}>
+  1094→                              {resendResult.message}
+  1095→                            </p>
+  1096→                          )}
+  1097→                        </TableCell>
+  1098→                      </TableRow>
+  1099→                    )
+  1100→                  })}
+  1101→                </TableBody>
+  1102→              </Table>
+  1103→            </div>
+  1104→          )}
+  1105→        </CardContent>
+  1106→      </Card>
+  1107→    </div>
+  1108→  )
+  1109→}
+  1110→
