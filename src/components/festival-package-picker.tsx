@@ -93,16 +93,22 @@ export function FestivalPackagePicker({
   const selectedPkg = packages.find(p => p.id === selectedPkgId) || null
 
   // ─── AVAILABILITY ────────────────────────────────────────────────
-  // CONCEPT: Availability is PER-TICKET, not PER-SEAT.
-  //   - 1 tiket FULL Pass (4 days) = reserves 1 seat in EACH of the 4 days.
-  //   - 1 tiket MULTI (Day 2+3) = reserves 1 seat in Day 2 AND 1 seat in Day 3.
-  //   - 1 tiket SINGLE (Day 2) = reserves 1 seat in Day 2.
+  // CONCEPT: Each PriceCategory IS its own tiket pool.
+  //   - "Day 2 Tiket" category → has its own seats (all for Day 2).
+  //   - "Day 3 Tiket" category → has its own seats (all for Day 3).
+  //   - "FULL Pass" category   → has its own seats (its own pool).
   //
-  // So max tiket sellable = MIN of available seats across the package's applicable days.
-  // (The bottleneck day determines how many multi-day tickets can be sold.)
+  // So availability = count of AVAILABLE seats in this package's zone. Period.
+  // No per-day breakdown. No min-across-days. No sum across days.
   //
-  // We DO NOT sum seats across days — that would over-count.
-  // We DO NOT show per-day breakdown — availability is a single "tiket" number.
+  // `applicableDayIds` is ONLY metadata for:
+  //   - Display ("Berlaku untuk X hari")
+  //   - Check-in / scan logic (which days this ticket grants access to)
+  // It does NOT affect availability calculation.
+  //
+  // Each tiket is 1 unit. 1 tiket in "Day 2" category = 1 seat in Day 2 pool.
+  // 1 tiket in "FULL Pass" category = 1 seat in FULL Pass pool.
+  // The pools are independent — selling a Day 2 tiket does not reduce FULL Pass pool.
   const [availability, setAvailability] = useState<Record<string, number>>({})
   useEffect(() => {
     async function fetchAvailability() {
@@ -114,40 +120,11 @@ export function FestivalPackagePicker({
 
         const avail: Record<string, number> = {}
         for (const pkg of packages) {
-          // Resolve the package's effective applicable days.
-          // - If applicableDayIds is set → use it as-is.
-          // - If FULL with no applicableDayIds → expand to ALL show dates.
-          // - If SINGLE/MULTI with no applicableDayIds → fallback to first 1 / 2 days.
-          let effectiveDayIds = pkg.parsedDayIds.slice()
-          if (effectiveDayIds.length === 0) {
-            if (pkg.packageType === 'FULL') {
-              effectiveDayIds = showDates.map(sd => sd.id)
-            } else if (pkg.packageType === 'SINGLE' && showDates[0]) {
-              effectiveDayIds = [showDates[0].id]
-            } else if (pkg.packageType === 'MULTI' && showDates.length >= 2) {
-              effectiveDayIds = [showDates[0].id, showDates[1].id]
-            } else if (showDates[0]) {
-              // Fallback: assign to first day so we at least show something
-              effectiveDayIds = [showDates[0].id]
-            }
-          }
-
-          if (effectiveDayIds.length === 0) {
-            // Truly no show dates — show 0 rather than mislead with sum
-            avail[pkg.id] = 0
-            continue
-          }
-
-          // Count AVAILABLE seats in this zone, per applicable day.
-          // 1 tiket = 1 seat per day → max sellable = min across days.
-          const perDayCounts = effectiveDayIds.map(dayId =>
-            seats.filter(s =>
-              s.zoneName === pkg.name &&
-              s.status === 'AVAILABLE' &&
-              s.eventShowDateId === dayId
-            ).length
-          )
-          avail[pkg.id] = Math.min(...perDayCounts)
+          // Count AVAILABLE seats in this package's zone (zoneName === package name).
+          // That's it. The package IS the pool.
+          avail[pkg.id] = seats.filter(s =>
+            s.zoneName === pkg.name && s.status === 'AVAILABLE'
+          ).length
         }
         setAvailability(avail)
       } catch (err) {
@@ -155,7 +132,7 @@ export function FestivalPackagePicker({
       }
     }
     if (packages.length > 0) fetchAvailability()
-  }, [eventId, packages, showDates])
+  }, [eventId, packages])
 
   const packageIcon = (pkgType: string | null | undefined) => {
     if (pkgType === 'FULL') return Crown
