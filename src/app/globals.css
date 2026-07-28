@@ -225,3 +225,23 @@
 .stage-glow {
   box-shadow: 0 0 30px rgba(200, 169, 81, 0.15), 0 0 60px rgba(200, 169, 81, 0.05);
 }
+
+/* Thin scrollbar — for zone definition list, festival picker, etc. */
+.thin-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 169, 81, 0.3) transparent;
+}
+.thin-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(200, 169, 81, 0.3);
+  border-radius: 3px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(200, 169, 81, 0.5);
+}

@@ -106,15 +106,26 @@ export function FestivalPackagePicker({
         const avail: Record<string, number> = {}
         for (const pkg of packages) {
           // Match by zone name (= price category name in our auto-built GA config)
-          const matching = seats.filter((s: any) =>
-            s.zoneName === pkg.name &&
-            s.status === 'AVAILABLE' &&
-            pkg.parsedDayIds.includes(s.eventShowDateId)
-          )
+          // Two scenarios for day matching:
+          //  - parsedDayIds has entries → seat must belong to one of those days
+          //  - parsedDayIds is empty (FULL with no showDates, or REGULAR) → count all matching seats
+          const dayIds = pkg.parsedDayIds
+          const matching = seats.filter((s: any) => {
+            if (s.zoneName !== pkg.name) return false
+            if (s.status !== 'AVAILABLE') return false
+            // Day matching: if package has specific days, seat must match one
+            if (dayIds.length > 0) {
+              // Seat must have an eventShowDateId that's in dayIds
+              // If seat has null eventShowDateId (legacy/single-day), skip it
+              return s.eventShowDateId && dayIds.includes(s.eventShowDateId)
+            }
+            // No specific days → count all seats in this zone regardless of eventShowDateId
+            return true
+          })
           // Capacity per day = min available across applicable days
           // (each ticket covers all applicable days, so limit is the day with lowest availability)
-          if (pkg.parsedDayIds.length > 0) {
-            const perDayCounts = pkg.parsedDayIds.map(dayId =>
+          if (dayIds.length > 0) {
+            const perDayCounts = dayIds.map(dayId =>
               matching.filter((s: any) => s.eventShowDateId === dayId).length
             )
             avail[pkg.id] = Math.min(...perDayCounts)

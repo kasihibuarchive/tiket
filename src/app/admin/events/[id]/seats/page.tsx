@@ -562,7 +562,7 @@ function GaZoneManagementPanel({
 
           {/* Existing zones */}
           {gaZonesDef.length > 0 && (
-            <div className="space-y-2 mb-4 max-h-96 overflow-y-auto">
+            <div className="space-y-2 mb-4 max-h-96 overflow-y-auto pr-2 -mr-2 thin-scrollbar">
               {gaZonesDef.map((zone, idx) => (
                 <div
                   key={idx}

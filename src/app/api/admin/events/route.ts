@@ -61,7 +61,13 @@ export async function GET() {
 
         return {
           ...event,
-          priceCategories: eventPriceCats,
+          priceCategories: eventPriceCats.map(pc => ({
+            ...pc,
+            // Parse applicableDayIds from JSON string to array for frontend
+            applicableDayIds: pc.applicableDayIds
+              ? (() => { try { return JSON.parse(pc.applicableDayIds) } catch { return null } })()
+              : null,
+          })),
           showDates: eventShowDates,
           seatSummary: {
             total: totalSeats,
