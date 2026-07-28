@@ -96,6 +96,7 @@ function GaZoneManagementPanel({
   fileInputRef,
   existingZoneSummary,
   existingSeatsCount,
+  showDates,
   onRefresh,
 }: {
   eventId: string
