@@ -11,10 +11,11 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
+import { parseMapEmbedUrl, buildMapExternalLink } from '@/lib/map-utils'
 import { toDatetimeLocalValue, formatEventDate, formatEventTime } from '@/lib/date'
 import {
   Loader2, Save, ArrowLeft, Users, Star, Plus, Trash2, Edit, X, Check, MessageSquareQuote,
-  Link2, Copy, ExternalLink, MousePointerClick, Clock,
+  Link2, Copy, ExternalLink, MousePointerClick, Clock, MapPin, Search,
 } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -176,6 +177,7 @@ interface EventData {
   showDate: string
   openGate: string | null
   location: string
+  mapUrl: string | null
   posterUrl: string | null
   synopsis: string
   teaserVideoUrl: string | null
@@ -455,6 +457,7 @@ export default function AdminEventEditPage() {
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('Teater')
   const [location, setLocation] = useState('')
+  const [mapUrl, setMapUrl] = useState('')
   const [posterUrl, setPosterUrl] = useState('')
   const [teaserVideoUrl, setTeaserVideoUrl] = useState('')
   const [synopsis, setSynopsis] = useState('')
@@ -498,6 +501,7 @@ export default function AdminEventEditPage() {
         setTitle(ev.title)
         setCategory(ev.category)
         setLocation(ev.location)
+        setMapUrl(ev.mapUrl || '')
         setPosterUrl(ev.posterUrl || '')
         setTeaserVideoUrl(ev.teaserVideoUrl || '')
         setSynopsis(ev.synopsis || '')
@@ -571,6 +575,7 @@ export default function AdminEventEditPage() {
           title,
           category,
           location,
+          mapUrl: mapUrl.trim() || null,
           posterUrl: posterUrl || null,
           teaserVideoUrl: teaserVideoUrl || null,
           synopsis,
@@ -757,13 +762,107 @@ export default function AdminEventEditPage() {
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-sm font-medium">Lokasi</Label>
-            <Input
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-              placeholder="Teateran, Yogyakarta"
-            />
+          <div className="space-y-3 rounded-lg border border-border/60 bg-muted/20 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm font-medium flex items-center gap-1.5">
+                <MapPin className="w-4 h-4 text-gold" />
+                Lokasi &amp; Google Maps
+              </Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  const q = location.trim() || mapUrl.trim()
+                  if (!q) {
+                    alert('Isi nama lokasi dulu sebelum cari di Google Maps.')
+                    return
+                  }
+                  window.open(
+                    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`,
+                    '_blank',
+                    'noopener,noreferrer'
+                  )
+                }}
+              >
+                <Search className="w-3.5 h-3.5" />
+                Cari di Google Maps
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">Nama lokasi (tampil di guest view)</Label>
+              <Input
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="Teateran, Yogyakarta"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">
+                URL Google Maps (opsional) — tempel share link, koordinat, atau URL place
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  value={mapUrl}
+                  onChange={(e) => setMapUrl(e.target.value)}
+                  placeholder="https://maps.app.goo.gl/… atau -6.2088,106.8456 atau https://www.google.com/maps/place/…"
+                  className="font-mono text-xs"
+                />
+                {mapUrl && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-9 px-2 text-xs shrink-0"
+                    onClick={() => setMapUrl('')}
+                    title="Hapus URL"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </Button>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground/80 leading-snug">
+                Tip: buka Google Maps → cari tempat → klik <span className="font-medium">Share</span> → copy link →
+                paste ke sini. Kalau dikosongkan, peta akan otomatis cari pakai nama lokasi di atas.
+              </p>
+            </div>
+
+            {/* Live embed preview */}
+            {(() => {
+              const embedUrl = parseMapEmbedUrl(mapUrl, location)
+              const externalLink = buildMapExternalLink(mapUrl, location)
+              if (!embedUrl) return null
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-muted-foreground">Preview peta (tampil di guest view)</span>
+                    {externalLink && (
+                      <a
+                        href={externalLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-gold hover:underline inline-flex items-center gap-1"
+                      >
+                        Buka di Maps <ExternalLink className="w-3 h-3" />
+                      </a>
+                    )}
+                  </div>
+                  <div className="rounded-md overflow-hidden border border-border/60 bg-white">
+                    <iframe
+                      key={embedUrl}
+                      src={embedUrl}
+                      className="w-full h-[260px] block"
+                      loading="lazy"
+                      referrerPolicy="no-referrer-when-downgrade"
+                      title="Preview lokasi"
+                    />
+                  </div>
+                </div>
+              )
+            })()}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

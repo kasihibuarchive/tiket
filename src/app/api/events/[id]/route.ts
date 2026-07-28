@@ -23,6 +23,7 @@ export async function GET(
           showDate: true,
           openGate: true,
           location: true,
+          mapUrl: true,
           posterUrl: true,
           teaserVideoUrl: true,
           synopsis: true,

@@ -91,6 +91,7 @@ model Event {
   castData        String?   // JSON: [{name, role, imageUrl}] — Cast & Crew
   reviewsData     String?   // JSON: [{authorName, rating: 1-5, comment, createdAt}] — Legacy admin reviews (kept for backward compat)
   isCompleted     Boolean   @default(false) // Event performance has ended — guests can review but can't buy tickets
+  mapUrl          String?  // Google Maps URL (share/embed/place) — parsed to embed URL for guest view
 
   // Visibility settings — control what public sees
   hideSeatAvailability Boolean @default(false) // Hide seat availability bar (progress bar + "X/Y tersedia")

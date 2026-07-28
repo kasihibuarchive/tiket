@@ -12,6 +12,7 @@ import { OptimizedImage } from '@/components/optimized-image'
 import { Badge } from '@/components/ui/badge'
 import { formatEventDate, formatEventTime } from '@/lib/date'
 import { cn } from '@/lib/utils'
+import { parseMapEmbedUrl, buildMapExternalLink } from '@/lib/map-utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -31,6 +32,7 @@ interface EventData {
   showDate: string
   openGate: string | null
   location: string
+  mapUrl: string | null
   posterUrl: string | null
   teaserVideoUrl: string | null
   synopsis: string
@@ -540,8 +542,40 @@ export default function EventDetailPage() {
                   <div className="flex items-center gap-2 text-sm text-white/60">
                     <MapPin className="w-4 h-4 text-gold" />
                     <span>{event.location}</span>
+                    {(() => {
+                      const externalLink = buildMapExternalLink(event.mapUrl, event.location)
+                      if (!externalLink) return null
+                      return (
+                        <a
+                          href={externalLink}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="ml-1 text-[11px] text-gold hover:underline inline-flex items-center gap-0.5"
+                        >
+                          Lihat di Maps
+                        </a>
+                      )
+                    })()}
                   </div>
                 </div>
+
+                {/* Google Maps embed — shown if mapUrl or location is available */}
+                {(() => {
+                  const embedUrl = parseMapEmbedUrl(event.mapUrl, event.location)
+                  if (!embedUrl) return null
+                  return (
+                    <div className="mb-6 rounded-lg overflow-hidden border border-white/10 bg-white/5">
+                      <iframe
+                        key={embedUrl}
+                        src={embedUrl}
+                        className="w-full h-[260px] sm:h-[300px] block"
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                        title={`Peta lokasi ${event.location}`}
+                      />
+                    </div>
+                  )
+                })()}
 
                 {/* Multi-day show dates tabs */}
                 {showDates.length > 1 && (
