@@ -1,0 +1,895 @@
+     1→     1→'use client'
+     2→     2→
+     3→     3→import { useState, useEffect, useCallback, useMemo } from 'react'
+     4→     4→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     5→     5→import { Button } from '@/components/ui/button'
+     6→     6→import { Input } from '@/components/ui/input'
+     7→     7→import { Label } from '@/components/ui/label'
+     8→     8→import { Badge } from '@/components/ui/badge'
+     9→     9→import { Separator } from '@/components/ui/separator'
+    10→    10→import {
+    11→    11→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    12→    12→} from '@/components/ui/table'
+    13→    13→import {
+    14→    14→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    15→    15→} from '@/components/ui/select'
+    16→    16→import {
+    17→    17→  Send, Loader2, Ticket, Users, X, MapPin, Clock, Mail,
+    18→    18→  AlertCircle, CheckCircle2, Calendar, Zap, Image,
+    19→    19→} from 'lucide-react'
+    20→    20→import { cn } from '@/lib/utils'
+    21→    21→import { formatShortDate, formatEventDateTime } from '@/lib/date'
+    22→    22→import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+    23→    23→import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
+    24→    24→
+    25→    25→// ─── Types ────────────────────────────────────────────────────────────────────
+    26→    26→
+    27→    27→interface EventOption {
+    28→    28→  id: string
+    29→    29→  title: string
+    30→    30→  category: string
+    31→    31→  showDate: string
+    32→    32→  location: string
+    33→    33→  seatSummary?: { total: number; available: number; sold: number }
+    34→    34→  seatMapId: string | null
+    35→    35→}
+    36→    36→
+    37→    37→interface SeatData {
+    38→    38→  id: string
+    39→    39→  seatCode: string
+    40→    40→  status: string
+    41→    41→  row: string
+    42→    42→  col: number
+    43→    43→  lockedUntil: string | null
+    44→    44→  zoneName: string | null
+    45→    45→  priceCategory: { id: string; name: string; price: number; colorCode: string } | null
+    46→    46→}
+    47→    47→
+    48→    48→interface ComplimentaryTicket {
+    49→    49→  id: string
+    50→    50→  transactionId: string
+    51→    51→  customerName: string
+    52→    52→  customerEmail: string
+    53→    53→  customerWa: string
+    54→    54→  seatCodes: string
+    55→    55→  eventTitle: string
+    56→    56→  createdAt: string
+    57→    57→  emailSent?: boolean
+    58→    58→}
+    59→    59→
+    60→    60→interface SeatMapInfo {
+    61→    61→  id: string
+    62→    62→  name: string
+    63→    63→  seatType: string
+    64→    64→}
+    65→    65→
+    66→    66→// ─── Steps ───────────────────────────────────────────────────────────────────
+    67→    67→
+    68→    68→const STEPS = ['Pilih Event', 'Detail Tamu', 'Pilih Kursi'] as const
+    69→    69→
+    70→    70→// ─── Main Component ───────────────────────────────────────────────────────────
+    71→    71→
+    72→    72→export default function OTSTicketPage() {
+    73→    73→  // Step tracking
+    74→    74→  const [currentStep, setCurrentStep] = useState(0)
+    75→    75→
+    76→    76→  // Events
+    77→    77→  const [events, setEvents] = useState<EventOption[]>([])
+    78→    78→  const [isLoadingEvents, setIsLoadingEvents] = useState(true)
+    79→    79→
+    80→    80→  // Show dates
+    81→    81→  const [showDates, setShowDates] = useState<any[]>([])
+    82→    82→  const [selectedShowDateId, setSelectedShowDateId] = useState<string>('')
+    83→    83→
+    84→    84→  // Seats
+    85→    85→  const [seats, setSeats] = useState<SeatData[]>([])
+    86→    86→  const [isLoadingSeats, setIsLoadingSeats] = useState(false)
+    87→    87→  const [selectedSeats, setSelectedSeats] = useState<string[]>([])
+    88→    88→  const [seatMapInfo, setSeatMapInfo] = useState<SeatMapInfo | null>(null)
+    89→    89→  const [layoutData, setLayoutData] = useState<any>(null)
+    90→    90→  const [eventSeatType, setEventSeatType] = useState<string | null>(null)
+    91→    91→  const [eventLayoutImage, setEventLayoutImage] = useState<string | null>(null)
+    92→    92→  const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
+    93→    93→
+    94→    94→  // Form
+    95→    95→  const [selectedEventId, setSelectedEventId] = useState<string>('')
+    96→    96→  const [guestName, setGuestName] = useState('')
+    97→    97→
+    98→    98→  // Submit
+    99→    99→  const [isSubmitting, setIsSubmitting] = useState(false)
+   100→   100→  const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null)
+   101→   101→
+   102→   102→  // Recent tickets
+   103→   103→  const [recentTickets, setRecentTickets] = useState<ComplimentaryTicket[]>([])
+   104→   104→  const [isLoadingRecent, setIsLoadingRecent] = useState(true)
+   105→   105→
+   106→   106→  // GA (General Admission)
+   107→   107→  const [selectedGaZone, setSelectedGaZone] = useState<string>('')
+   108→   108→  const [gaQuantity, setGaQuantity] = useState<number>(1)
+   109→   109→
+   110→   110→  // Admin info
+   111→   111→  const [adminInfo, setAdminInfo] = useState<{ id: string; name: string; role: string } | null>(null)
+   112→   112→
+   113→   113→  // ─── Derived ──────────────────────────────────────────────────────────
+   114→   114→
+   115→   115→  const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId) || null, [events, selectedEventId])
+   116→   116→  const isNumberedSeatMap = eventSeatType === 'NUMBERED' || seatMapInfo?.seatType === 'NUMBERED'
+   117→   117→  const useCanvasMode = !!(parsedLayout?.canvasSeats && parsedLayout.canvasSeats.length > 0)
+   118→   118→  const availableSeatsCount = useMemo(() => seats.filter((s) => s.status === 'AVAILABLE').length, [seats])
+   119→   119→
+   120→   120→  const seatLookup = useMemo(() => {
+   121→   121→    const map = new Map<string, SeatData>()
+   122→   122→    for (const seat of seats) map.set(seat.seatCode, seat)
+   123→   123→    return map
+   124→   124→  }, [seats])
+   125→   125→
+   126→   126→  const seatsByRow = useMemo(() => {
+   127→   127→    const groups: Record<string, SeatData[]> = {}
+   128→   128→    for (const seat of seats) {
+   129→   129→      if (!groups[seat.row]) groups[seat.row] = []
+   130→   130→      groups[seat.row].push(seat)
+   131→   131→    }
+   132→   132→    for (const row of Object.keys(groups)) groups[row].sort((a, b) => a.col - b.col)
+   133→   133→    return groups
+   134→   134→  }, [seats])
+   135→   135→
+   136→   136→  const sortedRowKeys = useMemo(() => Object.keys(seatsByRow).sort(), [seatsByRow])
+   137→   137→
+   138→   138→  // GA zone groups: group AVAILABLE seats by zoneName
+   139→   139→  const zoneGroups = useMemo(() => {
+   140→   140→    const groups: Record<string, { seats: SeatData[]; priceCategory: SeatData['priceCategory'] }> = {}
+   141→   141→    for (const seat of seats) {
+   142→   142→      if (seat.status !== 'AVAILABLE') continue
+   143→   143→      const zone = seat.zoneName || 'General'
+   144→   144→      if (!groups[zone]) groups[zone] = { seats: [], priceCategory: seat.priceCategory }
+   145→   145→      groups[zone].seats.push(seat)
+   146→   146→    }
+   147→   147→    return groups
+   148→   148→  }, [seats])
+   149→   149→
+   150→   150→  const zoneGroupKeys = useMemo(() => Object.keys(zoneGroups).sort(), [zoneGroups])
+   151→   151→
+   152→   152→  // GA selected zone available count
+   153→   153→  const selectedGaZoneInfo = useMemo(() => {
+   154→   154→    if (!selectedGaZone || !zoneGroups[selectedGaZone]) return null
+   155→   155→    return zoneGroups[selectedGaZone]
+   156→   156→  }, [selectedGaZone, zoneGroups])
+   157→   157→
+   158→   158→  // ─── Init ─────────────────────────────────────────────────────────────
+   159→   159→
+   160→   160→  useEffect(() => {
+   161→   161→    try {
+   162→   162→      const stored = localStorage.getItem('teateran_admin')
+   163→   163→      if (stored) setAdminInfo(JSON.parse(stored))
+   164→   164→    } catch {}
+   165→   165→  }, [])
+   166→   166→
+   167→   167→  // ─── Fetch events ─────────────────────────────────────────────────────
+   168→   168→
+   169→   169→  useEffect(() => {
+   170→   170→    async function fetchEvents() {
+   171→   171→      try {
+   172→   172→        const res = await fetch('/api/admin/events')
+   173→   173→        if (res.ok) {
+   174→   174→          const data = await res.json()
+   175→   175→          setEvents(data.events || [])
+   176→   176→        }
+   177→   177→      } catch {}
+   178→   178→      finally { setIsLoadingEvents(false) }
+   179→   179→    }
+   180→   180→    fetchEvents()
+   181→   181→  }, [])
+   182→   182→
+   183→   183→  // ─── Fetch recent tickets ─────────────────────────────────────────────
+   184→   184→
+   185→   185→  useEffect(() => {
+   186→   186→    async function fetchRecent() {
+   187→   187→      try {
+   188→   188→        const res = await fetch('/api/admin/tickets/complimentary')
+   189→   189→        if (res.ok) {
+   190→   190→          const data = await res.json()
+   191→   191→          setRecentTickets(data.tickets || [])
+   192→   192→        }
+   193→   193→      } catch {}
+   194→   194→      finally { setIsLoadingRecent(false) }
+   195→   195→    }
+   196→   196→    fetchRecent()
+   197→   197→  }, [])
+   198→   198→
+   199→   199→  // ─── Fetch seats when event selected ──────────────────────────────────
+   200→   200→
+   201→   201→  const fetchSeatsForEvent = useCallback(async (eventId: string, showDateFilter?: string) => {
+   202→   202→    setIsLoadingSeats(true)
+   203→   203→    setSelectedSeats([])
+   204→   204→    setSeatMapInfo(null)
+   205→   205→    setLayoutData(null)
+   206→   206→    setEventSeatType(null)
+   207→   207→    setEventLayoutImage(null)
+   208→   208→
+   209→   209→    try {
+   210→   210→      const seatsUrl = `/api/events/${eventId}/seats?admin=1${showDateFilter ? `&showDateId=${showDateFilter}` : ''}`
+   211→   211→      const seatsRes = await fetch(seatsUrl)
+   212→   212→      if (seatsRes.ok) {
+   213→   213→        const data = await seatsRes.json()
+   214→   214→        setSeats(data.seats || [])
+   215→   215→      }
+   216→   216→
+   217→   217→      const eventRes = await fetch(`/api/events/${eventId}?admin=1`)
+   218→   218→      if (eventRes.ok) {
+   219→   219→        const eventData = await eventRes.json()
+   220→   220→        setEventSeatType(eventData.seatType || null)
+   221→   221→        setEventLayoutImage(eventData.layoutImage || null)
+   222→   222→        if (eventData.seatMapId) {
+   223→   223→          const mapRes = await fetch('/api/admin/seat-maps')
+   224→   224→          if (mapRes.ok) {
+   225→   225→            const mapsData = await mapRes.json()
+   226→   226→            const map = (mapsData.seatMaps || []).find((m: any) => m.id === eventData.seatMapId)
+   227→   227→            if (map) {
+   228→   228→              setSeatMapInfo({ id: map.id, name: map.name, seatType: map.seatType })
+   229→   229→              setLayoutData(map.layoutData || null)
+   230→   230→            }
+   231→   231→          }
+   232→   232→        }
+   233→   233→        if (eventData.showDates?.length > 0) {
+   234→   234→          setShowDates(eventData.showDates)
+   235→   235→          if (!showDateFilter) setSelectedShowDateId(eventData.showDates[0].id)
+   236→   236→        } else {
+   237→   237→          setShowDates([])
+   238→   238→          setSelectedShowDateId('')
+   239→   239→        }
+   240→   240→      }
+   241→   241→    } catch {}
+   242→   242→    finally { setIsLoadingSeats(false) }
+   243→   243→  }, [])
+   244→   244→
+   245→   245→  useEffect(() => {
+   246→   246→    if (selectedEventId) fetchSeatsForEvent(selectedEventId)
+   247→   247→    else { setSeats([]); setSelectedSeats([]); setSeatMapInfo(null); setShowDates([]) }
+   248→   248→  }, [selectedEventId, fetchSeatsForEvent])
+   249→   249→
+   250→   250→  useEffect(() => {
+   251→   251→    if (selectedEventId && selectedShowDateId) fetchSeatsForEvent(selectedEventId, selectedShowDateId)
+   252→   252→  }, [selectedShowDateId])
+   253→   253→
+   254→   254→  // ─── Seat actions ────────────────────────────────────────────────────
+   255→   255→
+   256→   256→  function toggleSeat(seatCode: string) {
+   257→   257→    setSelectedSeats((prev) => prev.includes(seatCode) ? prev.filter((s) => s !== seatCode) : [...prev, seatCode])
+   258→   258→  }
+   259→   259→
+   260→   260→  function removeSeat(seatCode: string) {
+   261→   261→    setSelectedSeats((prev) => prev.filter((s) => s !== seatCode))
+   262→   262→  }
+   263→   263→
+   264→   264→  function addGaTickets() {
+   265→   265→    if (!selectedGaZone || !selectedGaZoneInfo || gaQuantity < 1) return
+   266→   266→    const available = selectedGaZoneInfo.seats
+   267→   267→    const qty = Math.min(gaQuantity, available.length)
+   268→   268→
+   269→   269→    // Find existing seat codes for this zone that are already selected
+   270→   270→    const existingInZone = selectedSeats.filter((s) => s.startsWith(`${selectedGaZone}-`))
+   271→   271→    const existingNumbers = existingInZone.map((s) => {
+   272→   272→      const parts = s.split('-')
+   273→   273→      return parseInt(parts[parts.length - 1], 10) || 0
+   274→   274→    })
+   275→   275→    const maxExisting = existingNumbers.length > 0 ? Math.max(...existingNumbers) : 0
+   276→   276→
+   277→   277→    // Also check existing seat codes in the available seats for this zone to avoid duplicates
+   278→   278→    const allExistingCodes = new Set(seats.map((s) => s.seatCode))
+   279→   279→    const nextStart = Math.max(maxExisting, ...Array.from(allExistingCodes)
+   280→   280→      .filter((c) => c.startsWith(`${selectedGaZone}-`))
+   281→   281→      .map((c) => parseInt(c.split('-').pop() || '0', 10) || 0)) + 1
+   282→   282→
+   283→   283→    const newCodes: string[] = []
+   284→   284→    for (let i = 0; i < qty; i++) {
+   285→   285→      newCodes.push(`${selectedGaZone}-${nextStart + i}`)
+   286→   286→    }
+   287→   287→
+   288→   288→    setSelectedSeats((prev) => [...prev, ...newCodes])
+   289→   289→    setGaQuantity(1)
+   290→   290→  }
+   291→   291→
+   292→   292→  function removeGaTicketsForZone(zoneName: string) {
+   293→   293→    setSelectedSeats((prev) => prev.filter((s) => !s.startsWith(`${zoneName}-`)))
+   294→   294→  }
+   295→   295→
+   296→   296→  function getSeatColorClass(seat: SeatData): string {
+   297→   297→    if (seat.status !== 'AVAILABLE') return 'bg-gray-300 text-gray-500 cursor-not-allowed'
+   298→   298→    if (selectedSeats.includes(seat.seatCode)) return 'bg-gold text-white cursor-pointer hover:bg-gold-dark shadow-sm ring-2 ring-gold/50'
+   299→   299→    return 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+   300→   300→  }
+   301→   301→
+   302→   302→  // ─── Step navigation ──────────────────────────────────────────────────
+   303→   303→
+   304→   304→  function goToStep(step: number) {
+   305→   305→    setCurrentStep(step)
+   306→   306→    setSubmitResult(null)
+   307→   307→  }
+   308→   308→
+   309→   309→  // ─── Submit ──────────────────────────────────────────────────────────
+   310→   310→
+   311→   311→  async function handleSubmit() {
+   312→   312→    if (!selectedEventId || !guestName) {
+   313→   313→      setSubmitResult({ success: false, message: 'Harap masukkan nama tamu.' })
+   314→   314→      return
+   315→   315→    }
+   316→   316→    if (selectedSeats.length === 0) {
+   317→   317→      setSubmitResult({ success: false, message: 'Harap pilih minimal 1 kursi.' })
+   318→   318→      return
+   319→   319→    }
+   320→   320→
+   321→   321→    setIsSubmitting(true)
+   322→   322→    setSubmitResult(null)
+   323→   323→
+   324→   324→    try {
+   325→   325→      const res = await fetch('/api/admin/tickets/complimentary', {
+   326→   326→        method: 'POST',
+   327→   327→        headers: {
+   328→   328→          'Content-Type': 'application/json',
+   329→   329→          ...(adminInfo ? { 'x-admin-id': adminInfo.id, 'x-admin-name': adminInfo.name || adminInfo.role } : {}),
+   330→   330→        },
+   331→   331→        body: JSON.stringify({
+   332→   332→          eventId: selectedEventId,
+   333→   333→          seatCodes: selectedSeats,
+   334→   334→          guestName,
+   335→   335→          guestEmail: '',
+   336→   336→          guestPhone: '',
+   337→   337→          showDateId: selectedShowDateId || undefined,
+   338→   338→        }),
+   339→   339→      })
+   340→   340→
+   341→   341→      const data = await res.json()
+   342→   342→
+   343→   343→      if (res.ok) {
+   344→   344→        setSubmitResult({ success: true, message: `Tiket OTS berhasil dibuat! TRX: ${data.transactionId}` })
+   345→   345→        // Reset everything
+   346→   346→        setGuestName('')
+   347→   347→        setSelectedSeats([])
+   348→   348→        setCurrentStep(0)
+   349→   349→        setSelectedEventId('')
+   350→   350→        // Refresh history
+   351→   351→        const recentRes = await fetch('/api/admin/tickets/complimentary')
+   352→   352→        if (recentRes.ok) {
+   353→   353→          const recentData = await recentRes.json()
+   354→   354→          setRecentTickets(recentData.tickets || [])
+   355→   355→        }
+   356→   356→      } else {
+   357→   357→        setSubmitResult({ success: false, message: data.error || 'Gagal mengirim tiket.' })
+   358→   358→      }
+   359→   359→    } catch {
+   360→   360→      setSubmitResult({ success: false, message: 'Terjadi kesalahan jaringan.' })
+   361→   361→    } finally {
+   362→   362→      setIsSubmitting(false)
+   363→   363→    }
+   364→   364→  }
+   365→   365→
+   366→   366→  function parseSeatCodes(codes: string): string[] {
+   367→   367→    if (!codes) return []
+   368→   368→    try { return JSON.parse(codes) } catch { return codes.split(',').map((s) => s.trim()).filter(Boolean) }
+   369→   369→  }
+   370→   370→
+   371→   371→  // ─── Render ──────────────────────────────────────────────────────────
+   372→   372→
+   373→   373→  return (
+   374→   374→    <div className="space-y-6">
+   375→   375→      {/* Header */}
+   376→   376→      <div className="flex items-center gap-3">
+   377→   377→        <div className="w-10 h-10 rounded-lg bg-gold/10 flex items-center justify-center">
+   378→   378→          <Zap className="w-5 h-5 text-gold" />
+   379→   379→        </div>
+   380→   380→        <div>
+   381→   381→          <h1 className="font-serif text-2xl font-bold text-charcoal">OTS Ticket</h1>
+   382→   382→          <p className="text-sm text-muted-foreground mt-0.5">On The Spot — buat tiket langsung di lokasi, cukup nama pembeli</p>
+   383→   383→        </div>
+   384→   384→      </div>
+   385→   385→
+   386→   386→      {/* Result banner */}
+   387→   387→      {submitResult && (
+   388→   388→        <div className={cn(
+   389→   389→          'flex items-start gap-3 p-4 rounded-lg text-sm',
+   390→   390→          submitResult.success ? 'bg-emerald-50 border border-emerald-200 text-emerald-800' : 'bg-red-50 border border-red-200 text-red-800',
+   391→   391→        )}>
+   392→   392→          {submitResult.success ? <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" /> : <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />}
+   393→   393→          <p>{submitResult.message}</p>
+   394→   394→          <button onClick={() => setSubmitResult(null)} className="ml-auto flex-shrink-0 hover:opacity-70"><X className="w-4 h-4" /></button>
+   395→   395→        </div>
+   396→   396→      )}
+   397→   397→
+   398→   398→      {/* Main form card */}
+   399→   399→      <Card className="border-border/50">
+   400→   400→        <CardHeader className="pb-4">
+   401→   401→          <CardTitle className="font-serif text-lg text-charcoal">Buat Tiket OTS</CardTitle>
+   402→   402→        </CardHeader>
+   403→   403→        <CardContent className="space-y-6">
+   404→   404→          {/* Step indicator */}
+   405→   405→          <div className="flex items-center gap-2">
+   406→   406→            {STEPS.map((step, idx) => (
+   407→   407→              <button
+   408→   408→                key={step}
+   409→   409→                onClick={() => idx < currentStep ? goToStep(idx) : undefined}
+   410→   410→                disabled={idx > currentStep}
+   411→   411→                className={cn(
+   412→   412→                  'flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-all',
+   413→   413→                  idx === currentStep
+   414→   414→                    ? 'bg-gold text-white'
+   415→   415→                    : idx < currentStep
+   416→   416→                      ? 'bg-gold/20 text-gold cursor-pointer hover:bg-gold/30'
+   417→   417→                      : 'bg-muted text-muted-foreground',
+   418→   418→                )}
+   419→   419→              >
+   420→   420→                <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px] font-bold">
+   421→   421→                  {idx < currentStep ? '✓' : idx + 1}
+   422→   422→                </span>
+   423→   423→                {step}
+   424→   424→              </button>
+   425→   425→            ))}
+   426→   426→          </div>
+   427→   427→
+   428→   428→          <Separator />
+   429→   429→
+   430→   430→          {/* Step 0: Pilih Event */}
+   431→   431→          {currentStep === 0 && (
+   432→   432→            <div className="space-y-4 py-2">
+   433→   433→              <Label className="text-sm font-medium">Pilih Event</Label>
+   434→   434→              {isLoadingEvents ? (
+   435→   435→                <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+   436→   436→                  <Loader2 className="w-4 h-4 animate-spin text-gold" /> Memuat event...
+   437→   437→                </div>
+   438→   438→              ) : events.length === 0 ? (
+   439→   439→                <p className="text-sm text-muted-foreground py-4 text-center">Tidak ada event aktif.</p>
+   440→   440→              ) : (
+   441→   441→                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   442→   442→                  {events.map((event) => (
+   443→   443→                    <button
+   444→   444→                      key={event.id}
+   445→   445→                      onClick={() => { setSelectedEventId(event.id); goToStep(1) }}
+   446→   446→                      className={cn(
+   447→   447→                        'text-left p-4 rounded-xl border-2 transition-all',
+   448→   448→                        selectedEventId === event.id
+   449→   449→                          ? 'border-gold bg-gold/5'
+   450→   450→                          : 'border-border/50 bg-white hover:border-gold/30 hover:shadow-sm',
+   451→   451→                      )}
+   452→   452→                    >
+   453→   453→                      <p className="font-medium text-charcoal text-sm">{event.title}</p>
+   454→   454→                      <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-muted-foreground">
+   455→   455→                        <Badge variant="secondary" className="text-[10px]">{event.category}</Badge>
+   456→   456→                        <span className="flex items-center gap-0.5"><Clock className="w-3 h-3" />{formatShortDate(event.showDate)}</span>
+   457→   457→                        <span className="flex items-center gap-0.5"><MapPin className="w-3 h-3" />{event.location}</span>
+   458→   458→                      </div>
+   459→   459→                      {event.seatSummary && (
+   460→   460→                        <p className="text-[10px] text-muted-foreground mt-2">
+   461→   461→                          <Ticket className="w-3 h-3 inline mr-0.5" />
+   462→   462→                          {event.seatSummary.available} kursi tersedia
+   463→   463→                        </p>
+   464→   464→                      )}
+   465→   465→                    </button>
+   466→   466→                  ))}
+   467→   467→                </div>
+   468→   468→              )}
+   469→   469→            </div>
+   470→   470→          )}
+   471→   471→
+   472→   472→          {/* Step 1: Detail Tamu */}
+   473→   473→          {currentStep === 1 && (
+   474→   474→            <div className="space-y-5 py-2">
+   475→   475→              <div className="space-y-3">
+   476→   476→                <Label className="text-sm font-medium flex items-center gap-2"><Users className="w-4 h-4 text-gold" />Informasi Tamu</Label>
+   477→   477→                <div className="space-y-1.5 max-w-md">
+   478→   478→                  <Label className="text-xs text-muted-foreground">Nama <span className="text-danger">*</span></Label>
+   479→   479→                  <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Nama pembeli" className="bg-white" autoFocus />
+   480→   480→                </div>
+   481→   481→              </div>
+   482→   482→
+   483→   483→              {selectedEvent && (
+   484→   484→                <div className="bg-muted/20 rounded-lg p-3 text-xs text-muted-foreground">
+   485→   485→                  <span className="font-medium text-charcoal">Event: </span>{selectedEvent.title}
+   486→   486→                  <span className="mx-2">·</span>
+   487→   487→                  {formatEventDateTime(selectedEvent.showDate)}
+   488→   488→                  <span className="mx-2">·</span>
+   489→   489→                  {selectedEvent.location}
+   490→   490→                </div>
+   491→   491→              )}
+   492→   492→
+   493→   493→              <div className="flex items-center gap-3 justify-between">
+   494→   494→                <Button variant="outline" onClick={() => goToStep(0)}>Kembali</Button>
+   495→   495→                <Button
+   496→   496→                  disabled={!guestName}
+   497→   497→                  onClick={() => { fetchSeatsForEvent(selectedEventId, selectedShowDateId || undefined); goToStep(2) }}
+   498→   498→                  className="bg-charcoal hover:bg-charcoal/90 text-gold"
+   499→   499→                >
+   500→   500→                  Pilih Kursi
+   501→   501→                </Button>
+   502→   502→              </div>
+   503→   503→            </div>
+   504→   504→          )}
+   505→   505→
+   506→   506→          {/* Step 2: Pilih Kursi */}
+   507→   507→          {currentStep === 2 && (
+   508→   508→            <div className="space-y-4 py-2">
+   509→   509→              {/* Show date tabs */}
+   510→   510→              {showDates.length > 1 && (
+   511→   511→                <div className="flex items-center gap-2 flex-wrap">
+   512→   512→                  <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+   513→   513→                  {showDates.map((sd: any, idx: number) => (
+   514→   514→                    <button
+   515→   515→                      key={sd.id}
+   516→   516→                      onClick={() => setSelectedShowDateId(sd.id)}
+   517→   517→                      className={cn(
+   518→   518→                        'px-3 py-1 rounded-full text-xs font-medium transition-all border',
+   519→   519→                        selectedShowDateId === sd.id
+   520→   520→                          ? 'bg-gold text-white border-gold'
+   521→   521→                          : 'bg-white text-muted-foreground border-border hover:border-gold/50',
+   522→   522→                      )}
+   523→   523→                    >
+   524→   524→                      {sd.label || `Hari ${idx + 1}`} ({new Date(sd.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })})
+   525→   525→                    </button>
+   526→   526→                  ))}
+   527→   527→                </div>
+   528→   528→              )}
+   529→   529→
+   530→   530→              {isLoadingSeats ? (
+   531→   531→                <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+   532→   532→                  <Loader2 className="w-5 h-5 animate-spin text-gold" /> Memuat kursi...
+   533→   533→                </div>
+   534→   534→              ) : isNumberedSeatMap ? (
+   535→   535→                /* ─── Numbered Seat Map ─── */
+   536→   536→                <div className="space-y-4">
+   537→   537→                  <div className="flex items-center justify-between">
+   538→   538→                    <p className="text-xs text-muted-foreground">
+   539→   539→                      Tersedia: <span className="font-semibold text-charcoal">{availableSeatsCount}</span>
+   540→   540→                    </p>
+   541→   541→                    {selectedSeats.length > 0 && (
+   542→   542→                      <Badge className="bg-gold text-white text-xs">{selectedSeats.length} dipilih</Badge>
+   543→   543→                    )}
+   544→   544→                  </div>
+   545→   545→
+   546→   546→                  <div className="bg-muted/20 rounded-xl p-4 overflow-x-auto">
+   547→   547→                    {useCanvasMode && parsedLayout ? (
+   548→   548→                      <div className="flex justify-center">
+   549→   549→                        <CanvasSeatLayout
+   550→   550→                          parsedLayout={parsedLayout}
+   551→   551→                          seatLookup={seatLookup as Map<string, any>}
+   552→   552→                          renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+   553→   553→                            const isAvailable = seatData.status === 'AVAILABLE'
+   554→   554→                            const isSelected = selectedSeats.includes(canvasSeat.seatCode)
+   555→   555→                            return (
+   556→   556→                              <button
+   557→   557→                                key={key}
+   558→   558→                                onClick={() => isAvailable ? toggleSeat(canvasSeat.seatCode) : undefined}
+   559→   559→                                disabled={!isAvailable}
+   560→   560→                                className={cn(
+   561→   561→                                  'absolute rounded text-[10px] font-medium flex items-center justify-center transition-all',
+   562→   562→                                  isSelected ? 'bg-gold text-white shadow-sm ring-2 ring-gold/50 cursor-pointer'
+   563→   563→                                    : isAvailable ? 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+   564→   564→                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed',
+   565→   565→                                )}
+   566→   566→                                style={{ left: scaledX, top: scaledY, width: size, height: size }}
+   567→   567→                                title={`${canvasSeat.seatCode} - ${seatData.status}`}
+   568→   568→                              >
+   569→   569→                                {canvasSeat.seatNum}
+   570→   570→                              </button>
+   571→   571→                            )
+   572→   572→                          }}
+   573→   573→                          renderEmpty={(x, y, size, key) => (
+   574→   574→                            <div key={key} className="absolute" style={{ left: x, top: y, width: size, height: size }} />
+   575→   575→                          )}
+   576→   576→                        />
+   577→   577→                      </div>
+   578→   578→                    ) : (
+   579→   579→                      <>
+   580→   580→                        <div className="text-center mb-3">
+   581→   581→                          <div className="bg-charcoal text-white text-[10px] uppercase tracking-widest px-6 py-1.5 rounded-full inline-block">Panggung</div>
+   582→   582→                        </div>
+   583→   583→                        <div className="mx-auto w-full flex flex-col items-center">
+   584→   584→                          {sortedRowKeys.map((row) => (
+   585→   585→                            <div key={row} className="flex items-center gap-2 mb-1.5">
+   586→   586→                              <span className="w-6 text-xs font-mono font-semibold text-charcoal/60 text-right">{row}</span>
+   587→   587→                              <div className="flex gap-1 flex-1">
+   588→   588→                                {seatsByRow[row].map((seat) => (
+   589→   589→                                  <button
+   590→   590→                                    key={seat.id}
+   591→   591→                                    onClick={() => seat.status === 'AVAILABLE' ? toggleSeat(seat.seatCode) : undefined}
+   592→   592→                                    disabled={seat.status !== 'AVAILABLE'}
+   593→   593→                                    className={cn('w-8 h-8 rounded text-[10px] font-mono font-medium flex items-center justify-center transition-all', getSeatColorClass(seat))}
+   594→   594→                                    title={`${seat.seatCode} - ${seat.status}`}
+   595→   595→                                  >
+   596→   596→                                    {seat.col}
+   597→   597→                                  </button>
+   598→   598→                                ))}
+   599→   599→                              </div>
+   600→   600→                              <span className="w-6 text-xs font-mono font-semibold text-charcoal/60">{row}</span>
+   601→   601→                            </div>
+   602→   602→                          ))}
+   603→   603→                        </div>
+   604→   604→                      </>
+   605→   605→                    )}
+   606→   606→
+   607→   607→                    {/* Legend */}
+   608→   608→                    <div className="flex items-center justify-center gap-4 mt-4 text-[10px] text-muted-foreground">
+   609→   609→                      <div className="flex items-center gap-1.5"><div className="w-4 h-4 rounded bg-emerald-100 border border-emerald-200" />Tersedia</div>
+   610→   610→                      <div className="flex items-center gap-1.5"><div className="w-4 h-4 rounded bg-gold border border-gold-dark" />Dipilih</div>
+   611→   611→                      <div className="flex items-center gap-1.5"><div className="w-4 h-4 rounded bg-gray-300" />Terisi</div>
+   612→   612→                    </div>
+   613→   613→                  </div>
+   614→   614→
+   615→   615→                  {/* Selected seats */}
+   616→   616→                  {selectedSeats.length > 0 && (
+   617→   617→                    <div className="space-y-2">
+   618→   618→                      <p className="text-xs text-muted-foreground">Kursi dipilih:</p>
+   619→   619→                      <div className="flex flex-wrap gap-2">
+   620→   620→                        {selectedSeats.map((code) => (
+   621→   621→                          <Badge key={code} className="bg-gold text-white text-xs cursor-pointer hover:bg-gold-dark transition-colors" onClick={() => removeSeat(code)}>
+   622→   622→                            {code} <X className="w-3 h-3 ml-1" />
+   623→   623→                          </Badge>
+   624→   624→                        ))}
+   625→   625→                      </div>
+   626→   626→                    </div>
+   627→   627→                  )}
+   628→   628→                </div>
+   629→   629→              ) : (
+   630→   630→                /* ─── GA (General Admission) Zone Selector ─── */
+   631→   631→                <div className="space-y-4">
+   632→   632→                  {/* Layout Image for GA events */}
+   633→   633→                  {eventLayoutImage && (
+   634→   634→                    <div className="bg-muted/20 rounded-xl p-3">
+   635→   635→                      <div className="flex items-center gap-2 mb-2">
+   636→   636→                        <Image className="w-3.5 h-3.5 text-gold" />
+   637→   637→                        <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+   638→   638→                      </div>
+   639→   639→                      <div className="w-full rounded-lg overflow-hidden border border-border/30">
+   640→   640→                        <img
+   641→   641→                          src={eventLayoutImage}
+   642→   642→                          alt="Layout venue"
+   643→   643→                          className="w-full h-auto max-h-64 object-contain"
+   644→   644→                        />
+   645→   645→                      </div>
+   646→   646→                    </div>
+   647→   647→                  )}
+   648→   648→
+   649→   649→                  {/* Zone info cards */}
+   650→   650→                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+   651→   651→                    {zoneGroupKeys.map((zone) => {
+   652→   652→                      const group = zoneGroups[zone]
+   653→   653→                      const selectedInZone = selectedSeats.filter((s) => s.startsWith(`${zone}-`)).length
+   654→   654→                      return (
+   655→   655→                        <div
+   656→   656→                          key={zone}
+   657→   657→                          className={cn(
+   658→   658→                            'rounded-xl border-2 p-4 transition-all',
+   659→   659→                            selectedGaZone === zone
+   660→   660→                              ? 'border-gold bg-gold/5'
+   661→   661→                              : 'border-border/50 bg-white hover:border-gold/30',
+   662→   662→                          )}
+   663→   663→                        >
+   664→   664→                          <div className="flex items-start justify-between">
+   665→   665→                            <div className="space-y-1">
+   666→   666→                              <div className="flex items-center gap-2">
+   667→   667→                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+   668→   668→                                <p className="font-medium text-sm text-charcoal">{zone}</p>
+   669→   669→                              </div>
+   670→   670→                              <p className="text-xs text-muted-foreground pl-[18px]">
+   671→   671→                                Tersedia: <span className="font-semibold text-emerald-700">{group.seats.length}</span>
+   672→   672→                              </p>
+   673→   673→                            </div>
+   674→   674→                            <div className="flex items-center gap-2">
+   675→   675→                              {group.priceCategory && (
+   676→   676→                                <Badge
+   677→   677→                                  variant="secondary"
+   678→   678→                                  className="text-[10px]"
+   679→   679→                                  style={{ borderColor: group.priceCategory.colorCode, borderWidth: 1 }}
+   680→   680→                                >
+   681→   681→                                  {group.priceCategory.name}
+   682→   682→                                </Badge>
+   683→   683→                              )}
+   684→   684→                              {selectedInZone > 0 && (
+   685→   685→                                <Badge className="bg-gold text-white text-[10px]">+{selectedInZone}</Badge>
+   686→   686→                              )}
+   687→   687→                            </div>
+   688→   688→                          </div>
+   689→   689→                        </div>
+   690→   690→                      )
+   691→   691→                    })}
+   692→   692→                  </div>
+   693→   693→
+   694→   694→                  {zoneGroupKeys.length === 0 && (
+   695→   695→                    <p className="text-sm text-muted-foreground py-4 text-center">Tidak ada kursi tersedia untuk event ini.</p>
+   696→   696→                  )}
+   697→   697→
+   698→   698→                  {/* Zone selector + quantity picker */}
+   699→   699→                  {zoneGroupKeys.length > 0 && (
+   700→   700→                    <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 p-4 bg-muted/20 rounded-xl">
+   701→   701→                      <div className="flex-1 space-y-1.5">
+   702→   702→                        <Label className="text-xs text-muted-foreground">Pilih Zona</Label>
+   703→   703→                        <Select value={selectedGaZone} onValueChange={(v) => { setSelectedGaZone(v); setGaQuantity(1) }}>
+   704→   704→                          <SelectTrigger className="bg-white">
+   705→   705→                            <SelectValue placeholder="Pilih zona..." />
+   706→   706→                          </SelectTrigger>
+   707→   707→                          <SelectContent>
+   708→   708→                            {zoneGroupKeys.map((zone) => (
+   709→   709→                              <SelectItem key={zone} value={zone}>
+   710→   710→                                <div className="flex items-center gap-2">
+   711→   711→                                  <span>{zone}</span>
+   712→   712→                                  <span className="text-muted-foreground text-xs">({zoneGroups[zone].seats.length} tersedia)</span>
+   713→   713→                                </div>
+   714→   714→                              </SelectItem>
+   715→   715→                            ))}
+   716→   716→                          </SelectContent>
+   717→   717→                        </Select>
+   718→   718→                      </div>
+   719→   719→
+   720→   720→                      <div className="w-full sm:w-32 space-y-1.5">
+   721→   721→                        <Label className="text-xs text-muted-foreground">Jumlah</Label>
+   722→   722→                        <div className="flex items-center gap-1">
+   723→   723→                          <Button
+   724→   724→                            type="button"
+   725→   725→                            variant="outline"
+   726→   726→                            size="icon"
+   727→   727→                            className="h-9 w-9"
+   728→   728→                            disabled={!selectedGaZone || gaQuantity <= 1}
+   729→   729→                            onClick={() => setGaQuantity((q) => Math.max(1, q - 1))}
+   730→   730→                          >
+   731→   731→                            −
+   732→   732→                          </Button>
+   733→   733→                          <Input
+   734→   734→                            type="number"
+   735→   735→                            min={1}
+   736→   736→                            max={selectedGaZoneInfo ? selectedGaZoneInfo.seats.length : 99}
+   737→   737→                            value={gaQuantity}
+   738→   738→                            onChange={(e) => setGaQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+   739→   739→                            className="h-9 text-center bg-white"
+   740→   740→                            disabled={!selectedGaZone}
+   741→   741→                          />
+   742→   742→                          <Button
+   743→   743→                            type="button"
+   744→   744→                            variant="outline"
+   745→   745→                            size="icon"
+   746→   746→                            className="h-9 w-9"
+   747→   747→                            disabled={!selectedGaZone || !selectedGaZoneInfo || gaQuantity >= selectedGaZoneInfo.seats.length}
+   748→   748→                            onClick={() => setGaQuantity((q) => Math.min(selectedGaZoneInfo!.seats.length, q + 1))}
+   749→   749→                          >
+   750→   750→                            +
+   751→   751→                          </Button>
+   752→   752→                        </div>
+   753→   753→                      </div>
+   754→   754→
+   755→   755→                      <Button
+   756→   756→                        onClick={addGaTickets}
+   757→   757→                        disabled={!selectedGaZone || !selectedGaZoneInfo || gaQuantity < 1}
+   758→   758→                        className="bg-gold hover:bg-gold-dark text-white h-9 whitespace-nowrap"
+   759→   759→                      >
+   760→   760→                        <Ticket className="w-4 h-4 mr-1.5" />
+   761→   761→                        Tambah ({gaQuantity})
+   762→   762→                      </Button>
+   763→   763→                    </div>
+   764→   764→                  )}
+   765→   765→
+   766→   766→                  {/* Selected GA tickets as badges */}
+   767→   767→                  {selectedSeats.length > 0 && (
+   768→   768→                    <div className="space-y-2">
+   769→   769→                      <p className="text-xs text-muted-foreground">Tiket dipilih:</p>
+   770→   770→                      <div className="flex flex-wrap gap-2">
+   771→   771→                        {selectedSeats.map((code) => {
+   772→   772→                          const zone = code.includes('-') ? code.split('-').slice(0, -1).join('-') : code
+   773→   773→                          return (
+   774→   774→                            <Badge
+   775→   775→                              key={code}
+   776→   776→                              className="bg-gold text-white text-xs cursor-pointer hover:bg-gold-dark transition-colors"
+   777→   777→                              onClick={() => removeSeat(code)}
+   778→   778→                            >
+   779→   779→                              <MapPin className="w-3 h-3 mr-1" />
+   780→   780→                              {code} <X className="w-3 h-3 ml-1" />
+   781→   781→                            </Badge>
+   782→   782→                          )
+   783→   783→                        })}
+   784→   784→                      </div>
+   785→   785→                      <div className="flex gap-2">
+   786→   786→                        {zoneGroupKeys
+   787→   787→                          .filter((z) => selectedSeats.some((s) => s.startsWith(`${z}-`)))
+   788→   788→                          .map((z) => (
+   789→   789→                            <Button
+   790→   790→                              key={z}
+   791→   791→                              variant="ghost"
+   792→   792→                              size="sm"
+   793→   793→                              className="text-xs text-red-500 hover:text-red-600 hover:bg-red-50"
+   794→   794→                              onClick={() => removeGaTicketsForZone(z)}
+   795→   795→                            >
+   796→   796→                              Hapus semua zona {z}
+   797→   797→                            </Button>
+   798→   798→                          ))
+   799→   799→                        }
+   800→   800→                      </div>
+   801→   801→                    </div>
+   802→   802→                  )}
+   803→   803→                </div>
+   804→   804→              )}
+   805→   805→
+   806→   806→              <Separator />
+   807→   807→
+   808→   808→              {/* Summary */}
+   809→   809→              <div className="bg-charcoal/5 rounded-xl p-4 space-y-2 text-xs">
+   810→   810→                <p className="font-medium text-charcoal text-sm">Ringkasan</p>
+   811→   811→                <div className="grid grid-cols-2 gap-2">
+   812→   812→                  <div><span className="text-muted-foreground">Nama:</span> <span className="font-medium">{guestName}</span></div>
+   813→   813→                  <div><span className="text-muted-foreground">Event:</span> <span className="font-medium">{selectedEvent?.title}</span></div>
+   814→   814→                  <div>
+   815→   815→                    <span className="text-muted-foreground">Kursi:</span>{' '}
+   816→   816→                    <div className="flex flex-wrap gap-1 mt-0.5">
+   817→   817→                      {selectedSeats.length > 0
+   818→   818→                        ? selectedSeats.map((c) => <Badge key={c} className="bg-gold text-white text-[10px]">{c}</Badge>)
+   819→   819→                        : isNumberedSeatMap
+   820→   820→                          ? <span className="text-muted-foreground italic">Belum dipilih</span>
+   821→   821→                          : <span className="text-muted-foreground italic">Pilih zona & jumlah di atas</span>
+   822→   822→                      }
+   823→   823→                    </div>
+   824→   824→                  </div>
+   825→   825→                </div>
+   826→   826→              </div>
+   827→   827→
+   828→   828→              <div className="flex items-center gap-3 justify-between">
+   829→   829→                <Button variant="outline" onClick={() => goToStep(1)}>Kembali</Button>
+   830→   830→                <Button
+   831→   831→                  onClick={handleSubmit}
+   832→   832→                  disabled={isSubmitting || selectedSeats.length === 0}
+   833→   833→                  className="bg-charcoal hover:bg-charcoal/90 text-gold min-w-[180px]"
+   834→   834→                >
+   835→   835→                  {isSubmitting ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{'Menyimpan...'}</> : <><Send className="w-4 h-4 mr-2" />Simpan Tiket</>}
+   836→   836→                </Button>
+   837→   837→              </div>
+   838→   838→            </div>
+   839→   839→          )}
+   840→   840→        </CardContent>
+   841→   841→      </Card>
+   842→   842→
+   843→   843→      {/* Recent OTS Tickets */}
+   844→   844→      <Card className="border-border/50">
+   845→   845→        <CardHeader className="pb-4">
+   846→   846→          <CardTitle className="font-serif text-lg text-charcoal flex items-center gap-2">
+   847→   847→            <Clock className="w-4 h-4 text-gold" />
+   848→   848→            Riwayat OTS Ticket
+   849→   849→          </CardTitle>
+   850→   850→        </CardHeader>
+   851→   851→        <CardContent className="p-0">
+   852→   852→          {isLoadingRecent ? (
+   853→   853→            <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 text-gold animate-spin" /></div>
+   854→   854→          ) : recentTickets.length === 0 ? (
+   855→   855→            <div className="text-center py-12">
+   856→   856→              <Zap className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+   857→   857→              <p className="text-sm text-muted-foreground">Belum ada tiket OTS</p>
+   858→   858→            </div>
+   859→   859→          ) : (
+   860→   860→            <div className="overflow-x-auto">
+   861→   861→              <Table>
+   862→   862→                <TableHeader>
+   863→   863→                  <TableRow>
+   864→   864→                    <TableHead className="text-xs">TRX ID</TableHead>
+   865→   865→                    <TableHead className="text-xs">Nama</TableHead>
+   866→   866→                    <TableHead className="text-xs">Event</TableHead>
+   867→   867→                    <TableHead className="text-xs">Kursi</TableHead>
+   868→   868→                    <TableHead className="text-xs">Waktu</TableHead>
+   869→   869→                  </TableRow>
+   870→   870→                </TableHeader>
+   871→   871→                <TableBody>
+   872→   872→                  {recentTickets.map((ticket) => {
+   873→   873→                    const codes = parseSeatCodes(ticket.seatCodes)
+   874→   874→                    return (
+   875→   875→                      <TableRow key={ticket.id}>
+   876→   876→                        <TableCell><span className="font-mono text-xs font-semibold text-gold">{ticket.transactionId}</span></TableCell>
+   877→   877→                        <TableCell>
+   878→   878→                          <div><p className="text-sm font-medium">{ticket.customerName}</p><p className="text-xs text-muted-foreground">{ticket.customerEmail}</p></div>
+   879→   879→                        </TableCell>
+   880→   880→                        <TableCell className="text-xs">{ticket.eventTitle}</TableCell>
+   881→   881→                        <TableCell><div className="flex flex-wrap gap-1">{codes.map((c) => <Badge key={c} variant="secondary" className="text-[9px]">{c}</Badge>)}</div></TableCell>
+   882→   882→                        <TableCell className="text-xs text-muted-foreground">{new Date(ticket.createdAt).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</TableCell>
+   883→   883→                      </TableRow>
+   884→   884→                    )
+   885→   885→                  })}
+   886→   886→                </TableBody>
+   887→   887→              </Table>
+   888→   888→            </div>
+   889→   889→          )}
+   890→   890→        </CardContent>
+   891→   891→      </Card>
+   892→   892→    </div>
+   893→   893→  )
+   894→   894→}
+   895→   895→
