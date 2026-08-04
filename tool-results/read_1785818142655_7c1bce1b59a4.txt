@@ -1,0 +1,792 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useRef } from 'react'
+     4→import { Button } from '@/components/ui/button'
+     5→import { Badge } from '@/components/ui/badge'
+     6→import { Input } from '@/components/ui/input'
+     7→import { Label } from '@/components/ui/label'
+     8→import {
+     9→  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
+    10→} from '@/components/ui/dialog'
+    11→import {
+    12→  QrCode, RotateCcw, LogIn, ArrowLeft, Loader2, CheckCircle, AlertTriangle, XCircle, Tag,
+    13→  CalendarDays, Clock, RefreshCw, ShieldCheck, ShieldX, Sparkles,
+    14→} from 'lucide-react'
+    15→
+    16→type ScanResultState = 'SCANNING' | 'LOADING' | 'SUCCESS' | 'WARNING' | 'ERROR'
+    17→
+    18→interface PromoDetails {
+    19→  discountType: string
+    20→  discountValue: number
+    21→  target: string
+    22→  bundleSize: number
+    23→  bundleDiscount: number
+    24→}
+    25→
+    26→interface FestivalShowDate {
+    27→  id: string
+    28→  date: string
+    29→  label: string | null
+    30→  isScanned: boolean
+    31→}
+    32→
+    33→interface FestivalPayload {
+    34→  applicableShowDates: FestivalShowDate[]
+    35→  scannedShowDateIds: string[]
+    36→  targetShowDateId: string | null
+    37→  cooldownRemainingMs?: number | null
+    38→  cooldownEnabled?: boolean
+    39→  cooldownMinutes?: number
+    40→}
+    41→
+    42→interface CheckInTransaction {
+    43→  transactionId: string
+    44→  customerName: string
+    45→  customerEmail: string
+    46→  customerWa: string
+    47→  seatCodes: string
+    48→  paymentStatus: string
+    49→  checkInTime: string | null
+    50→  paidAt: string | null
+    51→  merchandiseData: string | null
+    52→  totalAmount: number
+    53→  adminFeeApplied: number
+    54→  eventTitle: string | null
+    55→  eventMode?: string  // REGULAR | FESTIVAL
+    56→  lastScanAt?: string | null
+    57→  lastScanShowDateId?: string | null
+    58→  manualValidityOverride?: string | null
+    59→  promoCode: string | null
+    60→  promoDetails: PromoDetails | null
+    61→  festival?: FestivalPayload | null
+    62→}
+    63→
+    64→interface ScanResult {
+    65→  status: 'SUCCESS' | 'WARNING' | 'ERROR'
+    66→  message: string
+    67→  transaction?: CheckInTransaction
+    68→}
+    69→
+    70→export default function UsherScannerPage() {
+    71→  const [scanState, setScanState] = useState<ScanResultState>('SCANNING')
+    72→  const [result, setResult] = useState<ScanResult | null>(null)
+    73→  const [lastTransactionId, setLastTransactionId] = useState<string | null>(null)
+    74→  const [lastTargetDayId, setLastTargetDayId] = useState<string | null>(null)
+    75→  const [overrideLoading, setOverrideLoading] = useState<'FORCE_VALID' | 'FORCE_INVALID' | 'RESET_COOLDOWN' | null>(null)
+    76→  const [overrideDialog, setOverrideDialog] = useState<null | 'FORCE_VALID' | 'FORCE_INVALID' | 'RESET_COOLDOWN'>(null)
+    77→  const [overrideNote, setOverrideNote] = useState('')
+    78→  const scannerRef = useRef<any>(null)
+    79→  const scannerContainerRef = useRef<HTMLDivElement>(null)
+    80→
+    81→  // Format promo description for display
+    82→  function formatPromoDescription(promo: PromoDetails): string {
+    83→    if (promo.discountType === 'BUNDLING_TICKET') {
+    84→      return `Bundling: beli ${promo.bundleSize} tiket, diskon Rp ${promo.bundleDiscount.toLocaleString('id-ID')}/bundle`
+    85→    }
+    86→    const valueStr = promo.discountType === 'PERCENT'
+    87→      ? `${promo.discountValue}%`
+    88→      : `Rp ${promo.discountValue.toLocaleString('id-ID')}`
+    89→    const targetMap: Record<string, string> = {
+    90→      ALL: 'semua',
+    91→      TICKET: 'tiket',
+    92→      MERCH: 'merchandise',
+    93→      BUNDLING: 'tiket + merchandise',
+    94→    }
+    95→    const targetStr = targetMap[promo.target] || promo.target
+    96→    return `Diskon ${valueStr} (${targetStr})`
+    97→  }
+    98→
+    99→  function parseMerchandise(data: string | null): Array<{ name: string; quantity: number }> {
+   100→    if (!data) return []
+   101→    try { return JSON.parse(data) } catch { return [] }
+   102→  }
+   103→
+   104→  function parseSeatCodes(codes: string | null): string[] {
+   105→    if (!codes) return []
+   106→    try { return JSON.parse(codes) } catch {
+   107→      return codes.split(',').map((s) => s.trim()).filter(Boolean)
+   108→    }
+   109→  }
+   110→
+   111→  function extractTransactionId(qrText: string): string | null {
+   112→    const parts = qrText.split('KODE TRX:')
+   113→    if (parts.length < 2) return null
+   114→    return parts[1].trim()
+   115→  }
+   116→
+   117→  async function performCheckIn(transactionId: string, overrideAction?: 'FORCE_VALID' | 'FORCE_INVALID' | 'RESET_COOLDOWN', overrideNote?: string) {
+   118→    setScanState('LOADING')
+   119→    setLastTransactionId(transactionId)
+   120→    if (overrideAction) setOverrideLoading(overrideAction)
+   121→
+   122→    try {
+   123→      const res = await fetch('/api/check-in', {
+   124→        method: 'POST',
+   125→        headers: { 'Content-Type': 'application/json' },
+   126→        body: JSON.stringify({
+   127→          transactionId,
+   128→          overrideAction,
+   129→          overrideNote: overrideNote || undefined,
+   130→        }),
+   131→      })
+   132→
+   133→      const data = await res.json()
+   134→
+   135→      if (data.status === 'SUCCESS') {
+   136→        setScanState('SUCCESS')
+   137→      } else if (data.status === 'WARNING') {
+   138→        setScanState('WARNING')
+   139→      } else {
+   140→        setScanState('ERROR')
+   141→      }
+   142→
+   143→      setResult(data)
+   144→      // Track which day was targeted so the override UI can hint at it
+   145→      setLastTargetDayId(data.transaction?.festival?.targetShowDateId || null)
+   146→    } catch (err) {
+   147→      setScanState('ERROR')
+   148→      setResult({
+   149→        status: 'ERROR',
+   150→        message: 'Gagal terhubung ke server. Silakan coba lagi.',
+   151→      })
+   152→    } finally {
+   153→      setOverrideLoading(null)
+   154→    }
+   155→  }
+   156→
+   157→  function handleScanSuccess(decodedText: string) {
+   158→    const transactionId = extractTransactionId(decodedText)
+   159→    if (!transactionId) {
+   160→      setScanState('ERROR')
+   161→      setResult({
+   162→        status: 'ERROR',
+   163→        message: 'Format QR tidak valid. Pastikan QR tiket yang benar.',
+   164→      })
+   165→      return
+   166→    }
+   167→    stopScanner()
+   168→    performCheckIn(transactionId)
+   169→  }
+   170→
+   171→  async function startScanner() {
+   172→    await stopScanner()
+   173→    try {
+   174→      const { Html5Qrcode } = await import('html5-qrcode')
+   175→      const scanner = new Html5Qrcode('qr-reader')
+   176→      await scanner.start(
+   177→        { facingMode: 'environment' },
+   178→        {
+   179→          fps: 10,
+   180→          qrbox: { width: 280, height: 280 },
+   181→          aspectRatio: 1.0,
+   182→        },
+   183→        (decodedText: string) => handleScanSuccess(decodedText),
+   184→        () => { /* QR not found in frame - ignore */ }
+   185→      )
+   186→      scannerRef.current = scanner
+   187→      setScanState('SCANNING')
+   188→    } catch (err) {
+   189→      console.error('Failed to start scanner:', err)
+   190→      setScanState('ERROR')
+   191→      setResult({
+   192→        status: 'ERROR',
+   193→        message: 'Gagal mengakses kamera. Pastikan izin kamera diberikan.',
+   194→      })
+   195→    }
+   196→  }
+   197→
+   198→  async function stopScanner() {
+   199→    if (scannerRef.current) {
+   200→      try {
+   201→        const state = scannerRef.current.getState()
+   202→        if (state === 2) await scannerRef.current.stop()
+   203→        scannerRef.current.clear()
+   204→      } catch { /* ignore */ }
+   205→      scannerRef.current = null
+   206→    }
+   207→  }
+   208→
+   209→  function resetScanner() {
+   210→    setResult(null)
+   211→    setLastTransactionId(null)
+   212→    setLastTargetDayId(null)
+   213→    setOverrideNote('')
+   214→    setOverrideDialog(null)
+   215→    setScanState('SCANNING')
+   216→    setTimeout(() => startScanner(), 300)
+   217→  }
+   218→
+   219→  function handleCheckInAgain() {
+   220→    if (lastTransactionId) performCheckIn(lastTransactionId)
+   221→  }
+   222→
+   223→  // ── Override handler — opens dialog for note input ──
+   224→  function openOverrideDialog(action: 'FORCE_VALID' | 'FORCE_INVALID' | 'RESET_COOLDOWN') {
+   225→    setOverrideDialog(action)
+   226→    setOverrideNote('')
+   227→  }
+   228→
+   229→  async function confirmOverride() {
+   230→    if (!lastTransactionId || !overrideDialog) return
+   231→    const action = overrideDialog
+   232→    setOverrideDialog(null)
+   233→    await performCheckIn(lastTransactionId, action, overrideNote)
+   234→  }
+   235→
+   236→  useEffect(() => {
+   237→    const timer = setTimeout(() => startScanner(), 500)
+   238→    return () => {
+   239→      clearTimeout(timer)
+   240→      stopScanner()
+   241→    }
+   242→  }, [])
+   243→
+   244→  // ============================================================
+   245→  // RENDER
+   246→  // ============================================================
+   247→
+   248→  if (scanState === 'LOADING') {
+   249→    return (
+   250→      <div className="min-h-screen flex items-center justify-center bg-warm-white">
+   251→        <div className="text-center space-y-4">
+   252→          <Loader2 className="w-12 h-12 text-charcoal animate-spin mx-auto" />
+   253→          <p className="text-charcoal font-medium text-lg">Memverifikasi tiket...</p>
+   254→        </div>
+   255→      </div>
+   256→    )
+   257→  }
+   258→
+   259→  // ── SUCCESS ──
+   260→  if (scanState === 'SUCCESS' && result?.transaction) {
+   261→    const txn = result.transaction
+   262→    const allSeats = parseSeatCodes(txn.seatCodes)
+   263→    const isFestival = allSeats.some((c) => c.includes('@'))
+   264→    const seats = isFestival
+   265→      ? [...new Set(allSeats.map((c) => c.split('@')[0]))]
+   266→      : allSeats
+   267→    const merch = parseMerchandise(txn.merchandiseData)
+   268→    const festival = txn.festival
+   269→
+   270→    return (
+   271→      <div className="min-h-screen flex flex-col items-center justify-center p-6" style={{ backgroundColor: '#4A7C59' }}>
+   272→        <div className="max-w-md w-full text-center text-white space-y-6">
+   273→          {/* Icon */}
+   274→          <div className="flex justify-center">
+   275→            <div className="w-24 h-24 rounded-full bg-white/20 flex items-center justify-center">
+   276→              <CheckCircle className="w-14 h-14 text-white" />
+   277→            </div>
+   278→          </div>
+   279→
+   280→          {/* Title */}
+   281→          <div>
+   282→            <h1 className="text-3xl font-bold font-serif">Tiket Valid ✓</h1>
+   283→            {isFestival && (
+   284→              <Badge className="mt-2 bg-white/20 text-white border-white/30">
+   285→                <Sparkles className="w-3 h-3 mr-1" />
+   286→                Festival Pass
+   287→              </Badge>
+   288→            )}
+   289→          </div>
+   290→
+   291→          {/* Event */}
+   292→          {txn.eventTitle && (
+   293→            <p className="text-white/80 text-lg">{txn.eventTitle}</p>
+   294→          )}
+   295→
+   296→          {/* Customer Info */}
+   297→          <div className="bg-white/15 rounded-xl p-5 space-y-3 text-left">
+   298→            <div>
+   299→              <p className="text-white/60 text-xs uppercase tracking-wider">Nama Pemesan</p>
+   300→              <p className="text-lg font-semibold">{txn.customerName}</p>
+   301→            </div>
+   302→
+   303→            {/* Festival: show applicable days */}
+   304→            {isFestival && festival ? (
+   305→              <div>
+   306→                <p className="text-white/60 text-xs uppercase tracking-wider flex items-center gap-1">
+   307→                  <CalendarDays className="w-3 h-3" />
+   308→                  Status Hari Pertunjukan
+   309→                </p>
+   310→                <div className="mt-2 space-y-1.5">
+   311→                  {festival.applicableShowDates.map((d) => {
+   312→                    const date = new Date(d.date)
+   313→                    const weekday = date.toLocaleDateString('id-ID', { weekday: 'short' })
+   314→                    const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+   315→                    const isToday = d.id === festival.targetShowDateId
+   316→                    return (
+   317→                      <div
+   318→                        key={d.id}
+   319→                        className={`flex items-center justify-between p-2 rounded-md text-sm ${
+   320→                          isToday
+   321→                            ? 'bg-white/30 ring-1 ring-white/50'
+   322→                            : d.isScanned
+   323→                              ? 'bg-white/10'
+   324→                              : 'bg-white/5'
+   325→                        }`}
+   326→                      >
+   327→                        <div className="flex items-center gap-2">
+   328→                          <span className="text-xs font-mono opacity-80">{weekday}, {dayMonth}</span>
+   329→                          {isToday && (
+   330→                            <Badge className="bg-white text-[#4A7C59] text-[9px] px-1.5 py-0">Scan sekarang</Badge>
+   331→                          )}
+   332→                          {d.label && <span className="text-[10px] opacity-60">· {d.label}</span>}
+   333→                        </div>
+   334→                        {d.isScanned && (
+   335→                          <CheckCircle className="w-4 h-4 text-white/90" />
+   336→                        )}
+   337→                      </div>
+   338→                    )
+   339→                  })}
+   340→                </div>
+   341→                <p className="text-[10px] text-white/60 mt-2">
+   342→                  Hijau: hari ini dipindai · Tanda centang: sudah pernah dipindai
+   343→                </p>
+   344→              </div>
+   345→            ) : (
+   346→              <div>
+   347→                <p className="text-white/60 text-xs uppercase tracking-wider">Kursi</p>
+   348→                <div className="flex flex-wrap gap-2 mt-1">
+   349→                  {seats.map((seat) => (
+   350→                    <span key={seat} className="bg-white/20 px-3 py-1 rounded-full text-sm font-mono font-medium">
+   351→                      {seat}
+   352→                    </span>
+   353→                  ))}
+   354→                </div>
+   355→              </div>
+   356→            )}
+   357→
+   358→            {merch.length > 0 && (
+   359→              <div>
+   360→                <p className="text-white/60 text-xs uppercase tracking-wider">Merchandise</p>
+   361→                <ul className="mt-1 space-y-1">
+   362→                  {merch.map((m, i) => (
+   363→                    <li key={i} className="text-sm text-white/90">
+   364→                      {m.name} × {m.quantity}
+   365→                    </li>
+   366→                  ))}
+   367→                </ul>
+   368→              </div>
+   369→            )}
+   370→
+   371→            {/* Promo Info */}
+   372→            {txn.promoCode ? (
+   373→              <div className="bg-yellow-400/20 border border-yellow-400/30 rounded-lg p-3">
+   374→                <div className="flex items-center gap-2">
+   375→                  <Tag className="w-4 h-4 text-yellow-300 shrink-0" />
+   376→                  <p className="text-yellow-200 text-xs uppercase tracking-wider font-medium">Promo</p>
+   377→                </div>
+   378→                <p className="text-white font-semibold mt-1">{txn.promoCode}</p>
+   379→                {txn.promoDetails && (
+   380→                  <p className="text-white/70 text-xs mt-0.5">{formatPromoDescription(txn.promoDetails)}</p>
+   381→                )}
+   382→              </div>
+   383→            ) : (
+   384→              <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+   385→                <div className="flex items-center gap-2">
+   386→                  <Tag className="w-4 h-4 text-white/30 shrink-0" />
+   387→                  <p className="text-white/30 text-xs">Tanpa promo</p>
+   388→                </div>
+   389→              </div>
+   390→            )}
+   391→          </div>
+   392→
+   393→          {/* Cooldown reminder for festival re-entries */}
+   394→          {isFestival && festival?.cooldownEnabled && (
+   395→            <div className="bg-white/10 rounded-lg p-3 text-xs text-white/80 flex items-start gap-2">
+   396→              <Clock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+   397→              <p className="text-left">
+   398→                Setelah scan berhasil, ada cooldown {festival.cooldownMinutes || 30} menit di hari yang sama.
+   399→                Usher bisa reset cooldown manual jika ada kendala.
+   400→              </p>
+   401→            </div>
+   402→          )}
+   403→
+   404→          {/* Action Button — confirm entry */}
+   405→          <Button
+   406→            onClick={resetScanner}
+   407→            className="w-full min-h-[56px] text-lg font-semibold bg-white text-[#4A7C59] hover:bg-white/90 rounded-xl"
+   408→          >
+   409→            <QrCode className="w-5 h-5 mr-2" />
+   410→            Scan Tiket Berikutnya
+   411→          </Button>
+   412→        </div>
+   413→      </div>
+   414→    )
+   415→  }
+   416→
+   417→  // ── WARNING (cooldown active or already scanned) ──
+   418→  if (scanState === 'WARNING' && result?.transaction) {
+   419→    const txn = result.transaction
+   420→    const allSeats = parseSeatCodes(txn.seatCodes)
+   421→    const isFestival = allSeats.some((c) => c.includes('@'))
+   422→    const seats = isFestival
+   423→      ? [...new Set(allSeats.map((c) => c.split('@')[0]))]
+   424→      : allSeats
+   425→    const festival = txn.festival
+   426→    const cooldownMs = festival?.cooldownRemainingMs || 0
+   427→    const cooldownMin = Math.ceil(cooldownMs / 60000)
+   428→
+   429→    return (
+   430→      <div className="min-h-screen flex flex-col items-center justify-center p-6" style={{ backgroundColor: '#D4843E' }}>
+   431→        <div className="max-w-md w-full text-center space-y-6">
+   432→          {/* Icon */}
+   433→          <div className="flex justify-center">
+   434→            <div className="w-24 h-24 rounded-full bg-white/20 flex items-center justify-center">
+   435→              <AlertTriangle className="w-14 h-14 text-white" />
+   436→            </div>
+   437→          </div>
+   438→
+   439→          {/* Title */}
+   440→          <div>
+   441→            <h1 className="text-3xl font-bold font-serif text-white">Peringatan</h1>
+   442→            <p className="text-white/90 text-lg font-medium mt-1">
+   443→              {isFestival && cooldownMs > 0 ? 'Cooldown Aktif' : 'Tiket sudah di-scan'}
+   444→            </p>
+   445→          </div>
+   446→
+   447→          {/* Warning Details */}
+   448→          <div className="bg-white/15 rounded-xl p-5 space-y-3 text-left text-white">
+   449→            <div>
+   450→              <p className="text-white/60 text-xs uppercase tracking-wider">Pesan</p>
+   451→              <p className="text-base font-semibold">{result.message}</p>
+   452→            </div>
+   453→
+   454→            <div>
+   455→              <p className="text-white/60 text-xs uppercase tracking-wider">Nama Pemesan</p>
+   456→              <p className="text-lg font-semibold">{txn.customerName}</p>
+   457→            </div>
+   458→
+   459→            {/* Festival: show scanned days */}
+   460→            {isFestival && festival ? (
+   461→              <div>
+   462→                <p className="text-white/60 text-xs uppercase tracking-wider">Status Hari</p>
+   463→                <div className="mt-2 space-y-1.5">
+   464→                  {festival.applicableShowDates.map((d) => {
+   465→                    const date = new Date(d.date)
+   466→                    const weekday = date.toLocaleDateString('id-ID', { weekday: 'short' })
+   467→                    const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+   468→                    const isToday = d.id === festival.targetShowDateId
+   469→                    return (
+   470→                      <div
+   471→                        key={d.id}
+   472→                        className={`flex items-center justify-between p-2 rounded-md text-sm ${
+   473→                          isToday ? 'bg-white/30 ring-1 ring-white/50' : 'bg-white/5'
+   474→                        }`}
+   475→                      >
+   476→                        <div className="flex items-center gap-2">
+   477→                          <span className="text-xs font-mono opacity-80">{weekday}, {dayMonth}</span>
+   478→                          {isToday && <Badge className="bg-white text-[#D4843E] text-[9px] px-1.5 py-0">Hari ini</Badge>}
+   479→                        </div>
+   480→                        {d.isScanned && <CheckCircle className="w-4 h-4 text-white/90" />}
+   481→                      </div>
+   482→                    )
+   483→                  })}
+   484→                </div>
+   485→              </div>
+   486→            ) : (
+   487→              <div>
+   488→                <p className="text-white/60 text-xs uppercase tracking-wider">Kursi</p>
+   489→                <div className="flex flex-wrap gap-2 mt-1">
+   490→                  {seats.map((seat) => (
+   491→                    <span key={seat} className="bg-white/20 px-3 py-1 rounded-full text-sm font-mono font-medium">
+   492→                      {seat}
+   493→                    </span>
+   494→                  ))}
+   495→                </div>
+   496→              </div>
+   497→            )}
+   498→
+   499→            {/* Promo Info */}
+   500→            {txn.promoCode ? (
+   501→              <div className="bg-yellow-400/20 border border-yellow-400/30 rounded-lg p-3">
+   502→                <div className="flex items-center gap-2">
+   503→                  <Tag className="w-4 h-4 text-yellow-300 shrink-0" />
+   504→                  <p className="text-yellow-200 text-xs uppercase tracking-wider font-medium">Promo</p>
+   505→                </div>
+   506→                <p className="text-white font-semibold mt-1">{txn.promoCode}</p>
+   507→                {txn.promoDetails && (
+   508→                  <p className="text-white/70 text-xs mt-0.5">{formatPromoDescription(txn.promoDetails)}</p>
+   509→                )}
+   510→              </div>
+   511→            ) : (
+   512→              <div className="bg-white/5 border border-white/10 rounded-lg p-3">
+   513→                <div className="flex items-center gap-2">
+   514→                  <Tag className="w-4 h-4 text-white/30 shrink-0" />
+   515→                  <p className="text-white/30 text-xs">Tanpa promo</p>
+   516→                </div>
+   517→              </div>
+   518→            )}
+   519→          </div>
+   520→
+   521→          {/* Cooldown info banner */}
+   522→          {isFestival && cooldownMs > 0 && (
+   523→            <div className="bg-white/10 rounded-lg p-3 text-xs text-white/80 flex items-start gap-2">
+   524→              <Clock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+   525→              <p className="text-left">
+   526→                Cooldown {cooldownMin} menit lagi untuk hari ini. Jika ini kasus darurat
+   527→                (mis. penonton keluar sejenak untuk toilet), gunakan tombol Reset Cooldown.
+   528→              </p>
+   529→            </div>
+   530→          )}
+   531→
+   532→          {/* Override Actions */}
+   533→          <div className="space-y-2">
+   534→            {isFestival && cooldownMs > 0 && (
+   535→              <Button
+   536→                onClick={() => openOverrideDialog('RESET_COOLDOWN')}
+   537→                disabled={overrideLoading === 'RESET_COOLDOWN'}
+   538→                className="w-full min-h-[48px] bg-white hover:bg-white/90 rounded-xl"
+   539→                style={{ color: '#D4843E' }}
+   540→              >
+   541→                {overrideLoading === 'RESET_COOLDOWN' ? (
+   542→                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   543→                ) : (
+   544→                  <RefreshCw className="w-4 h-4 mr-2" />
+   545→                )}
+   546→                Reset Cooldown
+   547→              </Button>
+   548→            )}
+   549→            <Button
+   550→              onClick={() => openOverrideDialog('FORCE_VALID')}
+   551→              disabled={overrideLoading === 'FORCE_VALID'}
+   552→              variant="outline"
+   553→              className="w-full min-h-[48px] bg-transparent border-white/40 text-white hover:bg-white/10 rounded-xl"
+   554→            >
+   555→              {overrideLoading === 'FORCE_VALID' ? (
+   556→                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   557→              ) : (
+   558→                <ShieldCheck className="w-4 h-4 mr-2" />
+   559→              )}
+   560→              Tetap Masukkan (Override)
+   561→            </Button>
+   562→            <Button
+   563→              onClick={resetScanner}
+   564→              className="w-full min-h-[48px] bg-white/10 hover:bg-white/20 text-white rounded-xl"
+   565→            >
+   566→              <QrCode className="w-4 h-4 mr-2" />
+   567→              Scan Tiket Berikutnya
+   568→            </Button>
+   569→          </div>
+   570→        </div>
+   571→      </div>
+   572→    )
+   573→  }
+   574→
+   575→  // ── ERROR (wrong day, force-invalid, not found, etc.) ──
+   576→  if (scanState === 'ERROR') {
+   577→    const txn = result?.transaction
+   578→    const allSeats = txn ? parseSeatCodes(txn.seatCodes) : []
+   579→    const isFestival = allSeats.some((c) => c.includes('@'))
+   580→    const festival = txn?.festival
+   581→
+   582→    return (
+   583→      <div className="min-h-screen flex flex-col items-center justify-center p-6" style={{ backgroundColor: '#C75050' }}>
+   584→        <div className="max-w-md w-full text-center text-white space-y-6">
+   585→          {/* Icon */}
+   586→          <div className="flex justify-center">
+   587→            <div className="w-24 h-24 rounded-full bg-white/20 flex items-center justify-center">
+   588→              <XCircle className="w-14 h-14 text-white" />
+   589→            </div>
+   590→          </div>
+   591→
+   592→          {/* Title */}
+   593→          <div>
+   594→            <h1 className="text-3xl font-bold font-serif">Tiket Tidak Valid</h1>
+   595→            <p className="text-white/90 text-base font-medium mt-1">Tiket ditolak</p>
+   596→          </div>
+   597→
+   598→          {/* Error Message */}
+   599→          <div className="bg-white/15 rounded-xl p-5">
+   600→            <p className="text-white/90 text-base">{result?.message || 'Terjadi kesalahan saat memverifikasi tiket.'}</p>
+   601→          </div>
+   602→
+   603→          {/* If festival wrong-day, show which days ARE valid */}
+   604→          {isFestival && festival && (
+   605→            <div className="bg-white/10 rounded-xl p-4 text-left">
+   606→              <p className="text-white/70 text-xs uppercase tracking-wider mb-2">Hari Berlaku di Paket Ini:</p>
+   607→              <div className="space-y-1.5">
+   608→                {festival.applicableShowDates.map((d) => {
+   609→                  const date = new Date(d.date)
+   610→                  const weekday = date.toLocaleDateString('id-ID', { weekday: 'short' })
+   611→                  const dayMonth = date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+   612→                  const time = `${date.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB`
+   613→                  return (
+   614→                    <div key={d.id} className="flex items-center justify-between text-sm">
+   615→                      <span className="font-mono">{weekday}, {dayMonth} · {time}</span>
+   616→                      {d.isScanned && <CheckCircle className="w-3.5 h-3.5 text-white/70" />}
+   617→                    </div>
+   618→                  )
+   619→                })}
+   620→              </div>
+   621→            </div>
+   622→          )}
+   623→
+   624→          {/* Customer Info (if we have it) */}
+   625→          {txn && (
+   626→            <div className="bg-white/15 rounded-xl p-4 text-left text-white">
+   627→              <p className="text-white/60 text-xs uppercase tracking-wider">Nama Pemesan</p>
+   628→              <p className="text-base font-semibold">{txn.customerName}</p>
+   629→              <p className="text-white/60 text-xs mt-2">TRX: {txn.transactionId}</p>
+   630→            </div>
+   631→          )}
+   632→
+   633→          {/* Override Action (only if we have a transaction) */}
+   634→          {txn && (
+   635→            <Button
+   636→              onClick={() => openOverrideDialog('FORCE_VALID')}
+   637→              disabled={overrideLoading === 'FORCE_VALID'}
+   638→              variant="outline"
+   639→              className="w-full min-h-[48px] bg-transparent border-white/40 text-white hover:bg-white/10 rounded-xl"
+   640→            >
+   641→              {overrideLoading === 'FORCE_VALID' ? (
+   642→                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   643→              ) : (
+   644→                <ShieldCheck className="w-4 h-4 mr-2" />
+   645→              )}
+   646→              Tetap Masukkan (Override)
+   647→            </Button>
+   648→          )}
+   649→
+   650→          <Button
+   651→            onClick={resetScanner}
+   652→            className="w-full min-h-[56px] text-lg font-semibold bg-white hover:bg-white/90 rounded-xl"
+   653→            style={{ color: '#C75050' }}
+   654→          >
+   655→            <RotateCcw className="w-5 h-5 mr-2" />
+   656→            Scan Ulang
+   657→          </Button>
+   658→        </div>
+   659→      </div>
+   660→    )
+   661→  }
+   662→
+   663→  // ── Override Note Dialog ──
+   664→  const overrideTitle =
+   665→    overrideDialog === 'FORCE_VALID' ? 'Override: Tetap Masukkan'
+   666→    : overrideDialog === 'FORCE_INVALID' ? 'Override: Tolak Tiket'
+   667→    : overrideDialog === 'RESET_COOLDOWN' ? 'Reset Cooldown'
+   668→    : ''
+   669→  const overrideDesc =
+   670→    overrideDialog === 'FORCE_VALID' ? 'Tiket akan diizinkan masuk meskipun tidak valid. Catat alasannya untuk audit.'
+   671→    : overrideDialog === 'FORCE_INVALID' ? 'Tiket akan ditolak secara permanen. Catat alasannya untuk audit.'
+   672→    : overrideDialog === 'RESET_COOLDOWN' ? 'Cooldown untuk hari ini akan direset. Penonton bisa langsung di-scan ulang.'
+   673→    : ''
+   674→  const overrideIcon =
+   675→    overrideDialog === 'FORCE_VALID' ? ShieldCheck
+   676→    : overrideDialog === 'FORCE_INVALID' ? ShieldX
+   677→    : RefreshCw
+   678→
+   679→  const OverrideIcon = overrideIcon
+   680→
+   681→  return (
+   682→    <div className="min-h-screen flex flex-col bg-warm-white">
+   683→      {/* Header */}
+   684→      <div className="bg-charcoal text-white px-4 py-4 flex items-center gap-3">
+   685→        <Button
+   686→          variant="ghost"
+   687→          size="icon"
+   688→          className="text-white/70 hover:text-white hover:bg-white/10 h-11 w-11"
+   689→          onClick={async () => {
+   690→            await stopScanner()
+   691→            window.history.back()
+   692→          }}
+   693→        >
+   694→          <ArrowLeft className="w-5 h-5" />
+   695→        </Button>
+   696→        <div>
+   697→          <h1 className="font-serif text-lg font-semibold">Scanner Tiket</h1>
+   698→          <p className="text-white/50 text-xs">Arahkan QR Code ke kamera</p>
+   699→        </div>
+   700→      </div>
+   701→
+   702→      {/* Scanner Area */}
+   703→      <div className="flex-1 flex flex-col items-center justify-center p-4">
+   704→        <div className="w-full max-w-sm">
+   705→          {/* Scanner Container */}
+   706→          <div
+   707→            ref={scannerContainerRef}
+   708→            id="qr-reader"
+   709→            className="rounded-2xl overflow-hidden shadow-lg border-2 border-charcoal/20"
+   710→            style={{ minHeight: '320px' }}
+   711→          />
+   712→
+   713→          {/* Instructions */}
+   714→          <div className="mt-6 text-center space-y-2">
+   715→            <div className="flex items-center justify-center gap-2 text-charcoal/70">
+   716→              <QrCode className="w-5 h-5" />
+   717→              <p className="text-sm font-medium">Menunggu QR Code...</p>
+   718→            </div>
+   719→            <p className="text-xs text-muted-foreground">
+   720→              Pastikan QR Code berada dalam bingkai scanner
+   721→            </p>
+   722→          </div>
+   723→        </div>
+   724→      </div>
+   725→
+   726→      {/* Footer Info */}
+   727→      <div className="px-4 py-4 border-t border-border/50">
+   728→        <p className="text-center text-xs text-muted-foreground">
+   729→          QR Format: NAMA: ... | KURSI/FESTIVAL: ... | KODE TRX: ...
+   730→        </p>
+   731→      </div>
+   732→
+   733→      {/* Override Note Dialog */}
+   734→      <Dialog open={overrideDialog !== null} onOpenChange={(open) => { if (!open) setOverrideDialog(null) }}>
+   735→        <DialogContent className="max-w-md">
+   736→          <DialogHeader>
+   737→            <DialogTitle className="font-serif text-lg flex items-center gap-2">
+   738→              {OverrideIcon && <OverrideIcon className="w-5 h-5 text-gold" />}
+   739→              {overrideTitle}
+   740→            </DialogTitle>
+   741→            <DialogDescription>{overrideDesc}</DialogDescription>
+   742→          </DialogHeader>
+   743→
+   744→          <div className="space-y-3">
+   745→            <Label htmlFor="override-note" className="text-sm font-medium">
+   746→              Alasan Override (wajib untuk audit log)
+   747→            </Label>
+   748→            <Input
+   749→              id="override-note"
+   750→              placeholder="Contoh: Penonton keluar toilet sejenak, sistem cooldown error"
+   751→              value={overrideNote}
+   752→              onChange={(e) => setOverrideNote(e.target.value)}
+   753→              autoFocus
+   754→            />
+   755→            {!overrideNote.trim() && (
+   756→              <p className="text-[11px] text-muted-foreground">
+   757→                Catatan ini akan tersimpan di log scan tiket.
+   758→              </p>
+   759→            )}
+   760→          </div>
+   761→
+   762→          <DialogFooter className="gap-2">
+   763→            <Button variant="outline" onClick={() => setOverrideDialog(null)}>
+   764→              Batal
+   765→            </Button>
+   766→            <Button
+   767→              onClick={confirmOverride}
+   768→              disabled={!overrideNote.trim() || overrideLoading !== null}
+   769→              className={
+   770→                overrideDialog === 'FORCE_INVALID'
+   771→                  ? 'bg-danger hover:bg-danger/90 text-white'
+   772→                  : 'bg-charcoal hover:bg-charcoal/90 text-gold'
+   773→              }
+   774→            >
+   775→              {overrideLoading !== null ? (
+   776→                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+   777→              ) : overrideDialog === 'FORCE_VALID' ? (
+   778→                <ShieldCheck className="w-4 h-4 mr-2" />
+   779→              ) : overrideDialog === 'FORCE_INVALID' ? (
+   780→                <ShieldX className="w-4 h-4 mr-2" />
+   781→              ) : (
+   782→                <RefreshCw className="w-4 h-4 mr-2" />
+   783→              )}
+   784→              Konfirmasi Override
+   785→            </Button>
+   786→          </DialogFooter>
+   787→        </DialogContent>
+   788→      </Dialog>
+   789→    </div>
+   790→  )
+   791→}
+   792→

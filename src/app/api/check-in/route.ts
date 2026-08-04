@@ -23,6 +23,17 @@ import { logActivity } from '@/lib/activity-log'
 // Cooldown enforced even on regular tickets? No — regular = single scan only.
 const FESTIVAL_DEFAULT_COOLDOWN_MINUTES = 30
 
+/**
+ * Scan window — how far from the show start time we allow check-in.
+ * ±12h means: usher can scan from 12h before show start (e.g. gate prep)
+ * up to 12h after show start (e.g. latecomers / post-show validation).
+ * Outside this window, scanning is REJECTED as BLOCKED_WRONG_DAY.
+ *
+ * Without this gate, scanning a ticket dated Aug 4 on Aug 2 (48h diff)
+ * would silently be marked VALID — which is the bug we're fixing.
+ */
+const SCAN_WINDOW_MS = 12 * 60 * 60 * 1000
+
 interface CheckInBody {
   transactionId: string
   // Optional: usher explicitly chose a day (used by admin override UI on events
@@ -65,6 +76,7 @@ export async function POST(request: NextRequest) {
         event: {
           select: {
             id: true, title: true, eventMode: true,
+            showDate: true, // legacy single-day field — fallback for regular ticket date validation
             scanCooldownMinutes: true, cooldownEnabled: true,
             showDates: { orderBy: { date: 'asc' } },
           },
@@ -139,6 +151,73 @@ export async function POST(request: NextRequest) {
         })
       }
 
+      // ── Date validation: reject scans outside the show's ±12h window ──
+      // This prevents "scan tiket tgl 4 agustus di tgl 2 agustus → VALID" bug.
+      // For multi-day regular events, use the transaction's showDateId; otherwise
+      // fall back to event.showDate (legacy single-day field).
+      // Skipped when usher explicitly does FORCE_VALID override.
+      if (overrideAction !== 'FORCE_VALID') {
+        const evt = transaction.event
+        const txnShowDate = transaction.showDateId
+          ? evt.showDates.find((d) => d.id === transaction.showDateId) || null
+          : null
+        const targetDateRaw: Date | null = txnShowDate?.date
+          ? new Date(txnShowDate.date)
+          : (evt.showDate ? new Date(evt.showDate) : null)
+
+        if (targetDateRaw && !isNaN(targetDateRaw.getTime())) {
+          const nowMs = Date.now()
+          const targetMs = targetDateRaw.getTime()
+          const diffMs = Math.abs(targetMs - nowMs)
+          if (diffMs > SCAN_WINDOW_MS) {
+            const isPast = targetMs < nowMs
+            const label = formatDayLabel(targetDateRaw)
+            await logTicketScan({
+              transactionId: transaction.id,
+              showDateId: txnShowDate?.id || null,
+              usherId,
+              isValid: false,
+              scanType: 'BLOCKED_WRONG_DAY',
+              reason: isPast
+                ? `Pertunjukan sudah lewat (${label})`
+                : `Pertunjukan belum dimulai — jadwal: ${label}`,
+            })
+            return NextResponse.json({
+              status: 'ERROR',
+              message: isPast
+                ? `Pertunjukan untuk tiket ini sudah lewat pada ${label}.`
+                : `Tiket ini berlaku untuk ${label}, bukan hari ini.`,
+              transaction: serializeTransaction(transaction),
+            })
+          }
+        }
+      }
+
+      // ── FORCE_VALID on wrong-day (not yet scanned) — usher override ──
+      if (overrideAction === 'FORCE_VALID' && !transaction.checkInTime) {
+        const checkedIn = await db.transaction.update({
+          where: { transactionId },
+          data: {
+            checkInTime: new Date(),
+            lastScanAt: new Date(),
+          },
+        })
+        await logTicketScan({
+          transactionId: transaction.id,
+          showDateId: transaction.showDateId || null,
+          usherId,
+          isValid: true,
+          scanType: 'FORCE_VALID',
+          reason: overrideNote || 'Usher force-validated wrong-day ticket',
+        })
+        await logActivity(request, 'CHECK_IN', `Force-valid wrong-day regular ticket ${transactionId}`)
+        return NextResponse.json({
+          status: 'SUCCESS',
+          message: 'Tiket valid (override usher)',
+          transaction: serializeTransaction(checkedIn),
+        })
+      }
+
       if (transaction.checkInTime) {
         // Already scanned — WARNING
         const scanTime = transaction.checkInTime
@@ -198,7 +277,7 @@ export async function POST(request: NextRequest) {
 
     if (!targetShowDateId) {
       // Auto-detect: find the show date whose date is closest to "now" in Jakarta tz
-      // Within ±12 hours of show start counts as that day's show.
+      // Within ±SCAN_WINDOW_MS of show start counts as that day's show.
       const now = new Date()
       const nowMs = now.getTime()
       let best: { id: string; diff: number; date: any } | null = null
@@ -208,11 +287,45 @@ export async function POST(request: NextRequest) {
           best = { id: d.id, diff, date: d }
         }
       }
-      if (best && best.diff <= 12 * 60 * 60 * 1000) {
+      if (best && best.diff <= SCAN_WINDOW_MS) {
         targetShowDateId = best.id
         targetShowDate = best.date
       } else if (best) {
-        // Outside ±12h window — pick the closest anyway but flag it
+        // Outside ±SCAN_WINDOW_MS window — REJECT.
+        // Previously this silently picked the closest day and let the scan
+        // proceed as VALID — that's the "scan tgl 4 agustus di tgl 2 agustus
+        // kok valid" bug. Now we hard-block with BLOCKED_WRONG_DAY; usher
+        // can still FORCE_VALID via override if needed.
+        const showDateMs = new Date(best.date.date).getTime()
+        const isPast = showDateMs < nowMs
+        const label = formatDayLabel(best.date.date)
+        // Only block here if NOT overridden — FORCE_VALID handled below.
+        if (overrideAction !== 'FORCE_VALID') {
+          await logTicketScan({
+            transactionId: transaction.id,
+            showDateId: best.id,
+            usherId,
+            isValid: false,
+            scanType: 'BLOCKED_WRONG_DAY',
+            reason: isPast
+              ? `Pertunjukan sudah lewat (${label})`
+              : `Pertunjukan belum dimulai — jadwal: ${label}`,
+          })
+          return NextResponse.json({
+            status: 'ERROR',
+            message: isPast
+              ? `Pertunjukan untuk tiket ini sudah lewat pada ${label}.`
+              : `Tiket ini berlaku untuk ${label}, bukan hari ini. Paket hanya berlaku untuk: ${applicableShowDates.map((d) => formatDayLabel(d.date)).join(', ')}`,
+            transaction: serializeTransaction(transaction, {
+              applicableShowDates,
+              scannedShowDateIds: await getScannedShowDateIds(transaction.id),
+              targetShowDateId: best.id,
+            }),
+          })
+        }
+        // FORCE_VALID override on out-of-window day — record target so the
+        // override block below can proceed (still validates the day is in
+        // the buyer's package via the next check).
         targetShowDateId = best.id
         targetShowDate = best.date
       }
