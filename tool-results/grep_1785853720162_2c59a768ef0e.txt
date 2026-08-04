@@ -1,0 +1,238 @@
+/home/z/my-project/src/app/verify/[transactionId]/page.tsx:43:  packageType: string | null  // SINGLE | MULTI | FULL
+/home/z/my-project/src/app/verify/[transactionId]/page.tsx:315:  const packageIcon = festival?.packageType === 'FULL' ? Crown
+/home/z/my-project/src/app/verify/[transactionId]/page.tsx:316:    : festival?.packageType === 'MULTI' ? Star
+/home/z/my-project/src/app/verify/[transactionId]/page.tsx:318:  const packageLabel = festival?.packageType === 'FULL' ? 'Full Pass'
+/home/z/my-project/src/app/verify/[transactionId]/page.tsx:319:    : festival?.packageType === 'MULTI' ? 'Multi-Day Pass'
+/home/z/my-project/src/app/verify/[transactionId]/page.tsx:320:    : festival?.packageType === 'SINGLE' ? 'Single Day'
+/home/z/my-project/src/app/api/check-in/route.ts:262:    const applicableDayIds = [...new Set(
+/home/z/my-project/src/app/api/check-in/route.ts:269:    const applicableShowDates = event.showDates.filter((d) => applicableDayIds.includes(d.id))
+/home/z/my-project/src/app/api/check-in/route.ts:335:    if (targetShowDateId && !applicableDayIds.includes(targetShowDateId)) {
+/home/z/my-project/src/app/api/events/[id]/seats/route.ts:60:          select: { id: true, name: true, price: true, colorCode: true, applicableDayIds: true, packageType: true },
+/home/z/my-project/src/app/api/events/[id]/seats/route.ts:80:        // Parse applicableDayIds from JSON string to array for frontend
+/home/z/my-project/src/app/api/events/[id]/seats/route.ts:81:        applicableDayIds: pc.applicableDayIds
+/home/z/my-project/src/app/api/events/[id]/seats/route.ts:82:          ? (() => { try { return JSON.parse(pc.applicableDayIds) as string[] } catch { return null } })()
+/home/z/my-project/src/app/api/verify/[transactionId]/route.ts:85:      const applicableDayIds = getFestivalDayIds(seatCodes)
+/home/z/my-project/src/app/api/verify/[transactionId]/route.ts:87:        where: { id: { in: applicableDayIds } },
+/home/z/my-project/src/app/api/verify/[transactionId]/route.ts:99:      let packageType: string | null = null
+/home/z/my-project/src/app/api/verify/[transactionId]/route.ts:103:          select: { name: true, packageType: true },
+/home/z/my-project/src/app/api/verify/[transactionId]/route.ts:107:          packageType = pc.packageType
+/home/z/my-project/src/app/api/verify/[transactionId]/route.ts:125:        packageType,
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:43:    packageType?: string | null
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:44:    applicableDayIds?: string[] | null
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:139:  const festivalPackages = useMemo(() => {
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:154:      .filter(pc => pc.packageType)
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:162:        return (order[a.packageType as keyof typeof order] || 99) - (order[b.packageType as keyof typeof order] || 99)
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:169:    for (const pkg of festivalPackages) {
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:173:  }, [festivalPackages, seats])
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:176:    () => festivalPackages.find(p => p.id === selectedFestivalPkgId) || null,
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:177:    [festivalPackages, selectedFestivalPkgId]
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:425:        // FESTIVAL: send festivalPackage — API will pick N AVAILABLE seats from the package's zone
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:427:        body.festivalPackage = {
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:623:              {/* Show date tabs — hidden for FESTIVAL mode (paket festival carry their own applicableDayIds metadata) */}
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:672:                    {festivalPackages.length === 0 && (
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:679:                  {festivalPackages.length === 0 ? (
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:681:                      Belum ada paket tiket untuk festival ini. Tambahkan price category dengan <span className="font-mono">packageType</span> (SINGLE/MULTI/FULL) lewat halaman Edit Event.
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:685:                      {festivalPackages.map((pkg) => {
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:688:                        const PkgIcon = pkg.packageType === 'FULL' ? CalendarDays : pkg.packageType === 'MULTI' ? CalendarRange : Calendar
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:689:                        const pkgLabel = pkg.packageType === 'FULL' ? 'Full Pass' : pkg.packageType === 'MULTI' ? 'Multi-Day' : 'Single Day'
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:692:                        if (pkg.applicableDayIds && Array.isArray(pkg.applicableDayIds)) {
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:693:                          dayCount = pkg.applicableDayIds.length
+/home/z/my-project/src/app/admin/usher/complimentary/page.tsx:694:                        } else if (pkg.packageType === 'FULL') {
+/home/z/my-project/src/app/api/checkout/route.ts:25:      festivalPackage,
+/home/z/my-project/src/app/api/checkout/route.ts:28:    const isFestivalCheckout = !!festivalPackage
+/home/z/my-project/src/app/api/checkout/route.ts:30:    // Validation: festival mode needs festivalPackage; regular mode needs seatCodes
+/home/z/my-project/src/app/api/checkout/route.ts:37:    if (isFestivalCheckout && (!festivalPackage.quantity || festivalPackage.quantity < 1)) {
+/home/z/my-project/src/app/api/checkout/route.ts:70:      const pkg = festivalPackage
+/home/z/my-project/src/app/api/checkout/route.ts:85:      let applicableDayIds: string[] = pkg.applicableDayIds || []
+/home/z/my-project/src/app/api/checkout/route.ts:86:      if (priceCat.packageType === 'FULL') {
+/home/z/my-project/src/app/api/checkout/route.ts:89:        applicableDayIds = allDates.map(d => d.id)
+/home/z/my-project/src/app/api/checkout/route.ts:90:      } else if (priceCat.applicableDayIds) {
+/home/z/my-project/src/app/api/checkout/route.ts:91:        try { applicableDayIds = JSON.parse(priceCat.applicableDayIds) } catch { /* ignore */ }
+/home/z/my-project/src/app/api/checkout/route.ts:94:      if (applicableDayIds.length === 0) {
+/home/z/my-project/src/app/api/checkout/route.ts:102:      // derived from the price category's applicableDayIds at checkout time.
+/home/z/my-project/src/app/api/checkout/route.ts:145:      const dayIdsJoined = applicableDayIds.join(',')
+/home/z/my-project/src/app/api/checkout/route.ts:189:      const pkg = festivalPackage
+/home/z/my-project/src/app/api/checkout/route.ts:198:        name: `${pkg.packageName} (Festival Pass — ${pkg.applicableDayIds?.length || 0} hari)`,
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:53:  packageType?: string | null
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:54:  applicableDayIds?: string[] | null
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:137:  // Festival packages (PriceCategory with packageType)
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:138:  const festivalPackages = useMemo(() => {
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:141:      .filter(pc => pc.packageType)
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:144:        return (order[a.packageType || ''] || 99) - (order[b.packageType || ''] || 99)
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:150:    () => festivalPackages.find(p => p.id === selectedFestivalPkgId) || null,
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:151:    [festivalPackages, selectedFestivalPkgId]
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:157:    for (const pkg of festivalPackages) {
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:163:  }, [festivalPackages, seats])
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:392:    let festivalPackage: { priceCategoryId: string; quantity: number } | undefined
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:416:      festivalPackage = {
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:451:          festivalPackage,
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:765:                {festivalPackages.length === 0 ? (
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:767:                    Belum ada paket festival untuk event ini. Tambahkan price category dengan packageType di halaman Events.
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:774:                      {festivalPackages.map((pkg) => {
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:777:                        const pkgTypeLabel = pkg.packageType === 'FULL'
+/home/z/my-project/src/app/admin/tickets/complimentary/page.tsx:779:                          : pkg.packageType === 'MULTI'
+/home/z/my-project/src/app/api/admin/tickets/complimentary/route.ts:83:    const { eventId, seatCodes, guestName, guestEmail, guestPhone, showDateId, festivalPackage } = body
+/home/z/my-project/src/app/api/admin/tickets/complimentary/route.ts:164:      if (festivalPackage && festivalPackage.priceCategoryId) {
+/home/z/my-project/src/app/api/admin/tickets/complimentary/route.ts:167:          where: { id: festivalPackage.priceCategoryId },
+/home/z/my-project/src/app/api/admin/tickets/complimentary/route.ts:175:        const qty = Number(festivalPackage.quantity) || 0
+/home/z/my-project/src/app/admin/events/page.tsx:45:    packageType?: string | null
+/home/z/my-project/src/app/admin/events/page.tsx:46:    applicableDayIds?: string[] | null
+/home/z/my-project/src/app/admin/events/page.tsx:78:  packageType?: string | null   // "SINGLE" | "MULTI" | "FULL" | null
+/home/z/my-project/src/app/admin/events/page.tsx:79:  applicableDayIds?: string[]  // Array of showDate temp IDs (frontend only)
+/home/z/my-project/src/app/admin/events/page.tsx:214:    // Map price categories — convert DB applicableDayIds (array of showDate DB IDs) to tempIds for frontend editing
+/home/z/my-project/src/app/admin/events/page.tsx:248:          packageType: pc.packageType || null,
+/home/z/my-project/src/app/admin/events/page.tsx:249:          applicableDayIds: (pc.applicableDayIds || []).map((id: string) => showDateIdToTempId[id] || id),
+/home/z/my-project/src/app/admin/events/page.tsx:280:        packageType: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].packageType : null,
+/home/z/my-project/src/app/admin/events/page.tsx:281:        applicableDayIds: prev.priceCategories.length > 0 ? prev.priceCategories[prev.priceCategories.length - 1].applicableDayIds : [],
+/home/z/my-project/src/app/admin/events/page.tsx:312:        applicableDayIds: (pc.applicableDayIds || []).filter(id => id !== removedTempId),
+/home/z/my-project/src/app/admin/events/page.tsx:346:      // Festival Mode: filter out empty price categories and serialize applicableDayIds
+/home/z/my-project/src/app/admin/events/page.tsx:351:            // Regular event: no packageType / applicableDayIds
+/home/z/my-project/src/app/admin/events/page.tsx:352:            const { packageType, applicableDayIds, ...rest } = pc
+/home/z/my-project/src/app/admin/events/page.tsx:353:            void packageType; void applicableDayIds
+/home/z/my-project/src/app/admin/events/page.tsx:357:          const pkgType = pc.packageType || 'SINGLE'
+/home/z/my-project/src/app/admin/events/page.tsx:360:            const { packageType: _pt, applicableDayIds: _ad, ...rest } = pc
+/home/z/my-project/src/app/admin/events/page.tsx:362:            return { ...rest, packageType: 'FULL', applicableDayIds: null }
+/home/z/my-project/src/app/admin/events/page.tsx:365:          const dayIds = (pc.applicableDayIds || []).map(tempId =>
+/home/z/my-project/src/app/admin/events/page.tsx:372:            packageType: pkgType,
+/home/z/my-project/src/app/admin/events/page.tsx:373:            applicableDayIds: JSON.stringify(dayIds),
+/home/z/my-project/src/app/admin/events/page.tsx:439:        // For FESTIVAL events with new showDates, we need a second pass to update applicableDayIds
+/home/z/my-project/src/app/admin/events/page.tsx:456:            // Check if any price category has applicableDayIds that need updating
+/home/z/my-project/src/app/admin/events/page.tsx:458:              pc.packageType && pc.packageType !== 'FULL' &&
+/home/z/my-project/src/app/admin/events/page.tsx:459:              (pc.applicableDayIds || []).some(tempId => !showDateTempToDbId[tempId])
+/home/z/my-project/src/app/admin/events/page.tsx:465:                  if (!pc.packageType || pc.packageType === 'FULL') {
+/home/z/my-project/src/app/admin/events/page.tsx:470:                      packageType: pc.packageType || null,
+/home/z/my-project/src/app/admin/events/page.tsx:471:                      applicableDayIds: null,
+/home/z/my-project/src/app/admin/events/page.tsx:474:                  const dayIds = (pc.applicableDayIds || []).map(tempId =>
+/home/z/my-project/src/app/admin/events/page.tsx:481:                    packageType: pc.packageType,
+/home/z/my-project/src/app/admin/events/page.tsx:482:                    applicableDayIds: JSON.stringify(dayIds),
+/home/z/my-project/src/app/admin/events/page.tsx:485:              // Send second update to fix applicableDayIds
+/home/z/my-project/src/app/admin/events/page.tsx:1328:                            onClick={() => updatePriceCategory(index, 'packageType', 'SINGLE')}
+/home/z/my-project/src/app/admin/events/page.tsx:1330:                              (pc.packageType || 'SINGLE') === 'SINGLE'
+/home/z/my-project/src/app/admin/events/page.tsx:1339:                            onClick={() => updatePriceCategory(index, 'packageType', 'MULTI')}
+/home/z/my-project/src/app/admin/events/page.tsx:1341:                              pc.packageType === 'MULTI'
+/home/z/my-project/src/app/admin/events/page.tsx:1350:                            onClick={() => updatePriceCategory(index, 'packageType', 'FULL')}
+/home/z/my-project/src/app/admin/events/page.tsx:1352:                              pc.packageType === 'FULL'
+/home/z/my-project/src/app/admin/events/page.tsx:1363:                      {pc.packageType !== 'FULL' && (
+/home/z/my-project/src/app/admin/events/page.tsx:1366:                            Hari yang Berlaku {(pc.packageType || 'SINGLE') === 'SINGLE' ? '(pilih 1)' : '(pilih yang sesuai)'}
+/home/z/my-project/src/app/admin/events/page.tsx:1374:                                const isSelected = (pc.applicableDayIds || []).includes(tempId)
+/home/z/my-project/src/app/admin/events/page.tsx:1382:                                      const current = pc.applicableDayIds || []
+/home/z/my-project/src/app/admin/events/page.tsx:1384:                                        updatePriceCategory(index, 'applicableDayIds', current.filter(id => id !== tempId))
+/home/z/my-project/src/app/admin/events/page.tsx:1386:                                        updatePriceCategory(index, 'applicableDayIds', [...current, tempId])
+/home/z/my-project/src/app/admin/events/page.tsx:1405:                      {pc.packageType === 'FULL' && (
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:33:    priceCategories: Array<{ id: string; name: string; price: number; colorCode: string; packageType?: string | null; applicableDayIds?: string | null }>;
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:53:  festivalPackageBreakdown?: Array<{
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:54:    packageType: string; packageName: string; daysCount: number;
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:243:  ${data.festivalPackageBreakdown && data.festivalPackageBreakdown.length > 0 ? `
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:259:        ${data.festivalPackageBreakdown.map(fp => {
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:260:          const typeLabel = fp.packageType === 'FULL' ? 'Full Pass' : fp.packageType === 'MULTI' ? 'Multi-Day' : 'Single Day'
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:687:      {data.festivalPackageBreakdown && data.festivalPackageBreakdown.length > 0 && (
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:717:                  {data.festivalPackageBreakdown.map((fp, idx) => {
+/home/z/my-project/src/app/admin/events/[id]/finance/page.tsx:718:                    const typeLabel = fp.packageType === 'FULL' ? 'Full Pass' : fp.packageType === 'MULTI' ? 'Multi-Day' : 'Single Day'
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:48:  applicableDayIds?: string[] | null
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:49:  packageType?: string | null
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:282:  // dayId === null  → set to FULL pass (applicableDayIds = null, valid all days)
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:283:  // dayId === string → toggle that day in/out of applicableDayIds
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:292:    const current = pc.applicableDayIds || null
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:312:    // Derive packageType from applicableDayIds
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:313:    let packageType: string | null = null
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:314:    if (next === null) packageType = 'FULL'
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:315:    else if (next.length === 1) packageType = 'SINGLE'
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:316:    else if (next.length >= 2) packageType = 'MULTI'
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:319:    const prevValue = pc.applicableDayIds
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:321:      p.id === pc.id ? { ...p, applicableDayIds: next, packageType } : p
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:333:            packageType,
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:334:            applicableDayIds: next === null ? null : JSON.stringify(next),
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:343:          p.id === pc.id ? { ...p, applicableDayIds: prevValue } : p
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:350:        p.id === pc.id ? { ...p, applicableDayIds: prevValue } : p
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:834:                    const selected = pc.applicableDayIds || null
+/home/z/my-project/src/app/admin/events/[id]/seats/page.tsx:1243:                  (<code className="text-[10px] bg-amber-100 px-1 rounded">applicableDayIds</code>),
+/home/z/my-project/src/app/events/[id]/page.tsx:49:    packageType?: string | null
+/home/z/my-project/src/app/events/[id]/page.tsx:50:    applicableDayIds?: string | null
+/home/z/my-project/src/app/events/[id]/page.tsx:169:    applicableDayIds: string[]
+/home/z/my-project/src/app/events/[id]/page.tsx:1066:                      festivalPackage={festivalPkg ? {
+/home/z/my-project/src/app/events/[id]/page.tsx:1069:                        packageType: festivalPkg.priceCategory.packageType || 'SINGLE',
+/home/z/my-project/src/app/events/[id]/page.tsx:1070:                        applicableDayIds: festivalPkg.applicableDayIds,
+/home/z/my-project/src/app/api/admin/events/route.ts:66:            // Parse applicableDayIds from JSON string to array for frontend
+/home/z/my-project/src/app/api/admin/events/route.ts:67:            applicableDayIds: pc.applicableDayIds
+/home/z/my-project/src/app/api/admin/events/route.ts:68:              ? (() => { try { return JSON.parse(pc.applicableDayIds) } catch { return null } })()
+/home/z/my-project/src/app/api/admin/events/route.ts:177:            packageType?: string | null;
+/home/z/my-project/src/app/api/admin/events/route.ts:178:            applicableDayIds?: string | null;
+/home/z/my-project/src/app/api/admin/events/route.ts:184:            packageType: pc.packageType || null,
+/home/z/my-project/src/app/api/admin/events/route.ts:185:            applicableDayIds: pc.applicableDayIds || null,
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:58:        priceCategories: { select: { id: true, name: true, price: true, colorCode: true, packageType: true, applicableDayIds: true } },
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:121:    //   do NOT attribute to any single day — track in a separate festivalPackageBreakdown.
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:165:    const festivalPackageMap: Record<string, { packageType: string; packageName: string; daysCount: number; ticketCount: number; transactions: number; grossRevenue: number; adminFee: number; netRevenue: number }> = {}
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:166:    // Build a lookup from priceCategoryId → packageType + applicableDayIds
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:167:    const festivalPcLookup = new Map<string, { packageType: string; applicableDayIds: string[] }>()
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:169:      if (pc.packageType) {
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:171:        if (pc.applicableDayIds) {
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:172:          try { days = JSON.parse(pc.applicableDayIds) } catch { /* ignore */ }
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:173:        } else if (pc.packageType === 'FULL') {
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:176:        festivalPcLookup.set(pc.id, { packageType: pc.packageType, applicableDayIds: days })
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:236:            if (!festivalPackageMap[key]) {
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:237:              festivalPackageMap[key] = {
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:238:                packageType: pcInfo.packageType,
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:240:                daysCount: pcInfo.applicableDayIds.length,
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:248:            festivalPackageMap[key].ticketCount += effectiveTicketCount
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:249:            festivalPackageMap[key].transactions++
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:250:            festivalPackageMap[key].grossRevenue += tx.totalAmount
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:251:            festivalPackageMap[key].adminFee += adminFee
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:252:            festivalPackageMap[key].netRevenue += tx.totalAmount - adminFee
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:338:    const festivalAdminFee = Object.values(festivalPackageMap).reduce((sum, p) => sum + p.adminFee, 0)
+/home/z/my-project/src/app/api/admin/events/[id]/finance/route.ts:408:      festivalPackageBreakdown: Object.values(festivalPackageMap).sort((a, b) => b.grossRevenue - a.grossRevenue),
+/home/z/my-project/src/app/api/admin/events/[id]/generate-seats/route.ts:297:    // Multi-day is just metadata — applicableDayIds on each PriceCategory
+/home/z/my-project/src/app/api/admin/events/[id]/generate-seats/route.ts:310:    // done via PriceCategory.applicableDayIds, which the check-in / scan
+/home/z/my-project/src/components/checkout-form.tsx:55:  packageType: string  // SINGLE | MULTI | FULL
+/home/z/my-project/src/components/checkout-form.tsx:56:  applicableDayIds: string[]
+/home/z/my-project/src/components/checkout-form.tsx:68:  festivalPackage?: FestivalPackageInfo
+/home/z/my-project/src/components/checkout-form.tsx:101:export function CheckoutForm({ eventId, showDateId, selectedSeats, totalPrice, onBack, adminFee = 0, festivalPackage }: CheckoutFormProps) {
+/home/z/my-project/src/components/checkout-form.tsx:111:  const isFestival = !!festivalPackage
+/home/z/my-project/src/components/checkout-form.tsx:136:  const festivalTicketCount = festivalPackage?.quantity || 0
+/home/z/my-project/src/components/checkout-form.tsx:143:  const zoneNames = isFestival && festivalPackage
+/home/z/my-project/src/components/checkout-form.tsx:144:    ? [festivalPackage.packageName]
+/home/z/my-project/src/components/checkout-form.tsx:368:      if (isFestival && festivalPackage) {
+/home/z/my-project/src/components/checkout-form.tsx:369:        checkoutPayload.festivalPackage = {
+/home/z/my-project/src/components/checkout-form.tsx:370:          priceCategoryId: festivalPackage.priceCategoryId,
+/home/z/my-project/src/components/checkout-form.tsx:371:          packageName: festivalPackage.packageName,
+/home/z/my-project/src/components/checkout-form.tsx:372:          packageType: festivalPackage.packageType,
+/home/z/my-project/src/components/checkout-form.tsx:373:          applicableDayIds: festivalPackage.applicableDayIds,
+/home/z/my-project/src/components/checkout-form.tsx:374:          quantity: festivalPackage.quantity,
+/home/z/my-project/src/components/checkout-form.tsx:375:          unitPrice: festivalPackage.unitPrice,
+/home/z/my-project/src/components/checkout-form.tsx:439:              {isFestival && festivalPackage ? (
+/home/z/my-project/src/components/checkout-form.tsx:445:                      {festivalPackage.packageName}
+/home/z/my-project/src/components/checkout-form.tsx:447:                        {festivalPackage.packageType === 'FULL' ? 'Full Pass' : festivalPackage.packageType === 'MULTI' ? 'Multi-Day' : 'Single Day'}
+/home/z/my-project/src/components/checkout-form.tsx:451:                      Rp {festivalPackage.unitPrice.toLocaleString('id-ID')}
+/home/z/my-project/src/components/checkout-form.tsx:455:                    <span>× {festivalPackage.quantity} tiket</span>
+/home/z/my-project/src/components/checkout-form.tsx:456:                    <span>= Rp {(festivalPackage.unitPrice * festivalPackage.quantity).toLocaleString('id-ID')}</span>
+/home/z/my-project/src/components/checkout-form.tsx:459:                    Berlaku untuk {festivalPackage.applicableDayIds.length} hari pertunjukan · 1 QR untuk semua hari
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:60:          // Parse applicableDayIds from JSON string to array for frontend
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:61:          applicableDayIds: pc.applicableDayIds
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:62:            ? (() => { try { return JSON.parse(pc.applicableDayIds) } catch { return null } })()
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:189:        packageType?: string | null;
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:190:        applicableDayIds?: string | null;
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:195:        if (pc.packageType !== undefined) updateData.packageType = pc.packageType || null
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:196:        if (pc.applicableDayIds !== undefined) updateData.applicableDayIds = pc.applicableDayIds || null
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:210:              packageType: pc.packageType || null,
+/home/z/my-project/src/app/api/admin/events/[id]/route.ts:211:              applicableDayIds: pc.applicableDayIds || null,
+/home/z/my-project/src/app/api/admin/events/[id]/fix-seats/route.ts:10: *   - Multi-day is just metadata on PriceCategory.applicableDayIds
+/home/z/my-project/src/components/festival-package-picker.tsx:25:  packageType?: string | null   // SINGLE | MULTI | FULL
+/home/z/my-project/src/components/festival-package-picker.tsx:26:  applicableDayIds?: string | null  // JSON array of showDate IDs
+/home/z/my-project/src/components/festival-package-picker.tsx:40:    applicableDayIds: string[]
+/home/z/my-project/src/components/festival-package-picker.tsx:98:  // Filter to only categories with packageType (festival packages)
+/home/z/my-project/src/components/festival-package-picker.tsx:101:      .filter(pc => pc.packageType)
+/home/z/my-project/src/components/festival-package-picker.tsx:105:          if (pc.applicableDayIds) {
+/home/z/my-project/src/components/festival-package-picker.tsx:106:            applicableDays = JSON.parse(pc.applicableDayIds)
+/home/z/my-project/src/components/festival-package-picker.tsx:107:          } else if (pc.packageType === 'FULL') {
+/home/z/my-project/src/components/festival-package-picker.tsx:126:        return (order[a.packageType as keyof typeof order] || 99) - (order[b.packageType as keyof typeof order] || 99)
+/home/z/my-project/src/components/festival-package-picker.tsx:153:  // `applicableDayIds` is ONLY metadata for:
+/home/z/my-project/src/components/festival-package-picker.tsx:203:      applicableDayIds: selectedPkg.parsedDayIds,
+/home/z/my-project/src/components/festival-package-picker.tsx:250:          const Icon = packageIcon(pkg.packageType)
+/home/z/my-project/src/components/festival-package-picker.tsx:286:                        {packageLabel(pkg.packageType)}
+/home/z/my-project/src/lib/festival-seats.ts:86:    const applicableDayIds = getFestivalDayIds(seatCodes)
+/home/z/my-project/src/lib/festival-seats.ts:88:      where: { id: { in: applicableDayIds } },
+/home/z/my-project/src/lib/festival-seats.ts:328:  let applicableDayIds = getFestivalDayIds(seatCodes)
+/home/z/my-project/src/lib/festival-seats.ts:333:      select: { name: true, packageType: true, applicableDayIds: true },
+/home/z/my-project/src/lib/festival-seats.ts:337:      // For FULL pass, applicableDayIds is null in DB — use the actual day IDs from seatCodes
+/home/z/my-project/src/lib/festival-seats.ts:338:      if (pc.packageType !== 'FULL' && pc.applicableDayIds) {
+/home/z/my-project/src/lib/festival-seats.ts:340:          applicableDayIds = JSON.parse(pc.applicableDayIds)
+/home/z/my-project/src/lib/festival-seats.ts:351:    ' | HARI: ' + applicableDayIds.length + ' hari' +

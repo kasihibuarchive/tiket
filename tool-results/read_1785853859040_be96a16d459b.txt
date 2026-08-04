@@ -1,0 +1,593 @@
+     1→import { NextRequest, NextResponse } from 'next/server'
+     2→import { db } from '@/lib/db'
+     3→import { randomUUID } from 'crypto'
+     4→import { getTripayConfig, createTransactionSignature, createTripayTransaction, LEGACY_METHOD_MAP } from '@/lib/tripay'
+     5→import { checkoutLimiter, getClientIp } from '@/lib/rate-limit'
+     6→
+     7→const CHECKOUT_PREFIX = 'CK:'
+     8→
+     9→export async function POST(request: NextRequest) {
+    10→  try {
+    11→    // Rate limit by IP: max 5 checkouts per minute
+    12→    const ip = getClientIp(request)
+    13→    const rateResult = checkoutLimiter.check(`checkout:${ip}`)
+    14→    if (!rateResult.allowed) {
+    15→      return NextResponse.json(
+    16→        { error: 'Terlalu banyak request. Tunggu beberapa saat dan coba lagi.' },
+    17→        { status: 429, headers: { 'Retry-After': String(Math.ceil((rateResult.resetAt - Date.now()) / 1000)) } }
+    18→      )
+    19→    }
+    20→
+    21→    const body = await request.json()
+    22→    const {
+    23→      eventId, showDateId, customerName, customerEmail, customerWa, seatCodes, sessionId,
+    24→      promoCodeId, merchandise, paymentMethod,
+    25→      festivalPackage,
+    26→    } = body
+    27→
+    28→    const isFestivalCheckout = !!festivalPackage
+    29→
+    30→    // Validation: festival mode needs festivalPackage; regular mode needs seatCodes
+    31→    if (!eventId || !customerName || !customerEmail || !customerWa) {
+    32→      return NextResponse.json({ error: 'Data tidak lengkap' }, { status: 400 })
+    33→    }
+    34→    if (!isFestivalCheckout && (!seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0)) {
+    35→      return NextResponse.json({ error: 'Pilih kursi terlebih dahulu' }, { status: 400 })
+    36→    }
+    37→    if (isFestivalCheckout && (!festivalPackage.quantity || festivalPackage.quantity < 1)) {
+    38→      return NextResponse.json({ error: 'Jumlah tiket festival tidak valid' }, { status: 400 })
+    39→    }
+    40→
+    41→    if (!sessionId) {
+    42→      return NextResponse.json({ error: 'Session tidak valid. Silakan refresh halaman.' }, { status: 400 })
+    43→    }
+    44→
+    45→    const checkoutId = CHECKOUT_PREFIX + sessionId
+    46→
+    47→    // Get event with all needed fields
+    48→    const event = await db.event.findUnique({
+    49→      where: { id: eventId },
+    50→      select: {
+    51→        adminFee: true,
+    52→        isPublished: true,
+    53→        eventMode: true,
+    54→        seatType: true,
+    55→      },
+    56→    })
+    57→
+    58→    // Block checkout for unpublished events
+    59→    if (!event?.isPublished) {
+    60→      return NextResponse.json({ error: 'Penjualan tiket untuk event ini sudah ditutup.' }, { status: 403 })
+    61→    }
+    62→
+    63→    // Festival Mode: validate package + auto-pick GA seats from each applicable day
+    64→    let festivalAutoSeats: { id: string; seatCode: string; eventShowDateId: string; priceCategoryId: string }[] = []
+    65→    let festivalTicketCount = 0
+    66→    let festivalSeatCodes: string[] = []
+    67→    let festivalPriceCategoryId: string | null = null
+    68→
+    69→    if (isFestivalCheckout) {
+    70→      const pkg = festivalPackage
+    71→      const qty = parseInt(pkg.quantity, 10)
+    72→      if (!Number.isFinite(qty) || qty < 1) {
+    73→        return NextResponse.json({ error: 'Jumlah tiket tidak valid' }, { status: 400 })
+    74→      }
+    75→      festivalTicketCount = qty
+    76→
+    77→      // Validate price category
+    78→      const priceCat = await db.priceCategory.findUnique({ where: { id: pkg.priceCategoryId } })
+    79→      if (!priceCat || priceCat.eventId !== eventId) {
+    80→        return NextResponse.json({ error: 'Kategori harga tidak valid' }, { status: 400 })
+    81→      }
+    82→      festivalPriceCategoryId = priceCat.id
+    83→
+    84→      // Resolve applicable day IDs
+    85→      let applicableDayIds: string[] = pkg.applicableDayIds || []
+    86→      if (priceCat.packageType === 'FULL') {
+    87→        // FULL = all days
+    88→        const allDates = await db.eventShowDate.findMany({ where: { eventId }, orderBy: { date: 'asc' } })
+    89→        applicableDayIds = allDates.map(d => d.id)
+    90→      } else if (priceCat.applicableDayIds) {
+    91→        try { applicableDayIds = JSON.parse(priceCat.applicableDayIds) } catch { /* ignore */ }
+    92→      }
+    93→
+    94→      if (applicableDayIds.length === 0) {
+    95→        return NextResponse.json({ error: 'Paket festival tidak memiliki hari yang berlaku. Hubungi admin.' }, { status: 400 })
+    96→      }
+    97→
+    98→      // ─── NEW MODEL: 1 tiket = 1 seat (single pool, no per-day duplication) ───
+    99→      // Multi-day access is encoded in the seatCode stored on the transaction:
+   100→      //   "VIP-1@day1abc,day2def,day3ghi"
+   101→      // The seat itself has eventShowDateId = null. The applicable days are
+   102→      // derived from the price category's applicableDayIds at checkout time.
+   103→      //
+   104→      // Availability = count of AVAILABLE seats in this package's zone, period.
+   105→      // No per-day breakdown, no min-across-days.
+   106→      const allPickedSeats: { id: string; seatCode: string; priceCategoryId: string }[] = []
+   107→
+   108→      // Find `qty` available GA seats in this price category's zone
+   109→      // (zoneName === price category name in our auto-built GA config)
+   110→      const availableSeats = await db.seat.findMany({
+   111→        where: {
+   112→          eventId,
+   113→          priceCategoryId: priceCat.id,
+   114→          status: 'AVAILABLE',
+   115→        },
+   116→        orderBy: { seatCode: 'asc' },
+   117→        take: qty,
+   118→      })
+   119→
+   120→      if (availableSeats.length < qty) {
+   121→        return NextResponse.json({
+   122→          error: `Tiket tinggal ${availableSeats.length} (Anda pesan ${qty}). Kurangi jumlah atau pilih paket lain.`,
+   123→        }, { status: 409 })
+   124→      }
+   125→
+   126→      for (const s of availableSeats) {
+   127→        allPickedSeats.push({
+   128→          id: s.id,
+   129→          seatCode: s.seatCode,
+   130→          priceCategoryId: s.priceCategoryId!,
+   131→        })
+   132→      }
+   133→
+   134→      // Lock the picked seats under this checkout session
+   135→      const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+   136→      await db.seat.updateMany({
+   137→        where: { id: { in: allPickedSeats.map(s => s.id) } },
+   138→        data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
+   139→      })
+   140→
+   141→      festivalAutoSeats = allPickedSeats as any
+   142→      // Encode applicable day IDs into seatCode string for check-in:
+   143→      // "VIP-1@day1abc,day2def,day3ghi" — usher scans, system knows ticket
+   144→      // is valid for any of those days.
+   145→      const dayIdsJoined = applicableDayIds.join(',')
+   146→      festivalSeatCodes = allPickedSeats.map(s => `${s.seatCode}@${dayIdsJoined}`)
+   147→    } else {
+   148→      // REGULAR Mode: validate seats as before
+   149→      const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+   150→      if (showDateId) {
+   151→        seatWhere.eventShowDateId = showDateId
+   152→      }
+   153→      const seats = await db.seat.findMany({ where: seatWhere })
+   154→      if (seats.length !== seatCodes.length) return NextResponse.json({ error: 'Kursi tidak ditemukan' }, { status: 404 })
+   155→
+   156→      const invalidSeats = seats.filter((s) => s.status === 'SOLD')
+   157→      if (invalidSeats.length > 0) {
+   158→        return NextResponse.json({ error: 'Kursi ' + invalidSeats.map((s) => s.seatCode).join(', ') + ' sudah terjual' }, { status: 409 })
+   159→      }
+   160→
+   161→      const notOurs = seats.filter((s) => s.status === 'LOCKED_TEMPORARY' && s.lockedBy !== checkoutId)
+   162→      if (notOurs.length > 0) {
+   163→        return NextResponse.json({ error: 'Kursi ' + notOurs.map((s) => s.seatCode).join(', ') + ' sedang dipilih orang lain.' }, { status: 409 })
+   164→      }
+   165→
+   166→      // Re-lock seats
+   167→      const lockedUntil = new Date(Date.now() + 10 * 60 * 1000)
+   168→      await db.seat.updateMany({
+   169→        where: { eventId, seatCode: { in: seatCodes }, lockedBy: checkoutId },
+   170→        data: { status: 'LOCKED_TEMPORARY', lockedUntil, lockedBy: checkoutId },
+   171→      })
+   172→    }
+   173→
+   174→    // Resolve payment method — accept Tripay channel codes or legacy QRIS/NON_QRIS
+   175→    let resolvedMethod = paymentMethod || 'BCAVA'
+   176→    if (LEGACY_METHOD_MAP[resolvedMethod]) {
+   177→      resolvedMethod = LEGACY_METHOD_MAP[resolvedMethod]
+   178→    }
+   179→
+   180→    // Calculate seat prices & items
+   181→    const priceCats = await db.priceCategory.findMany({ where: { eventId } })
+   182→
+   183→    let seatTotal = 0
+   184→    const items: any[] = []
+   185→
+   186→    if (isFestivalCheckout) {
+   187→      // Festival Mode: each ticket = 1 festival package (covers all applicable days)
+   188→      // We charge `quantity` × package price (not per-day seats)
+   189→      const pkg = festivalPackage
+   190→      const qty = festivalTicketCount
+   191→      const pkgPrice = pkg.unitPrice
+   192→      seatTotal = pkgPrice * qty
+   193→
+   194→      items.push({
+   195→        id: `FESTIVAL-${pkg.priceCategoryId}`,
+   196→        price: pkgPrice,
+   197→        quantity: qty,
+   198→        name: `${pkg.packageName} (Festival Pass — ${pkg.applicableDayIds?.length || 0} hari)`,
+   199→        category: 'Tiket Festival',
+   200→        priceCategoryId: pkg.priceCategoryId,
+   201→      })
+   202→    } else {
+   203→      // REGULAR Mode: use seat prices as before
+   204→      const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+   205→      if (showDateId) {
+   206→        seatWhere.eventShowDateId = showDateId
+   207→      }
+   208→      const seatPrices = await db.seat.findMany({ where: seatWhere, select: { seatCode: true, priceCategoryId: true } })
+   209→
+   210→      for (const s of seatPrices) {
+   211→        const cat = priceCats.find((p) => p.id === s.priceCategoryId)
+   212→        if (!cat) return NextResponse.json({ error: 'Harga kursi belum diatur' }, { status: 400 })
+   213→        seatTotal += cat.price
+   214→        items.push({ id: s.seatCode, price: cat.price, quantity: 1, name: 'Kursi ' + s.seatCode, category: 'Tiket', priceCategoryId: s.priceCategoryId })
+   215→      }
+   216→    }
+   217→
+   218→    // Admin fee — flat per ticket (festival uses festivalTicketCount)
+   219→    const adminFeePerTicket = event?.adminFee || 0
+   220→    const effectiveTicketCount = isFestivalCheckout ? festivalTicketCount : seatCodes.length
+   221→    const adminFeeTotal = adminFeePerTicket * effectiveTicketCount
+   222→
+   223→    if (adminFeeTotal > 0) {
+   224→      items.push({ id: 'ADMIN-FEE', price: adminFeeTotal, quantity: 1, name: 'Biaya Admin', category: 'Biaya' })
+   225→    }
+   226→
+   227→    // Promo code - calculate discount (using Jakarta timezone)
+   228→    const JAKARTA_OFFSET = 7 * 60
+   229→    const toJakarta = (d: Date) => {
+   230→      const utcMs = d.getTime() + d.getTimezoneOffset() * 60 * 1000
+   231→      return new Date(utcMs + JAKARTA_OFFSET * 60 * 1000)
+   232→    }
+   233→
+   234→    let discountAmount = 0
+   235→    let promoCodeData: Awaited<ReturnType<typeof db.promoCode.findUnique>> | null = null
+   236→    let promoTarget = 'ALL'
+   237→    if (promoCodeId) {
+   238→      promoCodeData = await db.promoCode.findUnique({ where: { id: promoCodeId } })
+   239→      promoTarget = promoCodeData?.target || 'ALL'
+   240→      if (promoCodeData && promoCodeData.isActive && promoCodeData.currentUses < promoCodeData.maxUses) {
+   241→        const now = new Date()
+   242→        const nowJakarta = toJakarta(now)
+   243→        const fromJakarta = toJakarta(new Date(promoCodeData.validFrom))
+   244→        const untilJakarta = toJakarta(new Date(promoCodeData.validUntil))
+   245→
+   246→        if (nowJakarta >= fromJakarta && nowJakarta <= untilJakarta) {
+   247→          const hasMerch = merchandise && Array.isArray(merchandise) && merchandise.length > 0
+   248→
+   249→          // Use effectiveTicketCount so festival mode (where seatCodes is empty) still validates correctly
+   250→          const ticketCountForPromo = isFestivalCheckout ? festivalTicketCount : seatCodes.length
+   251→
+   252→          if (ticketCountForPromo < (promoCodeData.minTickets || 0)) {
+   253→            return NextResponse.json({ error: `Promo ini berlaku untuk pembelian minimal ${promoCodeData.minTickets} tiket` }, { status: 400 })
+   254→          }
+   255→          if (!hasMerch && (promoCodeData.minMerchItems || 0) > 0) {
+   256→            return NextResponse.json({ error: `Promo ini berlaku jika membeli minimal ${promoCodeData.minMerchItems} merchandise` }, { status: 400 })
+   257→          }
+   258→
+   259→          if (promoTarget === 'BUNDLING' && !(ticketCountForPromo > 0 && hasMerch)) {
+   260→            return NextResponse.json({ error: 'Promo bundling hanya berlaku jika membeli tiket + merchandise' }, { status: 400 })
+   261→          }
+   262→          if (promoTarget === 'MERCH' && !hasMerch) {
+   263→            return NextResponse.json({ error: 'Promo ini hanya berlaku untuk merchandise' }, { status: 400 })
+   264→          }
+   265→
+   266→          // --- Zone restriction validation ---
+   267→          // applicableZoneNames: JSON array of zone/category names
+   268→          // Matches: priceCategory.name (Numbered Seating) or zoneName (General Admission)
+   269→          // Festival Mode: package name (which is also zone name in GA config)
+   270→          if (promoCodeData.applicableZoneNames) {
+   271→            try {
+   272→              const allowedZones: string[] = JSON.parse(promoCodeData.applicableZoneNames)
+   273→              if (Array.isArray(allowedZones) && allowedZones.length > 0) {
+   274→                let allBuyerZones: string[] = []
+   275→
+   276→                if (isFestivalCheckout) {
+   277→                  // Festival: use package name (= price category name = zone name)
+   278→                  const festivalCat = priceCats.find(p => p.id === festivalPriceCategoryId)
+   279→                  if (festivalCat?.name) allBuyerZones.push(festivalCat.name)
+   280→                } else {
+   281→                  // Regular: get zone names from seats + price category names
+   282→                  const seatWhere: any = { eventId, seatCode: { in: seatCodes } }
+   283→                  if (showDateId) seatWhere.eventShowDateId = showDateId
+   284→                  const seatsForZones = await db.seat.findMany({
+   285→                    where: seatWhere,
+   286→                    select: { seatCode: true, zoneName: true, priceCategoryId: true },
+   287→                  })
+   288→                  const buyerZoneNames = seatsForZones
+   289→                    .map((s) => s.zoneName)
+   290→                    .filter(Boolean) as string[]
+   291→                  const buyerCategoryNames = seatsForZones
+   292→                    .map((s) => {
+   293→                      const cat = priceCats.find((p) => p.id === s.priceCategoryId)
+   294→                      return cat?.name
+   295→                    })
+   296→                    .filter(Boolean) as string[]
+   297→                  allBuyerZones = [...new Set([...buyerZoneNames, ...buyerCategoryNames])]
+   298→                }
+   299→
+   300→                const matchingZones = allBuyerZones.filter((name) => allowedZones.includes(name))
+   301→                if (matchingZones.length === 0) {
+   302→                  return NextResponse.json({ error: `Promo ini hanya berlaku untuk zona: ${allowedZones.join(', ')}` }, { status: 400 })
+   303→                }
+   304→              }
+   305→            } catch {
+   306→              // If JSON parse fails, ignore category restriction
+   307→            }
+   308→          }
+   309→        } else {
+   310→          // Promo date invalid — clear promo so it doesn't get applied
+   311→          promoCodeData = null
+   312→        }
+   313→      } else {
+   314→        // Promo inactive or max uses reached — clear promo
+   315→        promoCodeData = null
+   316→      }
+   317→    }
+   318→
+   319→    // Merchandise - use DB price, not client-sent price
+   320→    let merchDataToSave: any = null
+   321→    if (merchandise && Array.isArray(merchandise) && merchandise.length > 0) {
+   322→      merchDataToSave = []
+   323→      let merchTotal = 0
+   324→
+   325→      for (const merch of merchandise) {
+   326→        const merchItem = await db.merchandise.findUnique({ where: { id: merch.merchandiseId } })
+   327→        if (!merchItem) {
+   328→          return NextResponse.json({ error: 'Merchandise "' + merch.name + '" tidak ditemukan' }, { status: 404 })
+   329→        }
+   330→        if (merchItem.stock < merch.quantity || merch.quantity < 1) {
+   331→          return NextResponse.json({ error: 'Stok "' + merchItem.name + '" tidak cukup (sisa: ' + merchItem.stock + ')' }, { status: 409 })
+   332→        }
+   333→
+   334→        const subtotal = merchItem.price * merch.quantity
+   335→        merchTotal += subtotal
+   336→
+   337→        merchDataToSave.push({
+   338→          merchandiseId: merch.merchandiseId,
+   339→          name: merchItem.name,
+   340→          price: merchItem.price,
+   341→          quantity: merch.quantity,
+   342→        })
+   343→
+   344→        items.push({
+   345→          id: 'MERCH-' + merch.merchandiseId,
+   346→          price: merchItem.price,
+   347→          quantity: merch.quantity,
+   348→          name: merchItem.name,
+   349→          category: 'Merchandise',
+   350→        })
+   351→      }
+   352→
+   353→      for (const merch of merchandise) {
+   354→        await db.merchandise.update({
+   355→          where: { id: merch.merchandiseId },
+   356→          data: { stock: { decrement: merch.quantity } },
+   357→        })
+   358→      }
+   359→    }
+   360→
+   361→    const merchTotalCalc = merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.price * m.quantity, 0) : 0
+   362→
+   363→    // ── Calculate discount AFTER merchandise is resolved ──
+   364→    if (promoCodeData) {
+   365→      const isPerItem = promoCodeData.isPerItem === true
+   366→      const ticketSubtotal = seatTotal + adminFeeTotal
+   367→      // Use effectiveTicketCount for festival mode (where seatCodes is empty)
+   368→      const ticketCount = isFestivalCheckout ? festivalTicketCount : seatCodes.length
+   369→
+   370→      // --- Bundling discount calculation ---
+   371→      if (promoCodeData.bundleSize > 0 && promoCodeData.bundleDiscount > 0) {
+   372→        const bundleCount = Math.floor(ticketCount / promoCodeData.bundleSize)
+   373→        if (bundleCount > 0) {
+   374→          discountAmount = bundleCount * promoCodeData.bundleDiscount
+   375→        }
+   376→      } else if (promoTarget === 'TICKET') {
+   377→        if (isPerItem && ticketCount > 0) {
+   378→          const perItemDiscount =
+   379→            promoCodeData.discountType === 'PERCENT'
+   380→              ? Math.round((ticketSubtotal / ticketCount) * promoCodeData.discountValue / 100)
+   381→              : Math.min(promoCodeData.discountValue, ticketSubtotal / ticketCount)
+   382→          discountAmount = perItemDiscount * ticketCount
+   383→        } else {
+   384→          discountAmount =
+   385→            promoCodeData.discountType === 'PERCENT'
+   386→              ? Math.round(ticketSubtotal * promoCodeData.discountValue / 100)
+   387→              : Math.min(promoCodeData.discountValue, ticketSubtotal)
+   388→        }
+   389→      } else if (promoTarget === 'MERCH' && merchTotalCalc > 0) {
+   390→        const totalMerchQty = merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0
+   391→        if (isPerItem && totalMerchQty > 0) {
+   392→          const perItemDiscount =
+   393→            promoCodeData.discountType === 'PERCENT'
+   394→              ? Math.round((merchTotalCalc / totalMerchQty) * promoCodeData.discountValue / 100)
+   395→              : Math.min(promoCodeData.discountValue, merchTotalCalc / totalMerchQty)
+   396→          discountAmount = perItemDiscount * totalMerchQty
+   397→        } else {
+   398→          discountAmount =
+   399→            promoCodeData.discountType === 'PERCENT'
+   400→              ? Math.round(merchTotalCalc * promoCodeData.discountValue / 100)
+   401→              : Math.min(promoCodeData.discountValue, merchTotalCalc)
+   402→        }
+   403→      } else if (promoTarget === 'ALL' || promoTarget === 'BUNDLING') {
+   404→        const targetSubtotal = ticketSubtotal + merchTotalCalc
+   405→        const totalItems = ticketCount + (merchDataToSave ? merchDataToSave.reduce((s: number, m: any) => s + m.quantity, 0) : 0)
+   406→
+   407→        if (isPerItem && totalItems > 0) {
+   408→          const perItemDiscount =
+   409→            promoCodeData.discountType === 'PERCENT'
+   410→              ? Math.round((targetSubtotal / totalItems) * promoCodeData.discountValue / 100)
+   411→              : Math.min(promoCodeData.discountValue, targetSubtotal / totalItems)
+   412→          discountAmount = perItemDiscount * totalItems
+   413→        } else {
+   414→          discountAmount =
+   415→            promoCodeData.discountType === 'PERCENT'
+   416→              ? Math.round(targetSubtotal * promoCodeData.discountValue / 100)
+   417→              : Math.min(promoCodeData.discountValue, targetSubtotal)
+   418→        }
+   419→      }
+   420→    }
+   421→
+   422→    // Final total = seats + admin fee + merch - discount
+   423→    const totalAmount = Math.max(seatTotal + adminFeeTotal + merchTotalCalc - discountAmount, 1)
+   424→
+   425→    console.log('[checkout] seatTotal:', seatTotal, 'adminFee:', adminFeeTotal, 'discount:', discountAmount, 'merchTotal:', merchTotalCalc, 'totalAmount:', totalAmount)
+   426→
+   427→    // Increment promo code usage
+   428→    if (promoCodeId) {
+   429→      try {
+   430→        await db.promoCode.update({
+   431→          where: { id: promoCodeId },
+   432→          data: { currentUses: { increment: 1 } },
+   433→        })
+   434→        console.log('[checkout] Promo code usage incremented for', promoCodeId)
+   435→      } catch (promoErr) {
+   436→        console.error('[checkout] Failed to increment promo usage:', promoErr)
+   437→      }
+   438→    }
+   439→
+   440→    // Generate transaction ID
+   441→    const tid = 'TRX-' + randomUUID().slice(0, 8).toUpperCase()
+   442→
+   443→    // ── Tripay: Create closed payment transaction ──
+   444→    const tripayConfig = getTripayConfig()
+   445→    if (!tripayConfig.apiKey) {
+   446→      console.error('[checkout] TRIPAY_API_KEY is not configured')
+   447→      return NextResponse.json(
+   448→        { error: 'Payment gateway belum dikonfigurasi. Hubungi admin untuk mengatur API key Tripay.' },
+   449→        { status: 503 }
+   450→      )
+   451→    }
+   452→
+   453→    const expiredTime = Math.floor(Date.now() / 1000) + (24 * 60 * 60) // 24 hours
+   454→    const signature = createTransactionSignature(tid, totalAmount)
+   455→    const appUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+   456→
+   457→    // Build order_items for Tripay — always itemized so admin fee is visible
+   458→    let orderItems: { sku: string; name: string; price: number; quantity: number }[]
+   459→
+   460→    if (discountAmount === 0) {
+   461→      orderItems = items.map((item) => ({
+   462→        sku: item.id,
+   463→        name: item.name,
+   464→        price: item.price,
+   465→        quantity: item.quantity,
+   466→      }))
+   467→    } else {
+   468→      // Distribute discount proportionally across items so the total matches
+   469→      const totalItemValue = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+   470→      let remainingDiscount = discountAmount
+   471→
+   472→      orderItems = items.map((item, idx) => {
+   473→        const itemSubtotal = item.price * item.quantity
+   474→        let itemDiscount: number
+   475→
+   476→        if (idx === items.length - 1) {
+   477→          // Last item gets the remaining discount to avoid rounding issues
+   478→          itemDiscount = remainingDiscount
+   479→        } else {
+   480→          itemDiscount = Math.round(discountAmount * (itemSubtotal / totalItemValue))
+   481→          remainingDiscount -= itemDiscount
+   482→        }
+   483→
+   484→        const discountedPrice = Math.max(itemSubtotal - itemDiscount, 1)
+   485→        return {
+   486→          sku: item.id,
+   487→          name: item.name + (itemDiscount > 0 ? ' (diskon)' : ''),
+   488→          price: Math.ceil(discountedPrice / item.quantity),
+   489→          quantity: item.quantity,
+   490→        }
+   491→      })
+   492→    }
+   493→
+   494→    // Verify order_items total matches amount (Tripay validates this)
+   495→    const itemsTotal = orderItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+   496→    if (itemsTotal !== totalAmount) {
+   497→      // Adjust the last item's price to fix rounding differences
+   498→      const diff = totalAmount - itemsTotal
+   499→      const lastItem = orderItems[orderItems.length - 1]
+   500→      lastItem.price = Math.max(lastItem.price + Math.round(diff / lastItem.quantity), 1)
+   501→    }
+   502→
+   503→    const tripayPayload = {
+   504→      method: resolvedMethod,
+   505→      merchant_ref: tid,
+   506→      amount: totalAmount,
+   507→      customer_name: customerName,
+   508→      customer_email: customerEmail,
+   509→      customer_phone: customerWa,
+   510→      order_items: orderItems,
+   511→      callback_url: appUrl + '/api/webhooks/tripay',
+   512→      return_url: appUrl + '/verify/' + tid,
+   513→      expired_time: expiredTime,
+   514→      signature,
+   515→    }
+   516→
+   517→    console.log('[checkout] Tripay creating transaction:', resolvedMethod, 'amount:', totalAmount, 'tid:', tid)
+   518→
+   519→    const tripayRes = await createTripayTransaction(tripayPayload)
+   520→
+   521→    if (!tripayRes.ok) {
+   522→      const errText = await tripayRes.text().catch(() => 'Unknown error')
+   523→      console.error('[checkout] Tripay error:', tripayRes.status, errText)
+   524→      // Parse Tripay error response for a more helpful message
+   525→      let userMessage = 'Gagal menghubungi payment gateway (error ' + tripayRes.status + ')'
+   526→      try {
+   527→        const errJson = JSON.parse(errText)
+   528→        const tripayMsg = errJson.message || errJson.error || ''
+   529→        if (tripayRes.status === 401) {
+   530→          userMessage = 'API key Tripay tidak valid. Pastikan TRIPAY_API_KEY sudah benar di environment variables.'
+   531→          if (tripayMsg) userMessage += ' (' + tripayMsg + ')'
+   532→        } else if (tripayRes.status === 403) {
+   533→          userMessage = 'Akses Tripay ditolak. Kemungkinan: (1) Mode production/sandbox tidak sesuai — set TRIPAY_IS_PRODUCTION=true jika menggunakan API key production, (2) Private key atau merchant code salah — cek TRIPAY_PRIVATE_KEY dan TRIPAY_MERCHANT_CODE, (3) IP server belum di-whitelist di dashboard Tripay (production mode).'
+   534→          if (tripayMsg) userMessage += ' Detail: ' + tripayMsg
+   535→        } else if (tripayRes.status === 400) {
+   536→          userMessage = 'Permintaan ke Tripay tidak valid: ' + (tripayMsg || errText)
+   537→        }
+   538→      } catch {}
+   539→      return NextResponse.json({ error: userMessage }, { status: 502 })
+   540→    }
+   541→
+   542→    const tripayData = await tripayRes.json()
+   543→
+   544→    if (!tripayData.success || !tripayData.data) {
+   545→      const errMsg = tripayData.message || 'Gagal membuat transaksi pembayaran'
+   546→      console.error('[checkout] Tripay API error:', errMsg, JSON.stringify(tripayData).slice(0, 500))
+   547→      return NextResponse.json({ error: 'Tripay: ' + errMsg }, { status: 502 })
+   548→    }
+   549→
+   550→    const { reference, checkout_url, pay_url, pay_code, status } = tripayData.data
+   551→
+   552→    // Determine payment URL: prefer checkout_url (works for all channels)
+   553→    const paymentUrl = checkout_url || pay_url || null
+   554→
+   555→    console.log('[checkout] Tripay success — reference:', reference, 'checkout_url:', !!paymentUrl, 'pay_code:', !!pay_code)
+   556→
+   557→    // Save transaction to DB
+   558→    // Festival Mode: use festival seat codes (with day prefix) so each day's seat is tracked
+   559→    const finalSeatCodes = isFestivalCheckout ? festivalSeatCodes : seatCodes
+   560→
+   561→    await db.transaction.create({
+   562→      data: {
+   563→        transactionId: tid,
+   564→        eventId,
+   565→        showDateId: showDateId || null,
+   566→        customerName,
+   567→        customerEmail,
+   568→        customerWa,
+   569→        seatCodes: JSON.stringify(finalSeatCodes),
+   570→        totalAmount,
+   571→        paymentStatus: 'PENDING',
+   572→        adminFeeApplied: adminFeeTotal,
+   573→        promoCodeId: discountAmount > 0 ? promoCodeId : null,
+   574→        merchandiseData: merchDataToSave ? JSON.stringify(merchDataToSave) : null,
+   575→        midtransId: reference,       // Store Tripay reference (backward compat field name)
+   576→        paymentMethod: resolvedMethod,
+   577→        paymentUrl: paymentUrl,
+   578→      },
+   579→    })
+   580→
+   581→    return NextResponse.json({
+   582→      reference,
+   583→      checkoutUrl: paymentUrl,
+   584→      payCode: pay_code,
+   585→      transactionId: tid,
+   586→      paymentMethod: resolvedMethod,
+   587→    })
+   588→  } catch (error) {
+   589→    console.error('[checkout] Fatal error:', error)
+   590→    return NextResponse.json({ error: 'Terjadi kesalahan server. Coba lagi.' }, { status: 500 })
+   591→  }
+   592→}
+   593→
