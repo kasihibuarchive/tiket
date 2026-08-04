@@ -142,6 +142,16 @@ model PriceCategory {
   packageType       String?  // "SINGLE" | "MULTI" | "FULL" — null for REGULAR events
   applicableDayIds  String?  // JSON array of EventShowDate IDs that this category grants access to. Null = all days (FULL or REGULAR)
 
+  // ── SALES LOCK (Kunci Penjualan) ──
+  // Manual per-package lock — when true, public checkout rejects purchases
+  // with a clear message. Usher/admin can still issue complimentary tickets
+  // bypassing this lock (manual override). Distinct from seat-status
+  // 'UNAVAILABLE' (which is per-seat and used by GA zone-lock).
+  salesLocked      Boolean   @default(false)
+  salesLockReason  String?   // optional human-readable reason (shown to public if set)
+  salesLockedAt    DateTime?
+  salesLockedBy    String?   // admin username for audit log
+
   // Relations
   event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
   seats Seat[]

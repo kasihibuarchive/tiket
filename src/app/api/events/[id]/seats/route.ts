@@ -57,7 +57,13 @@ export async function GET(
         }),
         db.priceCategory.findMany({
           where: { eventId: id },
-          select: { id: true, name: true, price: true, colorCode: true, applicableDayIds: true, packageType: true },
+          select: {
+            id: true, name: true, price: true, colorCode: true,
+            applicableDayIds: true, packageType: true,
+            // Sales lock fields — frontend needs these to render locked state
+            salesLocked: true,
+            salesLockReason: true,
+          },
         }),
       ])
 
@@ -71,7 +77,7 @@ export async function GET(
         col: seat.col,
         zoneName: seat.zoneName,
         lockedUntil: seat.lockedUntil,
-        priceCategory: priceMap.get(seat.priceCategoryId) || null,
+        priceCategory: seat.priceCategoryId ? (priceMap.get(seat.priceCategoryId) || null) : null,
         eventShowDateId: seat.eventShowDateId,
       }))
 

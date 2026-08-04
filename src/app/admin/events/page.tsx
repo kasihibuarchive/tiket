@@ -25,7 +25,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table'
 import {
-  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users, RotateCcw, Star, Ticket
+  Plus, Edit, Trash2, LayoutGrid, Eye, EyeOff, Loader2, Calendar, X, Banknote, Map, CheckCircle2, Video, Smartphone, Users, RotateCcw, Star, Ticket, Lock, Unlock
 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 
@@ -44,6 +44,8 @@ interface EventData {
     colorCode: string
     packageType?: string | null
     applicableDayIds?: string[] | null
+    salesLocked?: boolean
+    salesLockReason?: string | null
   }>
   seatSummary?: { total: number; available: number; sold: number }
   seatMapId: string | null
@@ -77,6 +79,10 @@ interface PriceCategoryForm {
   capacity?: number            // GA only — auto-generates GA zone with this capacity
   packageType?: string | null   // "SINGLE" | "MULTI" | "FULL" | null
   applicableDayIds?: string[]  // Array of showDate temp IDs (frontend only)
+  // Sales lock (only relevant for existing packages with a DB id)
+  id?: string                  // DB id of existing PriceCategory (undefined for new)
+  salesLocked?: boolean
+  salesLockReason?: string | null
 }
 
 interface ShowDateForm {
@@ -241,12 +247,15 @@ export default function AdminEventsPage() {
           }
         } catch { /* ignore */ }
         return {
+          id: pc.id,
           name: pc.name,
           price: pc.price,
           colorCode: pc.colorCode,
           capacity: existingCapacity,
           packageType: pc.packageType || null,
           applicableDayIds: (pc.applicableDayIds || []).map((id: string) => showDateIdToTempId[id] || id),
+          salesLocked: pc.salesLocked || false,
+          salesLockReason: pc.salesLockReason || null,
         }
       }),
       showDates,
@@ -506,6 +515,65 @@ export default function AdminEventsPage() {
   }
 
   const [isSaving, setIsSaving] = useState(false)
+  const [lockLoadingPcId, setLockLoadingPcId] = useState<string | null>(null)
+
+  /**
+   * Toggle Kunci Penjualan for an existing festival package.
+   * Calls the dedicated lock API endpoint immediately (no Save needed).
+   * Updates the local form state so the UI reflects the new lock status.
+   */
+  async function toggleSalesLock(pcIndex: number) {
+    const pc = formData.priceCategories[pcIndex]
+    if (!pc?.id || !editingId) return
+    if (lockLoadingPcId) return // prevent double-click
+
+    const willLock = !pc.salesLocked
+    // For lock action, optionally prompt for a reason (simple window.prompt for now)
+    let reason: string | undefined
+    if (willLock) {
+      const promptResult = window.prompt(
+        `Alasan mengunci penjualan "${pc.name}" (opsional, akan ditampilkan ke pembeli):`,
+        ''
+      )
+      // If user clicks Cancel on the prompt, abort the lock
+      if (promptResult === null) return
+      reason = promptResult.trim() || undefined
+    }
+
+    setLockLoadingPcId(pc.id)
+    try {
+      const url = `/api/admin/events/${editingId}/price-categories/${pc.id}/lock`
+      const res = willLock
+        ? await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          })
+        : await fetch(url, { method: 'DELETE' })
+
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'Gagal mengubah status kunci penjualan.')
+        return
+      }
+
+      // Update local form state
+      setFormData(prev => {
+        const updated = [...prev.priceCategories]
+        updated[pcIndex] = {
+          ...updated[pcIndex],
+          salesLocked: willLock,
+          salesLockReason: willLock ? (reason || null) : null,
+        }
+        return { ...prev, priceCategories: updated }
+      })
+    } catch (err) {
+      console.error('Error toggling sales lock:', err)
+      alert('Gagal terhubung ke server. Coba lagi.')
+    } finally {
+      setLockLoadingPcId(null)
+    }
+  }
 
   async function handleDelete(id: string) {
     if (!confirm('Apakah Anda yakin ingin menghapus event ini? Semua data terkait akan dihapus.')) return
@@ -1406,6 +1474,46 @@ export default function AdminEventsPage() {
                         <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded p-2">
                           ✓ Full Pass — berlaku untuk semua hari pertunjukan ({formData.showDates.length} hari)
                         </p>
+                      )}
+
+                      {/* ── Kunci Penjualan (Sales Lock) ──
+                          Only shown for EXISTING festival packages (have DB id).
+                          New packages get the toggle after first save. */}
+                      {pc.id && (
+                        <div className="flex items-start gap-2 pt-2 border-t border-border/40">
+                          <div className="flex-1">
+                            <Label className="text-xs text-muted-foreground flex items-center gap-1">
+                              <Lock className="w-3 h-3" />
+                              Kunci Penjualan
+                            </Label>
+                            <p className="text-[10px] text-muted-foreground mt-0.5 leading-snug">
+                              {pc.salesLocked
+                                ? `Tiket paket ini tidak bisa dibeli publik.${pc.salesLockReason ? ` Alasan: ${pc.salesLockReason}` : ''}`
+                                : 'Aktifkan untuk menghentikan penjualan paket ini sementara.'}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={pc.salesLocked ? 'outline' : 'secondary'}
+                            disabled={lockLoadingPcId === pc.id}
+                            onClick={() => toggleSalesLock(index)}
+                            className={`h-7 text-[11px] shrink-0 ${
+                              pc.salesLocked
+                                ? 'border-red-300 text-red-700 hover:bg-red-50'
+                                : 'bg-charcoal/80 text-white hover:bg-charcoal'
+                            }`}
+                          >
+                            {lockLoadingPcId === pc.id ? (
+                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                            ) : pc.salesLocked ? (
+                              <Unlock className="w-3 h-3 mr-1" />
+                            ) : (
+                              <Lock className="w-3 h-3 mr-1" />
+                            )}
+                            {pc.salesLocked ? 'Buka Kunci' : 'Kunci'}
+                          </Button>
+                        </div>
                       )}
                     </div>
                   )}

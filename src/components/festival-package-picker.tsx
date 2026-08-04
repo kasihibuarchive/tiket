@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import {
   Calendar, CalendarDays, CalendarRange, Users, Minus, Plus, Loader2,
-  Check,
+  Check, Lock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -24,6 +24,10 @@ interface PriceCategoryData {
   colorCode: string
   packageType?: string | null   // SINGLE | MULTI | FULL
   applicableDayIds?: string | null  // JSON array of showDate IDs
+  // Sales lock ("Kunci Penjualan") — when true, package is hidden/disabled
+  // on the public picker and checkout rejects purchases with 403.
+  salesLocked?: boolean
+  salesLockReason?: string | null
 }
 
 interface FestivalPackagePickerProps {
@@ -250,7 +254,9 @@ export function FestivalPackagePicker({
           const Icon = packageIcon(pkg.packageType)
           const isSelected = selectedPkgId === pkg.id
           const avail = availability[pkg.id] ?? 0
-          const isSoldOut = avail === 0
+          const isLocked = !!pkg.salesLocked
+          const isSoldOut = !isLocked && avail === 0
+          const isDisabled = isLocked || isSoldOut
           const days = pkg.parsedDayIds
             .map(id => showDates.find(sd => sd.id === id))
             .filter(Boolean) as ShowDateData[]
@@ -263,9 +269,10 @@ export function FestivalPackagePicker({
                 isSelected
                   ? 'border-gold shadow-lg ring-2 ring-gold/20'
                   : 'border-border hover:border-gold/40 hover:shadow-md',
-                isSoldOut && 'opacity-60 cursor-not-allowed'
+                isDisabled && 'opacity-60 cursor-not-allowed',
+                isLocked && 'border-red-300/60 bg-red-50/30'
               )}
-              onClick={() => !isSoldOut && selectPackage(pkg.id)}
+              onClick={() => !isDisabled && selectPackage(pkg.id)}
             >
               {/* Color stripe top */}
               <div className="h-1.5" style={{ backgroundColor: pkg.colorCode }} />
@@ -287,11 +294,19 @@ export function FestivalPackagePicker({
                       </Badge>
                     </div>
                   </div>
-                  {isSelected && (
-                    <div className="w-5 h-5 rounded-full border-2 border-gold bg-gold flex items-center justify-center shrink-0">
-                      <Check className="w-3 h-3 text-white" strokeWidth={3} />
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {isLocked && (
+                      <Badge className="bg-red-100 text-red-700 border border-red-200 text-[10px]">
+                        <Lock className="w-2.5 h-2.5 mr-0.5" />
+                        Dikunci
+                      </Badge>
+                    )}
+                    {isSelected && (
+                      <div className="w-5 h-5 rounded-full border-2 border-gold bg-gold flex items-center justify-center">
+                        <Check className="w-3 h-3 text-white" strokeWidth={3} />
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Price */}
@@ -340,7 +355,12 @@ export function FestivalPackagePicker({
                 {/* Availability — respect hideSeatAvailability / hideSoldCount */}
                 {!(hideSeatAvailability && (hideSoldCount || isSoldOut)) && (
                   <div className="flex items-center justify-between pt-2 border-t border-border/40">
-                    {isSoldOut ? (
+                    {isLocked ? (
+                      <span className="text-[11px] text-red-700 font-medium flex items-center gap-1">
+                        <Lock className="w-3 h-3" />
+                        {pkg.salesLockReason || 'Penjualan dikunci sementara'}
+                      </span>
+                    ) : isSoldOut ? (
                       <span className="text-[11px] text-danger font-medium flex items-center gap-1">
                         <Users className="w-3 h-3" />
                         Habis
@@ -364,7 +384,7 @@ export function FestivalPackagePicker({
       </div>
 
       {/* Quantity selector + CTA — Liquid Glass overlay (Apple-style frosted glass) */}
-      {selectedPkg && (
+      {selectedPkg && !selectedPkg.salesLocked && (
         <div className="sticky bottom-4 z-50">
           <div className="relative rounded-2xl border border-white/40 bg-white/60 backdrop-blur-2xl backdrop-saturate-150 shadow-2xl shadow-black/20 ring-1 ring-black/5 overflow-hidden">
             {/* Subtle gold tint overlay */}

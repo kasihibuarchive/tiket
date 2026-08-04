@@ -81,6 +81,19 @@ export async function POST(request: NextRequest) {
       }
       festivalPriceCategoryId = priceCat.id
 
+      // ── Sales lock guard (Kunci Penjualan) ──
+      // Admin can manually lock a festival package's sales — e.g., to pause
+      // sales during a flash issue or when the package is being reconfigured.
+      // Usher/admin complimentary tickets bypass this (handled in their route).
+      if (priceCat.salesLocked) {
+        const reason = priceCat.salesLockReason?.trim()
+        return NextResponse.json({
+          error: reason
+            ? `Penjualan paket "${priceCat.name}" sedang dikunci: ${reason}`
+            : `Penjualan paket "${priceCat.name}" sedang dikunci sementara. Silakan coba lagi nanti.`,
+        }, { status: 403 })
+      }
+
       // Resolve applicable day IDs
       let applicableDayIds: string[] = pkg.applicableDayIds || []
       if (priceCat.packageType === 'FULL') {
