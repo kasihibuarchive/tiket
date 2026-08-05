@@ -1,0 +1,1329 @@
+     1→'use client'
+     2→
+     3→import { useState, useEffect, useCallback, useMemo } from 'react'
+     4→import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+     5→import { Button } from '@/components/ui/button'
+     6→import { Input } from '@/components/ui/input'
+     7→import { Label } from '@/components/ui/label'
+     8→import { Badge } from '@/components/ui/badge'
+     9→import { Separator } from '@/components/ui/separator'
+    10→import {
+    11→  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+    12→} from '@/components/ui/table'
+    13→import {
+    14→  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+    15→} from '@/components/ui/select'
+    16→import {
+    17→  Gift, Send, Loader2, Ticket, Users, X, MapPin, Clock, Mail, Phone,
+    18→  AlertCircle, CheckCircle2, XCircle, ChevronDown, ChevronUp, RotateCcw, Calendar, Image,
+    19→} from 'lucide-react'
+    20→import { cn } from '@/lib/utils'
+    21→import { formatShortDate, formatEventDateTime } from '@/lib/date'
+    22→import { parseLayoutData, type ParsedLayout } from '@/lib/seat-layout'
+    23→import { CanvasSeatLayout } from '@/components/canvas-seat-layout'
+    24→
+    25→// ─── Types ────────────────────────────────────────────────────────────────────
+    26→
+    27→interface EventOption {
+    28→  id: string
+    29→  title: string
+    30→  category: string
+    31→  showDate: string
+    32→  location: string
+    33→  seatSummary?: { total: number; available: number; sold: number }
+    34→  seatMapId: string | null
+    35→  eventMode?: string | null
+    36→}
+    37→
+    38→interface SeatData {
+    39→  id: string
+    40→  seatCode: string
+    41→  status: string
+    42→  row: string
+    43→  col: number
+    44→  lockedUntil: string | null
+    45→  priceCategory: { id: string; name: string; price: number; colorCode: string } | null
+    46→}
+    47→
+    48→interface PriceCategoryData {
+    49→  id: string
+    50→  name: string
+    51→  price: number
+    52→  colorCode: string
+    53→  packageType?: string | null
+    54→  applicableDayIds?: string[] | null
+    55→}
+    56→
+    57→interface ComplimentaryTicket {
+    58→  id: string
+    59→  transactionId: string
+    60→  customerName: string
+    61→  customerEmail: string
+    62→  customerWa: string
+    63→  seatCodes: string
+    64→  eventTitle: string
+    65→  createdAt: string
+    66→  paymentStatus: string
+    67→  emailSent?: boolean
+    68→}
+    69→
+    70→interface SeatMapInfo {
+    71→  id: string
+    72→  name: string
+    73→  seatType: string
+    74→}
+    75→
+    76→// ─── Main Component ───────────────────────────────────────────────────────────
+    77→
+    78→export default function ComplimentaryTicketsPage() {
+    79→  // Events
+    80→  const [events, setEvents] = useState<EventOption[]>([])
+    81→  const [isLoadingEvents, setIsLoadingEvents] = useState(true)
+    82→
+    83→  // Show dates for multi-day events
+    84→  const [showDates, setShowDates] = useState<any[]>([])
+    85→  const [selectedShowDateId, setSelectedShowDateId] = useState<string>('')
+    86→
+    87→  // Seats
+    88→  const [seats, setSeats] = useState<SeatData[]>([])
+    89→  const [priceCategories, setPriceCategories] = useState<PriceCategoryData[]>([])
+    90→  const [isLoadingSeats, setIsLoadingSeats] = useState(false)
+    91→  const [selectedSeats, setSelectedSeats] = useState<string[]>([])
+    92→  const [seatMapInfo, setSeatMapInfo] = useState<SeatMapInfo | null>(null)
+    93→  const [layoutData, setLayoutData] = useState<any>(null)
+    94→  const [eventSeatType, setEventSeatType] = useState<string | null>(null)
+    95→  const [eventLayoutImage, setEventLayoutImage] = useState<string | null>(null)
+    96→  const parsedLayout = useMemo(() => parseLayoutData(layoutData) as ParsedLayout | null, [layoutData])
+    97→
+    98→  // Form
+    99→  const [selectedEventId, setSelectedEventId] = useState<string>('')
+   100→  const [guestName, setGuestName] = useState('')
+   101→  const [guestEmail, setGuestEmail] = useState('')
+   102→  const [guestPhone, setGuestPhone] = useState('')
+   103→  const [gaQuantity, setGaQuantity] = useState(1)
+   104→  const [gaZone, setGaZone] = useState('')
+   105→
+   106→  // Festival mode state
+   107→  const [eventMode, setEventMode] = useState<string | null>(null)
+   108→  const [selectedFestivalPkgId, setSelectedFestivalPkgId] = useState<string>('')
+   109→  const [festivalQuantity, setFestivalQuantity] = useState(1)
+   110→
+   111→  // Submit
+   112→  const [isSubmitting, setIsSubmitting] = useState(false)
+   113→  const [submitResult, setSubmitResult] = useState<{ success: boolean; message: string } | null>(null)
+   114→
+   115→  // Stats
+   116→  const [totalComplimentary, setTotalComplimentary] = useState(0)
+   117→
+   118→  // Recent tickets
+   119→  const [recentTickets, setRecentTickets] = useState<ComplimentaryTicket[]>([])
+   120→  const [isLoadingRecent, setIsLoadingRecent] = useState(true)
+   121→
+   122→  // Resend email state
+   123→  const [resendingId, setResendingId] = useState<string | null>(null)
+   124→  const [resendResult, setResendResult] = useState<{ id: string; success: boolean; message: string } | null>(null)
+   125→
+   126→  // ─── Derived values ─────────────────────────────────────────────────────
+   127→
+   128→  const selectedEvent = useMemo(
+   129→    () => events.find((e) => e.id === selectedEventId) || null,
+   130→    [events, selectedEventId]
+   131→  )
+   132→
+   133→  const isNumberedSeatMap = eventSeatType === 'NUMBERED' || seatMapInfo?.seatType === 'NUMBERED'
+   134→  const isGeneralAdmission = !isNumberedSeatMap || !seatMapInfo
+   135→  const isFestival = eventMode === 'FESTIVAL'
+   136→
+   137→  // Festival packages (PriceCategory with packageType)
+   138→  const festivalPackages = useMemo(() => {
+   139→    if (!isFestival) return []
+   140→    return priceCategories
+   141→      .filter(pc => pc.packageType)
+   142→      .sort((a, b) => {
+   143→        const order: Record<string, number> = { SINGLE: 1, MULTI: 2, FULL: 3 }
+   144→        return (order[a.packageType || ''] || 99) - (order[b.packageType || ''] || 99)
+   145→      })
+   146→  }, [isFestival, priceCategories])
+   147→
+   148→  // Selected festival package
+   149→  const selectedFestivalPkg = useMemo(
+   150→    () => festivalPackages.find(p => p.id === selectedFestivalPkgId) || null,
+   151→    [festivalPackages, selectedFestivalPkgId]
+   152→  )
+   153→
+   154→  // Festival availability: count AVAILABLE seats in this package's zone
+   155→  const festivalAvailability = useMemo(() => {
+   156→    const map: Record<string, number> = {}
+   157→    for (const pkg of festivalPackages) {
+   158→      map[pkg.id] = seats.filter(s =>
+   159→        s.zoneName === pkg.name && s.status === 'AVAILABLE'
+   160→      ).length
+   161→    }
+   162→    return map
+   163→  }, [festivalPackages, seats])
+   164→
+   165→  // Seat lookup for canvas mode
+   166→  const seatLookup = useMemo(() => {
+   167→    const map = new Map<string, SeatData>()
+   168→    for (const seat of seats) {
+   169→      map.set(seat.seatCode, seat)
+   170→    }
+   171→    return map
+   172→  }, [seats])
+   173→
+   174→  // Check if canvas mode is available
+   175→  const useCanvasMode = !!(parsedLayout?.canvasSeats && parsedLayout.canvasSeats.length > 0)
+   176→
+   177→  // Group seats by row for the mini map
+   178→  const seatsByRow = useMemo(() => {
+   179→    const groups: Record<string, SeatData[]> = {}
+   180→    for (const seat of seats) {
+   181→      if (!groups[seat.row]) groups[seat.row] = []
+   182→      groups[seat.row].push(seat)
+   183→    }
+   184→    // Sort each row by column
+   185→    for (const row of Object.keys(groups)) {
+   186→      groups[row].sort((a, b) => a.col - b.col)
+   187→    }
+   188→    return groups
+   189→  }, [seats])
+   190→
+   191→  const sortedRowKeys = useMemo(
+   192→    () => Object.keys(seatsByRow).sort(),
+   193→    [seatsByRow]
+   194→  )
+   195→
+   196→  const availableSeatsCount = useMemo(
+   197→    () => seats.filter((s) => s.status === 'AVAILABLE').length,
+   198→    [seats]
+   199→  )
+   200→
+   201→  // Zones for GA
+   202→  const zones = useMemo(() => {
+   203→    const zoneSet = new Set<string>()
+   204→    seats.forEach((s) => {
+   205→      if (s.status === 'AVAILABLE' && (s as any).zoneName) {
+   206→        zoneSet.add((s as any).zoneName)
+   207→      }
+   208→    })
+   209→    return Array.from(zoneSet).sort()
+   210→  }, [seats])
+   211→
+   212→  // ─── Fetch events ───────────────────────────────────────────────────────
+   213→
+   214→  useEffect(() => {
+   215→    async function fetchEvents() {
+   216→      try {
+   217→        const res = await fetch('/api/admin/events')
+   218→        if (res.ok) {
+   219→          const data = await res.json()
+   220→          setEvents(data.events || [])
+   221→        }
+   222→      } catch (err) {
+   223→        console.error('Failed to fetch events:', err)
+   224→      } finally {
+   225→        setIsLoadingEvents(false)
+   226→      }
+   227→    }
+   228→    fetchEvents()
+   229→  }, [])
+   230→
+   231→  // ─── Fetch recent complimentary tickets ─────────────────────────────────
+   232→
+   233→  useEffect(() => {
+   234→    async function fetchRecentTickets() {
+   235→      try {
+   236→        const res = await fetch('/api/admin/tickets/complimentary')
+   237→        if (res.ok) {
+   238→          const data = await res.json()
+   239→          setRecentTickets(data.tickets || [])
+   240→          setTotalComplimentary(data.total || 0)
+   241→        }
+   242→      } catch (err) {
+   243→        console.error('Failed to fetch recent complimentary tickets:', err)
+   244→      } finally {
+   245→        setIsLoadingRecent(false)
+   246→      }
+   247→    }
+   248→    fetchRecentTickets()
+   249→  }, [])
+   250→
+   251→  // ─── Fetch seats when event is selected ─────────────────────────────────
+   252→
+   253→  const fetchSeatsForEvent = useCallback(async (eventId: string, showDateFilter?: string) => {
+   254→    setIsLoadingSeats(true)
+   255→    setSelectedSeats([])
+   256→    setSeatMapInfo(null)
+   257→    setLayoutData(null)
+   258→    setEventSeatType(null)
+   259→    setEventLayoutImage(null)
+   260→    setGaQuantity(1)
+   261→    setGaZone('')
+   262→
+   263→    try {
+   264→      // Fetch seats with optional showDateId filter
+   265→      const seatsUrl = `/api/events/${eventId}/seats?admin=1${showDateFilter ? `&showDateId=${showDateFilter}` : ''}`
+   266→      const seatsRes = await fetch(seatsUrl)
+   267→      if (seatsRes.ok) {
+   268→        const data = await seatsRes.json()
+   269→        setSeats(data.seats || [])
+   270→        setPriceCategories(data.priceCategories || [])
+   271→      }
+   272→
+   273→      // Fetch event detail to get seatMapId, showDates, seatType, layoutImage, eventMode
+   274→      const eventRes = await fetch(`/api/events/${eventId}?admin=1`)
+   275→      if (eventRes.ok) {
+   276→        const eventData = await eventRes.json()
+   277→        // Store seatType, layoutImage, eventMode for GA/festival detection and display
+   278→        setEventSeatType(eventData.seatType || null)
+   279→        setEventLayoutImage(eventData.layoutImage || null)
+   280→        setEventMode(eventData.eventMode || null)
+   281→        setSelectedFestivalPkgId('')
+   282→        setFestivalQuantity(1)
+   283→        if (eventData.seatMapId) {
+   284→          // Fetch seat map info
+   285→          const mapRes = await fetch('/api/admin/seat-maps')
+   286→          if (mapRes.ok) {
+   287→            const mapsData = await mapRes.json()
+   288→            const map = (mapsData.seatMaps || []).find((m: any) => m.id === eventData.seatMapId)
+   289→            if (map) {
+   290→              setSeatMapInfo({ id: map.id, name: map.name, seatType: map.seatType })
+   291→              setLayoutData(map.layoutData || null)
+   292→            }
+   293→          }
+   294→        }
+   295→        // Populate show dates for multi-day events
+   296→        if (eventData.showDates && eventData.showDates.length > 0) {
+   297→          setShowDates(eventData.showDates)
+   298→          if (!showDateFilter) {
+   299→            setSelectedShowDateId(eventData.showDates[0].id)
+   300→          }
+   301→        } else {
+   302→          setShowDates([])
+   303→          setSelectedShowDateId('')
+   304→        }
+   305→      }
+   306→    } catch (err) {
+   307→      console.error('Failed to fetch seats:', err)
+   308→    } finally {
+   309→      setIsLoadingSeats(false)
+   310→    }
+   311→  }, [])
+   312→
+   313→  useEffect(() => {
+   314→    if (selectedEventId) {
+   315→      fetchSeatsForEvent(selectedEventId)
+   316→    } else {
+   317→      setSeats([])
+   318→      setSelectedSeats([])
+   319→      setSeatMapInfo(null)
+   320→      setShowDates([])
+   321→      setSelectedShowDateId('')
+   322→    }
+   323→  }, [selectedEventId, fetchSeatsForEvent])
+   324→
+   325→  // Re-fetch seats when show date changes
+   326→  useEffect(() => {
+   327→    if (selectedEventId && selectedShowDateId) {
+   328→      fetchSeatsForEvent(selectedEventId, selectedShowDateId)
+   329→    }
+   330→  }, [selectedShowDateId])
+   331→
+   332→  // ─── Seat selection ─────────────────────────────────────────────────────
+   333→
+   334→  function toggleSeat(seatCode: string) {
+   335→    setSelectedSeats((prev) =>
+   336→      prev.includes(seatCode)
+   337→        ? prev.filter((s) => s !== seatCode)
+   338→        : [...prev, seatCode]
+   339→    )
+   340→  }
+   341→
+   342→  function removeSeat(seatCode: string) {
+   343→    setSelectedSeats((prev) => prev.filter((s) => s !== seatCode))
+   344→  }
+   345→
+   346→  // ─── Get seat color ─────────────────────────────────────────────────────
+   347→
+   348→  function getSeatColorClass(seat: SeatData): string {
+   349→    if (seat.status !== 'AVAILABLE') return 'bg-gray-300 text-gray-500 cursor-not-allowed'
+   350→    if (selectedSeats.includes(seat.seatCode)) return 'bg-gold text-white cursor-pointer hover:bg-gold-dark shadow-sm ring-2 ring-gold/50'
+   351→    return 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+   352→  }
+   353→
+   354→  // ─── Resend email ───────────────────────────────────────────────────────
+   355→
+   356→  async function handleResendEmail(ticketId: string, transactionId: string) {
+   357→    setResendingId(ticketId)
+   358→    setResendResult(null)
+   359→
+   360→    try {
+   361→      const res = await fetch('/api/usher/resend-email', {
+   362→        method: 'POST',
+   363→        headers: { 'Content-Type': 'application/json' },
+   364→        body: JSON.stringify({ transactionId }),
+   365→      })
+   366→
+   367→      const data = await res.json()
+   368→
+   369→      if (res.ok) {
+   370→        setResendResult({ id: ticketId, success: true, message: 'E-tiket berhasil dikirim ulang!' })
+   371→      } else {
+   372→        setResendResult({ id: ticketId, success: false, message: data.error || 'Gagal mengirim ulang.' })
+   373→      }
+   374→    } catch {
+   375→      setResendResult({ id: ticketId, success: false, message: 'Terjadi kesalahan jaringan.' })
+   376→    } finally {
+   377→      setResendingId(null)
+   378→      // Auto-hide after 5 seconds
+   379→      setTimeout(() => setResendResult(null), 5000)
+   380→    }
+   381→  }
+   382→
+   383→  // ─── Submit ─────────────────────────────────────────────────────────────
+   384→
+   385→  async function handleSubmit() {
+   386→    if (!selectedEventId || !guestName || !guestEmail || !guestPhone) {
+   387→      setSubmitResult({ success: false, message: 'Harap lengkapi semua field yang wajib diisi.' })
+   388→      return
+   389→    }
+   390→
+   391→    let seatCodes: string[]
+   392→    let festivalPackage: { priceCategoryId: string; quantity: number } | undefined
+   393→
+   394→    if (isFestival) {
+   395→      // ─── FESTIVAL MODE: pick package + quantity ────────────────────
+   396→      if (!selectedFestivalPkg) {
+   397→        setSubmitResult({ success: false, message: 'Pilih paket festival terlebih dahulu.' })
+   398→        return
+   399→      }
+   400→      if (festivalQuantity < 1) {
+   401→        setSubmitResult({ success: false, message: 'Jumlah tiket minimal 1.' })
+   402→        return
+   403→      }
+   404→      const avail = festivalAvailability[selectedFestivalPkg.id] ?? 0
+   405→      if (festivalQuantity > avail) {
+   406→        setSubmitResult({
+   407→          success: false,
+   408→          message: `Tiket tersedia hanya ${avail}. Kurangi jumlah atau pilih paket lain.`,
+   409→        })
+   410→        return
+   411→      }
+   412→      // Seat codes: use package name as prefix (matches zoneName in seat table)
+   413→      seatCodes = Array.from({ length: festivalQuantity }, (_, i) =>
+   414→        `${selectedFestivalPkg.name}-COMP${i + 1}`
+   415→      )
+   416→      festivalPackage = {
+   417→        priceCategoryId: selectedFestivalPkg.id,
+   418→        quantity: festivalQuantity,
+   419→      }
+   420→    } else if (isNumberedSeatMap) {
+   421→      if (selectedSeats.length === 0) {
+   422→        setSubmitResult({ success: false, message: 'Harap pilih minimal 1 kursi.' })
+   423→        return
+   424→      }
+   425→      seatCodes = selectedSeats
+   426→    } else {
+   427→      if (gaQuantity < 1) {
+   428→        setSubmitResult({ success: false, message: 'Jumlah tiket minimal 1.' })
+   429→        return
+   430→      }
+   431→      // Generate GA seat codes
+   432→      seatCodes = Array.from({ length: gaQuantity }, (_, i) =>
+   433→        gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`
+   434→      )
+   435→    }
+   436→
+   437→    setIsSubmitting(true)
+   438→    setSubmitResult(null)
+   439→
+   440→    try {
+   441→      const res = await fetch('/api/admin/tickets/complimentary', {
+   442→        method: 'POST',
+   443→        headers: { 'Content-Type': 'application/json' },
+   444→        body: JSON.stringify({
+   445→          eventId: selectedEventId,
+   446→          seatCodes,
+   447→          guestName,
+   448→          guestEmail,
+   449→          guestPhone,
+   450→          showDateId: selectedShowDateId || undefined,
+   451→          festivalPackage,
+   452→        }),
+   453→      })
+   454→
+   455→      const data = await res.json()
+   456→
+   457→      if (res.ok) {
+   458→        setSubmitResult({
+   459→          success: true,
+   460→          message: `Tiket komplimen berhasil dibuat! Transaction ID: ${data.transactionId}`,
+   461→        })
+   462→        // Reset form
+   463→        setGuestName('')
+   464→        setGuestEmail('')
+   465→        setGuestPhone('')
+   466→        setSelectedSeats([])
+   467→        setGaQuantity(1)
+   468→        setGaZone('')
+   469→        setFestivalQuantity(1)
+   470→        setSelectedFestivalPkgId('')
+   471→        // Refresh recent tickets
+   472→        const recentRes = await fetch('/api/admin/tickets/complimentary')
+   473→        if (recentRes.ok) {
+   474→          const recentData = await recentRes.json()
+   475→          setRecentTickets(recentData.tickets || [])
+   476→          setTotalComplimentary(recentData.total || 0)
+   477→        }
+   478→      } else {
+   479→        setSubmitResult({
+   480→          success: false,
+   481→          message: data.error || 'Gagal membuat tiket komplimen.',
+   482→        })
+   483→      }
+   484→    } catch (err) {
+   485→      setSubmitResult({
+   486→        success: false,
+   487→        message: 'Terjadi kesalahan jaringan. Silakan coba lagi.',
+   488→      })
+   489→    } finally {
+   490→      setIsSubmitting(false)
+   491→    }
+   492→  }
+   493→
+   494→  // ─── Parse seat codes from JSON string ──────────────────────────────────
+   495→
+   496→  function parseSeatCodes(codes: string): string[] {
+   497→    if (!codes) return []
+   498→    try {
+   499→      return JSON.parse(codes)
+   500→    } catch {
+   501→      return codes.split(',').map((s) => s.trim()).filter(Boolean)
+   502→    }
+   503→  }
+   504→
+   505→  // ─── Render ─────────────────────────────────────────────────────────────
+   506→
+   507→  return (
+   508→    <div className="space-y-6">
+   509→      {/* Header */}
+   510→      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+   511→        <div className="flex items-center gap-3">
+   512→          <div className="w-10 h-10 rounded-lg bg-gold/10 flex items-center justify-center">
+   513→            <Gift className="w-5 h-5 text-gold" />
+   514→          </div>
+   515→          <div>
+   516→            <h1 className="font-serif text-2xl font-bold text-charcoal">Tiket Komplimen</h1>
+   517→            <p className="text-sm text-muted-foreground mt-0.5">Buat tiket gratis untuk tamu undangan</p>
+   518→          </div>
+   519→        </div>
+   520→      </div>
+   521→
+   522→      {/* Stats Card */}
+   523→      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   524→        <Card className="border-border/50">
+   525→          <CardContent className="p-4 flex items-center gap-4">
+   526→            <div className="w-12 h-12 rounded-xl bg-gold/10 flex items-center justify-center flex-shrink-0">
+   527→              <Ticket className="w-6 h-6 text-gold" />
+   528→            </div>
+   529→            <div>
+   530→              <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Tiket Komplimen</p>
+   531→              <p className="text-2xl font-bold text-charcoal mt-0.5">
+   532→                {isLoadingRecent ? (
+   533→                  <Loader2 className="w-6 h-6 text-gold animate-spin inline" />
+   534→                ) : (
+   535→                  totalComplimentary
+   536→                )}
+   537→              </p>
+   538→            </div>
+   539→          </CardContent>
+   540→        </Card>
+   541→        <Card className="border-border/50">
+   542→          <CardContent className="p-4 flex items-center gap-4">
+   543→            <div className="w-12 h-12 rounded-xl bg-charcoal/5 flex items-center justify-center flex-shrink-0">
+   544→              <Users className="w-6 h-6 text-charcoal/60" />
+   545→            </div>
+   546→            <div>
+   547→              <p className="text-xs text-muted-foreground uppercase tracking-wider">Tamu Undangan</p>
+   548→              <p className="text-2xl font-bold text-charcoal mt-0.5">
+   549→                {isLoadingRecent ? (
+   550→                  <Loader2 className="w-6 h-6 text-gold animate-spin inline" />
+   551→                ) : (
+   552→                  recentTickets.length > 0
+   553→                    ? new Set(recentTickets.map((t) => t.customerEmail)).size
+   554→                    : 0
+   555→                )}
+   556→              </p>
+   557→            </div>
+   558→          </CardContent>
+   559→        </Card>
+   560→      </div>
+   561→
+   562→      {/* Form Card */}
+   563→      <Card className="border-border/50">
+   564→        <CardHeader className="pb-4">
+   565→          <CardTitle className="font-serif text-lg text-charcoal flex items-center gap-2">
+   566→            <Send className="w-4 h-4 text-gold" />
+   567→            Buat Tiket Komplimen Baru
+   568→          </CardTitle>
+   569→        </CardHeader>
+   570→        <CardContent className="space-y-6">
+   571→          {/* Submit Result Message */}
+   572→          {submitResult && (
+   573→            <div
+   574→              className={`flex items-start gap-3 p-4 rounded-lg text-sm ${
+   575→                submitResult.success
+   576→                  ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+   577→                  : 'bg-red-50 border border-red-200 text-red-800'
+   578→              }`}
+   579→            >
+   580→              {submitResult.success ? (
+   581→                <CheckCircle2 className="w-5 h-5 flex-shrink-0 mt-0.5" />
+   582→              ) : (
+   583→                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+   584→              )}
+   585→              <p>{submitResult.message}</p>
+   586→              <button
+   587→                onClick={() => setSubmitResult(null)}
+   588→                className="ml-auto flex-shrink-0 hover:opacity-70"
+   589→              >
+   590→                <X className="w-4 h-4" />
+   591→              </button>
+   592→            </div>
+   593→          )}
+   594→
+   595→          {/* Step 1: Event Selection */}
+   596→          <div className="space-y-2">
+   597→            <Label className="text-sm font-medium flex items-center gap-2">
+   598→              Pilih Event <span className="text-danger">*</span>
+   599→            </Label>
+   600→            {isLoadingEvents ? (
+   601→              <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
+   602→                <Loader2 className="w-4 h-4 animate-spin text-gold" />
+   603→                Memuat daftar event...
+   604→              </div>
+   605→            ) : (
+   606→              <Select value={selectedEventId} onValueChange={setSelectedEventId}>
+   607→                <SelectTrigger className="w-full bg-white">
+   608→                  <SelectValue placeholder="Pilih event..." />
+   609→                </SelectTrigger>
+   610→                <SelectContent>
+   611→                  {events.map((event) => (
+   612→                    <SelectItem key={event.id} value={event.id}>
+   613→                      <div className="flex flex-col">
+   614→                        <span className="font-medium">{event.title}</span>
+   615→                        <span className="text-xs text-muted-foreground">
+   616→                          {formatShortDate(event.showDate)} · {event.location}
+   617→                        </span>
+   618→                      </div>
+   619→                    </SelectItem>
+   620→                  ))}
+   621→                </SelectContent>
+   622→              </Select>
+   623→            )}
+   624→
+   625→            {/* Selected event info */}
+   626→            {selectedEvent && (
+   627→              <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-muted-foreground">
+   628→                <Badge variant="secondary" className="text-xs">
+   629→                  {selectedEvent.category}
+   630→                </Badge>
+   631→                <span className="flex items-center gap-1">
+   632→                  <Clock className="w-3 h-3" />
+   633→                  {formatEventDateTime(selectedEvent.showDate)}
+   634→                </span>
+   635→                <span className="flex items-center gap-1">
+   636→                  <MapPin className="w-3 h-3" />
+   637→                  {selectedEvent.location}
+   638→                </span>
+   639→                {selectedEvent.seatSummary && (
+   640→                  <span className="flex items-center gap-1">
+   641→                    <Ticket className="w-3 h-3" />
+   642→                    {selectedEvent.seatSummary.available} kursi tersedia
+   643→                  </span>
+   644→                )}
+   645→              </div>
+   646→            )}
+   647→          </div>
+   648→
+   649→          <Separator />
+   650→
+   651→          {/* Step 2: Guest Information */}
+   652→          <div className="space-y-4">
+   653→            <Label className="text-sm font-medium">Informasi Tamu</Label>
+   654→
+   655→            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+   656→              <div className="space-y-2">
+   657→                <Label className="text-xs text-muted-foreground flex items-center gap-1">
+   658→                  <Users className="w-3 h-3" />
+   659→                  Nama Tamu <span className="text-danger">*</span>
+   660→                </Label>
+   661→                <Input
+   662→                  value={guestName}
+   663→                  onChange={(e) => setGuestName(e.target.value)}
+   664→                  placeholder="Contoh: Bapak Joko Widodo"
+   665→                  className="bg-white"
+   666→                />
+   667→              </div>
+   668→              <div className="space-y-2">
+   669→                <Label className="text-xs text-muted-foreground flex items-center gap-1">
+   670→                  <Mail className="w-3 h-3" />
+   671→                  Email Tamu <span className="text-danger">*</span>
+   672→                </Label>
+   673→                <Input
+   674→                  type="email"
+   675→                  value={guestEmail}
+   676→                  onChange={(e) => setGuestEmail(e.target.value)}
+   677→                  placeholder="tamu@email.com"
+   678→                  className="bg-white"
+   679→                />
+   680→              </div>
+   681→            </div>
+   682→
+   683→            <div className="space-y-2 sm:max-w-md">
+   684→              <Label className="text-xs text-muted-foreground flex items-center gap-1">
+   685→                <Phone className="w-3 h-3" />
+   686→                No. WhatsApp <span className="text-danger">*</span>
+   687→              </Label>
+   688→              <Input
+   689→                type="tel"
+   690→                value={guestPhone}
+   691→                onChange={(e) => setGuestPhone(e.target.value)}
+   692→                placeholder="08xxxxxxxxxx"
+   693→                className="bg-white"
+   694→              />
+   695→            </div>
+   696→          </div>
+   697→
+   698→          <Separator />
+   699→
+   700→          {/* Step 3: Seat Selection */}
+   701→          <div className="space-y-4">
+   702→            <Label className="text-sm font-medium flex items-center gap-2">
+   703→              <Ticket className="w-4 h-4 text-gold" />
+   704→              Pemilihan Kursi
+   705→            </Label>
+   706→
+   707→            {/* Show Date Tabs for multi-day events (hidden in FESTIVAL mode — package handles days) */}
+   708→            {showDates.length > 1 && !isFestival && (
+   709→              <div className="flex items-center gap-2 flex-wrap">
+   710→                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+   711→                {showDates.map((sd: any, idx: number) => {
+   712→                  const sdLabel = sd.label || `Hari ${idx + 1}`
+   713→                  const sdDate = new Date(sd.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+   714→                  return (
+   715→                    <button
+   716→                      key={sd.id}
+   717→                      onClick={() => setSelectedShowDateId(sd.id)}
+   718→                      className={cn(
+   719→                        'px-3 py-1 rounded-full text-xs font-medium transition-all border',
+   720→                        selectedShowDateId === sd.id
+   721→                          ? 'bg-gold text-white border-gold'
+   722→                          : 'bg-white text-muted-foreground border-border hover:border-gold/50'
+   723→                      )}
+   724→                    >
+   725→                      {sdLabel} ({sdDate})
+   726→                    </button>
+   727→                  )
+   728→                })}
+   729→              </div>
+   730→            )}
+   731→
+   732→            {!selectedEventId ? (
+   733→              <div className="text-sm text-muted-foreground py-6 text-center bg-muted/30 rounded-lg">
+   734→                Pilih event terlebih dahulu untuk melihat pilihan kursi.
+   735→              </div>
+   736→            ) : isLoadingSeats ? (
+   737→              <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+   738→                <Loader2 className="w-5 h-5 animate-spin text-gold" />
+   739→                Memuat data kursi...
+   740→              </div>
+   741→            ) : isFestival ? (
+   742→              /* ─── FESTIVAL MODE: Package picker ─────────────────── */
+   743→              <div className="space-y-4">
+   744→                <p className="text-xs text-muted-foreground">
+   745→                  Event festival: pilih paket tiket dan jumlah. Tiket komplimen akan mengambil slot dari pool paket terkait.
+   746→                </p>
+   747→
+   748→                {/* Layout image (if any) */}
+   749→                {eventLayoutImage && (
+   750→                  <div className="bg-muted/20 rounded-xl p-3">
+   751→                    <div className="flex items-center gap-2 mb-2">
+   752→                      <Image className="w-3.5 h-3.5 text-gold" />
+   753→                      <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+   754→                    </div>
+   755→                    <div className="w-full rounded-lg overflow-hidden border border-border/30">
+   756→                      <img
+   757→                        src={eventLayoutImage}
+   758→                        alt="Layout venue"
+   759→                        className="w-full h-auto max-h-64 object-contain"
+   760→                      />
+   761→                    </div>
+   762→                  </div>
+   763→                )}
+   764→
+   765→                {festivalPackages.length === 0 ? (
+   766→                  <div className="text-xs text-muted-foreground py-4 text-center bg-amber-50/50 border border-amber-200/50 rounded-lg">
+   767→                    Belum ada paket festival untuk event ini. Tambahkan price category dengan packageType di halaman Events.
+   768→                  </div>
+   769→                ) : (
+   770→                  <div className="space-y-2">
+   771→                    {/* Package options */}
+   772→                    <Label className="text-xs text-muted-foreground">Paket Tiket <span className="text-danger">*</span></Label>
+   773→                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+   774→                      {festivalPackages.map((pkg) => {
+   775→                        const isSelected = selectedFestivalPkgId === pkg.id
+   776→                        const avail = festivalAvailability[pkg.id] ?? 0
+   777→                        const pkgTypeLabel = pkg.packageType === 'FULL'
+   778→                          ? 'Full Pass'
+   779→                          : pkg.packageType === 'MULTI'
+   780→                            ? 'Multi-Day'
+   781→                            : 'Single Day'
+   782→                        return (
+   783→                          <button
+   784→                            key={pkg.id}
+   785→                            type="button"
+   786→                            onClick={() => {
+   787→                              setSelectedFestivalPkgId(pkg.id)
+   788→                              setFestivalQuantity(1)
+   789→                            }}
+   790→                            disabled={avail === 0}
+   791→                            className={cn(
+   792→                              'text-left p-3 rounded-lg border-2 transition-all',
+   793→                              isSelected
+   794→                                ? 'border-gold bg-gold/5 shadow-sm'
+   795→                                : 'border-border/50 bg-white hover:border-gold/30',
+   796→                              avail === 0 && 'opacity-50 cursor-not-allowed'
+   797→                            )}
+   798→                          >
+   799→                            <div className="flex items-center justify-between gap-2">
+   800→                              <div className="flex items-center gap-2 min-w-0">
+   801→                                <div
+   802→                                  className="w-3 h-3 rounded-sm shrink-0"
+   803→                                  style={{ backgroundColor: pkg.colorCode }}
+   804→                                />
+   805→                                <span className="font-medium text-sm text-charcoal truncate">{pkg.name}</span>
+   806→                              </div>
+   807→                              <Badge variant="secondary" className="text-[9px] shrink-0">
+   808→                                {pkgTypeLabel}
+   809→                              </Badge>
+   810→                            </div>
+   811→                            <div className="flex items-center justify-between mt-1.5">
+   812→                              <span className="text-xs text-muted-foreground">
+   813→                                Rp {pkg.price.toLocaleString('id-ID')}
+   814→                              </span>
+   815→                              <span className={cn(
+   816→                                'text-[10px] font-medium',
+   817→                                avail === 0 ? 'text-red-500' : 'text-emerald-600'
+   818→                              )}>
+   819→                                {avail === 0 ? 'Habis' : `${avail} tersedia`}
+   820→                              </span>
+   821→                            </div>
+   822→                          </button>
+   823→                        )
+   824→                      })}
+   825→                    </div>
+   826→
+   827→                    {/* Quantity selector */}
+   828→                    {selectedFestivalPkg && (
+   829→                      <div className="space-y-2 sm:max-w-[200px] pt-2">
+   830→                        <Label className="text-xs text-muted-foreground">Jumlah Tiket <span className="text-danger">*</span></Label>
+   831→                        <div className="flex items-center gap-2">
+   832→                          <Button
+   833→                            type="button"
+   834→                            variant="outline"
+   835→                            size="icon"
+   836→                            className="h-9 w-9"
+   837→                            onClick={() => setFestivalQuantity(q => Math.max(1, q - 1))}
+   838→                            disabled={festivalQuantity <= 1}
+   839→                          >
+   840→                            -
+   841→                          </Button>
+   842→                          <Input
+   843→                            type="number"
+   844→                            min={1}
+   845→                            max={festivalAvailability[selectedFestivalPkg.id] ?? 1}
+   846→                            value={festivalQuantity}
+   847→                            onChange={(e) => {
+   848→                              const max = festivalAvailability[selectedFestivalPkg.id] ?? 1
+   849→                              const v = parseInt(e.target.value) || 1
+   850→                              setFestivalQuantity(Math.min(max, Math.max(1, v)))
+   851→                            }}
+   852→                            className="h-9 text-center bg-white"
+   853→                          />
+   854→                          <Button
+   855→                            type="button"
+   856→                            variant="outline"
+   857→                            size="icon"
+   858→                            className="h-9 w-9"
+   859→                            onClick={() => {
+   860→                              const max = festivalAvailability[selectedFestivalPkg.id] ?? 1
+   861→                              setFestivalQuantity(q => Math.min(max, q + 1))
+   862→                            }}
+   863→                            disabled={festivalQuantity >= (festivalAvailability[selectedFestivalPkg.id] ?? 1)}
+   864→                          >
+   865→                            +
+   866→                          </Button>
+   867→                        </div>
+   868→                        <p className="text-[10px] text-muted-foreground">
+   869→                          Maksimal {festivalAvailability[selectedFestivalPkg.id] ?? 0} tiket (stok tersedia)
+   870→                        </p>
+   871→                      </div>
+   872→                    )}
+   873→                  </div>
+   874→                )}
+   875→              </div>
+   876→            ) : isNumberedSeatMap ? (
+   877→              /* ─── Numbered Seat Map ────────────────────────────── */
+   878→              <div className="space-y-4">
+   879→                <div className="flex items-center justify-between">
+   880→                  <p className="text-xs text-muted-foreground">
+   881→                    Kursi tersedia: <span className="font-semibold text-charcoal">{availableSeatsCount}</span>
+   882→                  </p>
+   883→                  {selectedSeats.length > 0 && (
+   884→                    <Badge className="bg-gold text-white text-xs">
+   885→                      {selectedSeats.length} dipilih
+   886→                    </Badge>
+   887→                  )}
+   888→                </div>
+   889→
+   890→                {/* Mini Seat Map */}
+   891→                <div className="bg-muted/20 rounded-xl p-4 overflow-x-auto">
+   892→                  {useCanvasMode && parsedLayout ? (
+   893→                    /* ─── Canvas Mode: preserve empty space like guest view ─── */
+   894→                    <div className="flex justify-center">
+   895→                      <CanvasSeatLayout
+   896→                        parsedLayout={parsedLayout}
+   897→                        seatLookup={seatLookup as Map<string, any>}
+   898→                        renderSeat={(seatData, canvasSeat, scaledX, scaledY, size, key) => {
+   899→                          const isAvailable = seatData.status === 'AVAILABLE'
+   900→                          const isSelected = selectedSeats.includes(canvasSeat.seatCode)
+   901→                          return (
+   902→                            <button
+   903→                              key={key}
+   904→                              onClick={() => isAvailable ? toggleSeat(canvasSeat.seatCode) : undefined}
+   905→                              disabled={!isAvailable}
+   906→                              className={cn(
+   907→                                'absolute rounded text-[10px] font-medium flex items-center justify-center transition-all',
+   908→                                isSelected
+   909→                                  ? 'bg-gold text-white shadow-sm ring-2 ring-gold/50 cursor-pointer'
+   910→                                  : isAvailable
+   911→                                    ? 'bg-emerald-100 text-emerald-800 cursor-pointer hover:bg-emerald-200 hover:shadow-sm'
+   912→                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+   913→                              )}
+   914→                              style={{
+   915→                                left: scaledX,
+   916→                                top: scaledY,
+   917→                                width: size,
+   918→                                height: size,
+   919→                              }}
+   920→                              title={`${canvasSeat.seatCode} - ${seatData.status}`}
+   921→                            >
+   922→                              {canvasSeat.seatNum}
+   923→                            </button>
+   924→                          )
+   925→                        }}
+   926→                        renderEmpty={(x, y, size, key) => (
+   927→                          <div
+   928→                            key={key}
+   929→                            className="absolute"
+   930→                            style={{ left: x, top: y, width: size, height: size }}
+   931→                          />
+   932→                        )}
+   933→                      />
+   934→                    </div>
+   935→                  ) : (
+   936→                    /* ─── Fallback: Simple row-based mini map ─────────────── */
+   937→                    <>
+   938→                    <div className="text-center mb-3">
+   939→                      <div className="bg-charcoal text-white text-[10px] uppercase tracking-widest px-6 py-1.5 rounded-full inline-block">
+   940→                        Panggung
+   941→                      </div>
+   942→                    </div>
+   943→
+   944→                    <div className="mx-auto w-full flex flex-col items-center">
+   945→                      {sortedRowKeys.map((row) => (
+   946→                        <div key={row} className="flex items-center gap-2 mb-1.5">
+   947→                          <span className="w-6 text-xs font-mono font-semibold text-charcoal/60 text-right">
+   948→                            {row}
+   949→                          </span>
+   950→                          <div className="flex gap-1 flex-1">
+   951→                            {seatsByRow[row].map((seat) => (
+   952→                              <button
+   953→                                key={seat.id}
+   954→                                onClick={() =>
+   955→                                  seat.status === 'AVAILABLE'
+   956→                                    ? toggleSeat(seat.seatCode)
+   957→                                    : undefined
+   958→                                }
+   959→                                disabled={seat.status !== 'AVAILABLE'}
+   960→                                className={`
+   961→                                  w-8 h-8 rounded text-[10px] font-mono font-medium
+   962→                                  flex items-center justify-center transition-all
+   963→                                  ${getSeatColorClass(seat)}
+   964→                                `}
+   965→                                title={`${seat.seatCode} - ${seat.status}${seat.priceCategory ? ` (${seat.priceCategory.name})` : ''}`}
+   966→                              >
+   967→                                {seat.col}
+   968→                              </button>
+   969→                            ))}
+   970→                          </div>
+   971→                          <span className="w-6 text-xs font-mono font-semibold text-charcoal/60">
+   972→                            {row}
+   973→                          </span>
+   974→                        </div>
+   975→                      ))}
+   976→                    </div>
+   977→                    </>
+   978→                  )}
+   979→
+   980→                  {/* Legend */}
+   981→                  <div className="flex items-center justify-center gap-4 mt-4 text-[10px] text-muted-foreground">
+   982→                    <div className="flex items-center gap-1.5">
+   983→                      <div className="w-4 h-4 rounded bg-emerald-100 border border-emerald-200" />
+   984→                      Tersedia
+   985→                    </div>
+   986→                    <div className="flex items-center gap-1.5">
+   987→                      <div className="w-4 h-4 rounded bg-gold border border-gold-dark" />
+   988→                      Dipilih
+   989→                    </div>
+   990→                    <div className="flex items-center gap-1.5">
+   991→                      <div className="w-4 h-4 rounded bg-gray-300" />
+   992→                      Terisi
+   993→                    </div>
+   994→                  </div>
+   995→                </div>
+   996→
+   997→                {/* Selected Seat Badges */}
+   998→                {selectedSeats.length > 0 && (
+   999→                  <div className="space-y-2">
+  1000→                    <p className="text-xs text-muted-foreground">Kursi yang dipilih:</p>
+  1001→                    <div className="flex flex-wrap gap-2">
+  1002→                      {selectedSeats.map((code) => (
+  1003→                        <Badge
+  1004→                          key={code}
+  1005→                          className="bg-gold text-white text-xs cursor-pointer hover:bg-gold-dark transition-colors"
+  1006→                          onClick={() => removeSeat(code)}
+  1007→                        >
+  1008→                          {code}
+  1009→                          <X className="w-3 h-3 ml-1" />
+  1010→                        </Badge>
+  1011→                      ))}
+  1012→                    </div>
+  1013→                  </div>
+  1014→                )}
+  1015→              </div>
+  1016→            ) : (
+  1017→              /* ─── General Admission ─────────────────────────────── */
+  1018→              <div className="space-y-4">
+  1019→                <p className="text-xs text-muted-foreground">
+  1020→                  Event ini menggunakan sistem General Admission. Masukkan jumlah tiket yang diinginkan.
+  1021→                </p>
+  1022→
+  1023→                {/* Layout Image for GA events */}
+  1024→                {eventLayoutImage && (
+  1025→                  <div className="bg-muted/20 rounded-xl p-3">
+  1026→                    <div className="flex items-center gap-2 mb-2">
+  1027→                      <Image className="w-3.5 h-3.5 text-gold" />
+  1028→                      <span className="text-xs font-medium text-charcoal">Layout Venue</span>
+  1029→                    </div>
+  1030→                    <div className="w-full rounded-lg overflow-hidden border border-border/30">
+  1031→                      <img
+  1032→                        src={eventLayoutImage}
+  1033→                        alt="Layout venue"
+  1034→                        className="w-full h-auto max-h-64 object-contain"
+  1035→                      />
+  1036→                    </div>
+  1037→                  </div>
+  1038→                )}
+  1039→
+  1040→                {zones.length > 0 && (
+  1041→                  <div className="space-y-2 sm:max-w-md">
+  1042→                    <Label className="text-xs text-muted-foreground">Zone / Nama Area</Label>
+  1043→                    <Select value={gaZone} onValueChange={setGaZone}>
+  1044→                      <SelectTrigger className="w-full bg-white">
+  1045→                        <SelectValue placeholder="Pilih zone..." />
+  1046→                      </SelectTrigger>
+  1047→                      <SelectContent>
+  1048→                        {zones.map((z) => (
+  1049→                          <SelectItem key={z} value={z}>
+  1050→                            {z}
+  1051→                          </SelectItem>
+  1052→                        ))}
+  1053→                      </SelectContent>
+  1054→                    </Select>
+  1055→                  </div>
+  1056→                )}
+  1057→
+  1058→                {zones.length === 0 && (
+  1059→                  <div className="space-y-2 sm:max-w-md">
+  1060→                    <Label className="text-xs text-muted-foreground">Zone / Nama Area (opsional)</Label>
+  1061→                    <Input
+  1062→                      value={gaZone}
+  1063→                      onChange={(e) => setGaZone(e.target.value)}
+  1064→                      placeholder="Contoh: VIP, Festival Kiri"
+  1065→                      className="bg-white"
+  1066→                    />
+  1067→                  </div>
+  1068→                )}
+  1069→
+  1070→                <div className="space-y-2 sm:max-w-[200px]">
+  1071→                  <Label className="text-xs text-muted-foreground">Jumlah Tiket <span className="text-danger">*</span></Label>
+  1072→                  <div className="flex items-center gap-2">
+  1073→                    <Button
+  1074→                      type="button"
+  1075→                      variant="outline"
+  1076→                      size="icon"
+  1077→                      className="h-9 w-9"
+  1078→                      onClick={() => setGaQuantity((q) => Math.max(1, q - 1))}
+  1079→                      disabled={gaQuantity <= 1}
+  1080→                    >
+  1081→                      -
+  1082→                    </Button>
+  1083→                    <Input
+  1084→                      type="number"
+  1085→                      min={1}
+  1086→                      max={100}
+  1087→                      value={gaQuantity}
+  1088→                      onChange={(e) => setGaQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+  1089→                      className="h-9 text-center bg-white"
+  1090→                    />
+  1091→                    <Button
+  1092→                      type="button"
+  1093→                      variant="outline"
+  1094→                      size="icon"
+  1095→                      className="h-9 w-9"
+  1096→                      onClick={() => setGaQuantity((q) => Math.min(100, q + 1))}
+  1097→                      disabled={gaQuantity >= 100}
+  1098→                    >
+  1099→                      +
+  1100→                    </Button>
+  1101→                  </div>
+  1102→                  <p className="text-[10px] text-muted-foreground">
+  1103→                    Kode kursi akan di-generate otomatis (e.g. {gaZone ? `${gaZone}-` : 'GA-'}1, {gaZone ? `${gaZone}-` : 'GA-'}2, ...)
+  1104→                  </p>
+  1105→                </div>
+  1106→
+  1107→                {/* Preview */}
+  1108→                <div className="bg-muted/20 rounded-lg p-3 text-xs">
+  1109→                  <p className="font-medium text-charcoal mb-1">Preview:</p>
+  1110→                  <div className="flex flex-wrap gap-1.5">
+  1111→                    {Array.from({ length: gaQuantity }, (_, i) => (
+  1112→                      <Badge key={i} variant="secondary" className="text-[10px]">
+  1113→                        {gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`}
+  1114→                      </Badge>
+  1115→                    ))}
+  1116→                  </div>
+  1117→                </div>
+  1118→              </div>
+  1119→            )}
+  1120→          </div>
+  1121→
+  1122→          <Separator />
+  1123→
+  1124→          {/* Step 4: Summary */}
+  1125→          {(selectedEventId && (
+  1126→            isFestival
+  1127→              ? (!!selectedFestivalPkg && festivalQuantity >= 1)
+  1128→              : (selectedSeats.length > 0 || (!isNumberedSeatMap && gaQuantity >= 1))
+  1129→          )) && (
+  1130→            <div className="bg-charcoal/5 rounded-xl p-4 space-y-3">
+  1131→              <p className="text-sm font-medium text-charcoal">Ringkasan</p>
+  1132→              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+  1133→                <div>
+  1134→                  <span className="text-muted-foreground">Event:</span>{' '}
+  1135→                  <span className="font-medium">{selectedEvent?.title}</span>
+  1136→                </div>
+  1137→                <div>
+  1138→                  <span className="text-muted-foreground">Tamu:</span>{' '}
+  1139→                  <span className="font-medium">{guestName || '-'}</span>
+  1140→                </div>
+  1141→                <div>
+  1142→                  <span className="text-muted-foreground">Email:</span>{' '}
+  1143→                  <span className="font-medium">{guestEmail || '-'}</span>
+  1144→                </div>
+  1145→                <div>
+  1146→                  <span className="text-muted-foreground">WhatsApp:</span>{' '}
+  1147→                  <span className="font-medium">{guestPhone || '-'}</span>
+  1148→                </div>
+  1149→                <div className="sm:col-span-2">
+  1150→                  <span className="text-muted-foreground">Kursi:</span>{' '}
+  1151→                  <div className="flex flex-wrap gap-1.5 mt-1">
+  1152→                    {isFestival && selectedFestivalPkg
+  1153→                      ? Array.from({ length: festivalQuantity }, (_, i) => (
+  1154→                          <Badge key={i} className="bg-gold/80 text-white text-[10px]">
+  1155→                            {selectedFestivalPkg.name}-COMP{i + 1}
+  1156→                          </Badge>
+  1157→                        ))
+  1158→                      : isNumberedSeatMap
+  1159→                        ? selectedSeats.map((code) => (
+  1160→                            <Badge key={code} className="bg-gold text-white text-[10px]">{code}</Badge>
+  1161→                          ))
+  1162→                        : Array.from({ length: gaQuantity }, (_, i) => (
+  1163→                            <Badge key={i} variant="secondary" className="text-[10px]">
+  1164→                              {gaZone ? `${gaZone}-${i + 1}` : `GA-${i + 1}`}
+  1165→                            </Badge>
+  1166→                        ))}
+  1167→                  </div>
+  1168→                </div>
+  1169→              </div>
+  1170→            </div>
+  1171→          )}
+  1172→
+  1173→          {/* Submit */}
+  1174→          <div className="flex justify-end pt-2">
+  1175→            <Button
+  1176→              onClick={handleSubmit}
+  1177→              disabled={
+  1178→                isSubmitting ||
+  1179→                !selectedEventId ||
+  1180→                !guestName ||
+  1181→                !guestEmail ||
+  1182→                !guestPhone ||
+  1183→                (isFestival
+  1184→                  ? !selectedFestivalPkg || festivalQuantity < 1
+  1185→                  : isNumberedSeatMap
+  1186→                    ? selectedSeats.length === 0
+  1187→                    : gaQuantity < 1)
+  1188→              }
+  1189→              className="bg-charcoal hover:bg-charcoal/90 text-gold min-w-[200px]"
+  1190→            >
+  1191→              {isSubmitting ? (
+  1192→                <>
+  1193→                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+  1194→                  Mengirim...
+  1195→                </>
+  1196→              ) : (
+  1197→                <>
+  1198→                  <Send className="w-4 h-4 mr-2" />
+  1199→                  Kirim Tiket Komplimen
+  1200→                </>
+  1201→              )}
+  1202→            </Button>
+  1203→          </div>
+  1204→        </CardContent>
+  1205→      </Card>
+  1206→
+  1207→      {/* Recent Complimentary Tickets */}
+  1208→      <Card className="border-border/50">
+  1209→        <CardHeader className="pb-4">
+  1210→          <CardTitle className="font-serif text-lg text-charcoal flex items-center gap-2">
+  1211→            <Clock className="w-4 h-4 text-gold" />
+  1212→            Tiket Komplimen Terbaru
+  1213→          </CardTitle>
+  1214→        </CardHeader>
+  1215→        <CardContent className="p-0">
+  1216→          {isLoadingRecent ? (
+  1217→            <div className="flex items-center justify-center py-12">
+  1218→              <Loader2 className="w-6 h-6 text-gold animate-spin" />
+  1219→            </div>
+  1220→          ) : recentTickets.length === 0 ? (
+  1221→            <div className="text-center py-12">
+  1222→              <Gift className="w-8 h-8 text-muted-foreground/30 mx-auto mb-2" />
+  1223→              <p className="text-sm text-muted-foreground">Belum ada tiket komplimen yang dibuat</p>
+  1224→            </div>
+  1225→          ) : (
+  1226→            <div className="overflow-x-auto">
+  1227→              <Table>
+  1228→                <TableHeader>
+  1229→                  <TableRow>
+  1230→                    <TableHead className="text-xs">Transaction ID</TableHead>
+  1231→                    <TableHead className="text-xs">Nama Tamu</TableHead>
+  1232→                    <TableHead className="text-xs">Event</TableHead>
+  1233→                    <TableHead className="text-xs">Kursi</TableHead>
+  1234→                    <TableHead className="text-xs">Dibuat</TableHead>
+  1235→                    <TableHead className="text-xs text-center">Status</TableHead>
+  1236→                    <TableHead className="text-xs text-center">Aksi</TableHead>
+  1237→                  </TableRow>
+  1238→                </TableHeader>
+  1239→                <TableBody>
+  1240→                  {recentTickets.map((ticket) => {
+  1241→                    const seatCodes = parseSeatCodes(ticket.seatCodes)
+  1242→                    return (
+  1243→                      <TableRow key={ticket.id}>
+  1244→                        <TableCell>
+  1245→                          <span className="font-mono text-xs font-semibold text-gold">
+  1246→                            {ticket.transactionId}
+  1247→                          </span>
+  1248→                        </TableCell>
+  1249→                        <TableCell>
+  1250→                          <div>
+  1251→                            <p className="text-sm font-medium">{ticket.customerName}</p>
+  1252→                            <p className="text-[10px] text-muted-foreground">{ticket.customerEmail}</p>
+  1253→                          </div>
+  1254→                        </TableCell>
+  1255→                        <TableCell>
+  1256→                          <p className="text-xs font-medium">{ticket.eventTitle}</p>
+  1257→                        </TableCell>
+  1258→                        <TableCell>
+  1259→                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+  1260→                            {seatCodes.length <= 3
+  1261→                              ? seatCodes.map((code) => (
+  1262→                                  <Badge key={code} variant="secondary" className="text-[10px]">
+  1263→                                    {code}
+  1264→                                  </Badge>
+  1265→                                ))
+  1266→                              : (
+  1267→                                  <>
+  1268→                                    {seatCodes.slice(0, 3).map((code) => (
+  1269→                                      <Badge key={code} variant="secondary" className="text-[10px]">
+  1270→                                        {code}
+  1271→                                      </Badge>
+  1272→                                    ))}
+  1273→                                    <Badge variant="outline" className="text-[10px]">
+  1274→                                      +{seatCodes.length - 3}
+  1275→                                    </Badge>
+  1276→                                  </>
+  1277→                                )}
+  1278→                          </div>
+  1279→                        </TableCell>
+  1280→                        <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
+  1281→                          {formatShortDate(ticket.createdAt)}
+  1282→                        </TableCell>
+  1283→                        <TableCell className="text-center">
+  1284→                          {ticket.emailSent ? (
+  1285→                            <Badge className="bg-emerald-100 text-emerald-700 text-[10px] border-emerald-200">
+  1286→                              <CheckCircle2 className="w-3 h-3 mr-1" />
+  1287→                              TERKIRIM
+  1288→                            </Badge>
+  1289→                          ) : (
+  1290→                            <Badge className="bg-red-100 text-red-700 text-[10px] border-red-200">
+  1291→                              <XCircle className="w-3 h-3 mr-1" />
+  1292→                              GAGAL
+  1293→                            </Badge>
+  1294→                          )}
+  1295→                        </TableCell>
+  1296→                        <TableCell className="text-center">
+  1297→                          <Button
+  1298→                            size="sm"
+  1299→                            variant="outline"
+  1300→                            className="h-7 text-[10px] gap-1"
+  1301→                            onClick={() => handleResendEmail(ticket.id, ticket.transactionId)}
+  1302→                            disabled={resendingId === ticket.id}
+  1303→                          >
+  1304→                            {resendingId === ticket.id ? (
+  1305→                              <Loader2 className="w-3 h-3 animate-spin" />
+  1306→                            ) : (
+  1307→                              <RotateCcw className="w-3 h-3" />
+  1308→                            )}
+  1309→                            Kirim Ulang
+  1310→                          </Button>
+  1311→                          {resendResult?.id === ticket.id && (
+  1312→                            <p className={`text-[10px] mt-1 ${resendResult.success ? 'text-emerald-600' : 'text-red-600'}`}>
+  1313→                              {resendResult.message}
+  1314→                            </p>
+  1315→                          )}
+  1316→                        </TableCell>
+  1317→                      </TableRow>
+  1318→                    )
+  1319→                  })}
+  1320→                </TableBody>
+  1321→              </Table>
+  1322→            </div>
+  1323→          )}
+  1324→        </CardContent>
+  1325→      </Card>
+  1326→    </div>
+  1327→  )
+  1328→}
+  1329→
