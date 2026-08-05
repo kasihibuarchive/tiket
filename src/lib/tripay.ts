@@ -5,6 +5,30 @@ const TRIPAY_PRIVATE_KEY = process.env.TRIPAY_PRIVATE_KEY!
 const TRIPAY_MERCHANT_CODE = process.env.TRIPAY_MERCHANT_CODE!
 const TRIPAY_IS_PRODUCTION = process.env.TRIPAY_IS_PRODUCTION === 'true'
 
+// Timeout untuk semua request ke Tripay (ms).
+// 15 detik cukup untuk normal response, tidak terlalu lama sampai user bingung.
+const TRIPAY_TIMEOUT_MS = 15000
+
+// Berapa kali retry kalau network error (timeout, DNS, connection reset).
+// HTTP error (4xx/5xx) TIDAK di-retry — itu masalah config/auth, retry gak akan bantu.
+const TRIPAY_NETWORK_RETRY = 1
+
+/**
+ * Error class untuk distinguish network error (timeout, DNS, koneksi) dari HTTP error.
+ * Dipakai di catch block checkout route untuk kasih pesan yang sesuai ke user.
+ */
+export class TripayNetworkError extends Error {
+  public readonly isTimeout: boolean
+  public readonly cause: unknown
+
+  constructor(message: string, opts: { isTimeout?: boolean; cause?: unknown } = {}) {
+    super(message)
+    this.name = 'TripayNetworkError'
+    this.isTimeout = opts.isTimeout ?? false
+    this.cause = opts.cause
+  }
+}
+
 export function getTripayConfig() {
   const baseUrl = TRIPAY_IS_PRODUCTION
     ? 'https://tripay.co.id/api'
@@ -29,6 +53,70 @@ export function getTripayConfig() {
 }
 
 /**
+ * Helper: fetch ke Tripay dengan timeout + retry untuk network error.
+ *
+ * - Timeout 15s (TRIPAY_TIMEOUT_MS).
+ * - Retry 1x untuk network error (AbortError, TypeError "fetch failed", connection reset).
+ * - HTTP error (4xx/5xx) TIDAK di-retry — return response apa adanya, caller yang handle.
+ *
+ * Throws TripayNetworkError kalau semua retry habis dan masih network error.
+ */
+async function tripayFetch(
+  url: string,
+  init: RequestInit,
+  retryLabel: string
+): Promise<Response> {
+  let lastErr: unknown = null
+
+  for (let attempt = 0; attempt <= TRIPAY_NETWORK_RETRY; attempt++) {
+    const isLastAttempt = attempt === TRIPAY_NETWORK_RETRY
+    try {
+      const res = await fetch(url, {
+        ...init,
+        signal: AbortSignal.timeout(TRIPAY_TIMEOUT_MS),
+      })
+      // HTTP response diterima (bahkan 4xx/5xx) — return apa adanya.
+      // Caller bertanggung jawab handle status code.
+      return res
+    } catch (err: any) {
+      lastErr = err
+      const isAbort = err?.name === 'TimeoutError' || err?.name === 'AbortError'
+      const isNetwork =
+        isAbort ||
+        err?.name === 'TypeError' ||
+        err?.code === 'ECONNRESET' ||
+        err?.code === 'ECONNREFUSED' ||
+        err?.code === 'ENOTFOUND' ||
+        err?.code === 'ETIMEDOUT'
+
+      console.warn(
+        `[tripay:${retryLabel}] attempt ${attempt + 1}/${TRIPAY_NETWORK_RETRY + 1} failed:`,
+        err?.name, err?.message || err
+      )
+
+      if (!isNetwork || isLastAttempt) {
+        // Bukan network error (programmer bug, dsb.) ATAU retry habis — lempar ke atas
+        throw new TripayNetworkError(
+          isAbort
+            ? `Tripay tidak merespons dalam ${TRIPAY_TIMEOUT_MS / 1000} detik (timeout). Coba lagi beberapa saat.`
+            : `Gagal terhubung ke Tripay: ${err?.message || 'unknown network error'}`,
+          { isTimeout: isAbort, cause: err }
+        )
+      }
+
+      // Retry: tunggu 500ms sebelum coba lagi
+      await new Promise((r) => setTimeout(r, 500))
+    }
+  }
+
+  // Seharusnya tidak tercapai, tapi untuk TypeScript safety
+  throw new TripayNetworkError(
+    `Gagal terhubung ke Tripay setelah ${TRIPAY_NETWORK_RETRY + 1} percobaan: ${String(lastErr)}`,
+    { cause: lastErr }
+  )
+}
+
+/**
  * Create a transaction via Tripay (direct or through proxy).
  * Uses JSON body with order_items as a real array (Tripay verified format).
  */
@@ -49,27 +137,25 @@ export async function createTripayTransaction(params: {
   const jsonBody = JSON.stringify(params)
 
   if (config.useProxy) {
-    const res = await fetch(config.baseUrl + '/api/transaction/create', {
+    return tripayFetch(config.baseUrl + '/api/transaction/create', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'X-Proxy-Auth': config.proxyAuthKey!,
       },
       body: jsonBody,
-    })
-    return res
+    }, 'create-proxy')
   }
 
   // Direct call to Tripay
-  const res = await fetch(config.baseUrl + '/transaction/create', {
+  return tripayFetch(config.baseUrl + '/transaction/create', {
     method: 'POST',
     headers: {
       'Authorization': 'Bearer ' + config.apiKey,
       'Content-Type': 'application/json',
     },
     body: jsonBody,
-  })
-  return res
+  }, 'create-direct')
 }
 
 /**
@@ -96,25 +182,23 @@ export async function getTripayTransactionDetail(reference: string): Promise<Res
   if (config.useProxy) {
     // Proxy forwards as form-encoded POST
     const formParams = new URLSearchParams({ reference })
-    const res = await fetch(config.baseUrl + '/api/transaction/detail', {
+    return tripayFetch(config.baseUrl + '/api/transaction/detail', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'X-Proxy-Auth': config.proxyAuthKey!,
       },
       body: formParams.toString(),
-    })
-    return res
+    }, 'detail-proxy')
   }
 
   // Direct call to Tripay
-  const res = await fetch(config.baseUrl + '/transaction/detail?reference=' + encodeURIComponent(reference), {
+  return tripayFetch(config.baseUrl + '/transaction/detail?reference=' + encodeURIComponent(reference), {
     method: 'GET',
     headers: {
       'Authorization': 'Bearer ' + config.apiKey,
     },
-  })
-  return res
+  }, 'detail-direct')
 }
 
 /**
@@ -124,22 +208,20 @@ export async function getTripayPaymentChannels(): Promise<Response> {
   const config = getTripayConfig()
 
   if (config.useProxy) {
-    const res = await fetch(config.baseUrl + '/api/merchant/payment-channel', {
+    return tripayFetch(config.baseUrl + '/api/merchant/payment-channel', {
       method: 'GET',
       headers: {
         'X-Proxy-Auth': config.proxyAuthKey!,
       },
-    })
-    return res
+    }, 'channels-proxy')
   }
 
-  const res = await fetch(config.baseUrl + '/merchant/payment-channel', {
+  return tripayFetch(config.baseUrl + '/merchant/payment-channel', {
     method: 'GET',
     headers: {
       'Authorization': 'Bearer ' + config.apiKey,
     },
-  })
-  return res
+  }, 'channels-direct')
 }
 
 /**

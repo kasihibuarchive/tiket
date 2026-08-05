@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { randomUUID } from 'crypto'
-import { getTripayConfig, createTransactionSignature, createTripayTransaction, LEGACY_METHOD_MAP } from '@/lib/tripay'
+import { getTripayConfig, createTransactionSignature, createTripayTransaction, LEGACY_METHOD_MAP, TripayNetworkError } from '@/lib/tripay'
 import { checkoutLimiter, getClientIp } from '@/lib/rate-limit'
 
 const CHECKOUT_PREFIX = 'CK:'
@@ -527,13 +527,46 @@ export async function POST(request: NextRequest) {
       signature,
     }
 
-    console.log('[checkout] Tripay creating transaction:', resolvedMethod, 'amount:', totalAmount, 'tid:', tid)
+    console.log('[checkout] Tripay creating transaction:', resolvedMethod, 'amount:', totalAmount, 'tid:', tid, 'mode:', tripayConfig.isProduction ? 'production' : 'sandbox', 'proxy:', tripayConfig.useProxy)
 
-    const tripayRes = await createTripayTransaction(tripayPayload)
+    let tripayRes: Response
+    try {
+      tripayRes = await createTripayTransaction(tripayPayload)
+    } catch (netErr: any) {
+      // Network error (timeout, DNS, connection reset) — bukan HTTP error.
+      // Beri pesan spesifik ke user dan log detail ke server.
+      if (netErr instanceof TripayNetworkError) {
+        console.error('[checkout] Tripay network error:', {
+          isTimeout: netErr.isTimeout,
+          mode: tripayConfig.isProduction ? 'production' : 'sandbox',
+          useProxy: tripayConfig.useProxy,
+          proxyUrl: tripayConfig.useProxy ? tripayConfig.baseUrl : null,
+          message: netErr.message,
+          cause: netErr.cause instanceof Error ? netErr.cause.message : String(netErr.cause),
+        })
+        const userMsg = netErr.isTimeout
+          ? 'Payment gateway sedang tidak merespons (timeout). Silakan coba lagi dalam beberapa saat. Jika masalah berlanjut, hubungi admin.'
+          : 'Gagal terhubung ke payment gateway. Periksa koneksi internet Anda dan coba lagi. Jika masalah berlanjut, hubungi admin.'
+        return NextResponse.json(
+          { error: userMsg, debug: { mode: tripayConfig.isProduction ? 'production' : 'sandbox', useProxy: tripayConfig.useProxy } },
+          { status: 504 }
+        )
+      }
+      // Unexpected error — rethrow ke outer catch
+      throw netErr
+    }
 
     if (!tripayRes.ok) {
       const errText = await tripayRes.text().catch(() => 'Unknown error')
-      console.error('[checkout] Tripay error:', tripayRes.status, errText)
+      console.error('[checkout] Tripay HTTP error:', {
+        status: tripayRes.status,
+        body: errText.slice(0, 500),
+        mode: tripayConfig.isProduction ? 'production' : 'sandbox',
+        useProxy: tripayConfig.useProxy,
+        tid,
+        amount: totalAmount,
+        method: resolvedMethod,
+      })
       // Parse Tripay error response for a more helpful message
       let userMessage = 'Gagal menghubungi payment gateway (error ' + tripayRes.status + ')'
       try {
@@ -547,6 +580,10 @@ export async function POST(request: NextRequest) {
           if (tripayMsg) userMessage += ' Detail: ' + tripayMsg
         } else if (tripayRes.status === 400) {
           userMessage = 'Permintaan ke Tripay tidak valid: ' + (tripayMsg || errText)
+        } else if (tripayRes.status === 422) {
+          userMessage = 'Data transaksi ditolak Tripay: ' + (tripayMsg || errText)
+        } else if (tripayRes.status >= 500) {
+          userMessage = 'Server Tripay sedang bermasalah (error ' + tripayRes.status + '). Silakan coba lagi dalam beberapa saat.'
         }
       } catch {}
       return NextResponse.json({ error: userMessage }, { status: 502 })
