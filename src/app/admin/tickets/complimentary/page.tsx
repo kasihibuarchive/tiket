@@ -42,6 +42,7 @@ interface SeatData {
   row: string
   col: number
   lockedUntil: string | null
+  zoneName?: string | null
   priceCategory: { id: string; name: string; price: number; colorCode: string } | null
 }
 
@@ -132,7 +133,9 @@ export default function ComplimentaryTicketsPage() {
 
   const isNumberedSeatMap = eventSeatType === 'NUMBERED' || seatMapInfo?.seatType === 'NUMBERED'
   const isGeneralAdmission = !isNumberedSeatMap || !seatMapInfo
-  const isFestival = eventMode === 'FESTIVAL'
+  // Festival detection: explicit flag OR has any price category with packageType
+  // (robust against events that pre-date the eventMode field, or admin forgot to toggle)
+  const isFestival = eventMode === 'FESTIVAL' || priceCategories.some(pc => !!pc.packageType)
 
   // Festival packages (PriceCategory with packageType)
   const festivalPackages = useMemo(() => {
@@ -383,8 +386,14 @@ export default function ComplimentaryTicketsPage() {
   // ─── Submit ─────────────────────────────────────────────────────────────
 
   async function handleSubmit() {
-    if (!selectedEventId || !guestName || !guestEmail || !guestPhone) {
-      setSubmitResult({ success: false, message: 'Harap lengkapi semua field yang wajib diisi.' })
+    if (!selectedEventId || !guestName) {
+      setSubmitResult({ success: false, message: 'Harap isi nama event dan nama tamu.' })
+      return
+    }
+    // Email/Phone optional untuk OTS walk-in (backend support empty email)
+    // Tapi kalau email diisi, validasi format
+    if (guestEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) {
+      setSubmitResult({ success: false, message: 'Format email tidak valid.' })
       return
     }
 
@@ -668,7 +677,8 @@ export default function ComplimentaryTicketsPage() {
               <div className="space-y-2">
                 <Label className="text-xs text-muted-foreground flex items-center gap-1">
                   <Mail className="w-3 h-3" />
-                  Email Tamu <span className="text-danger">*</span>
+                  Email Tamu
+                  <span className="text-[10px] text-muted-foreground/70">(opsional — kosongkan untuk OTS walk-in)</span>
                 </Label>
                 <Input
                   type="email"
@@ -683,7 +693,8 @@ export default function ComplimentaryTicketsPage() {
             <div className="space-y-2 sm:max-w-md">
               <Label className="text-xs text-muted-foreground flex items-center gap-1">
                 <Phone className="w-3 h-3" />
-                No. WhatsApp <span className="text-danger">*</span>
+                No. WhatsApp
+                <span className="text-[10px] text-muted-foreground/70">(opsional)</span>
               </Label>
               <Input
                 type="tel"
@@ -701,8 +712,18 @@ export default function ComplimentaryTicketsPage() {
           <div className="space-y-4">
             <Label className="text-sm font-medium flex items-center gap-2">
               <Ticket className="w-4 h-4 text-gold" />
-              Pemilihan Kursi
+              {isFestival ? 'Pemilihan Paket Tiket' : 'Pemilihan Kursi'}
+              {isFestival && selectedEvent && (
+                <Badge variant="secondary" className="text-[10px] bg-gold/20 text-gold border-gold/30">
+                  Festival Mode
+                </Badge>
+              )}
             </Label>
+            {isFestival && (
+              <p className="text-xs text-muted-foreground -mt-2">
+                Event ini memiliki paket tiket festival. Pilih paket + jumlah tiket, sistem akan otomatis mengalokasikan slot dari pool paket.
+              </p>
+            )}
 
             {/* Show Date Tabs for multi-day events (hidden in FESTIVAL mode — package handles days) */}
             {showDates.length > 1 && !isFestival && (
@@ -1178,8 +1199,6 @@ export default function ComplimentaryTicketsPage() {
                 isSubmitting ||
                 !selectedEventId ||
                 !guestName ||
-                !guestEmail ||
-                !guestPhone ||
                 (isFestival
                   ? !selectedFestivalPkg || festivalQuantity < 1
                   : isNumberedSeatMap
