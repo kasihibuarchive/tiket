@@ -48,6 +48,8 @@ interface PriceCategoryData {
   colorCode: string
   applicableDayIds?: string[] | null
   packageType?: string | null
+  salesLocked?: boolean
+  salesLockReason?: string | null
 }
 
 interface ShowDateData {
@@ -277,6 +279,59 @@ function GaZoneManagementPanel({
       pc.name.toLowerCase() === zone.name.toLowerCase() ||
       pc.name.toLowerCase() === (zone.priceCategoryName || '').toLowerCase()
     )
+  }
+
+  // ─── Toggle Kunci Penjualan (sales lock) for a zone's PriceCategory ──
+  // Calls the dedicated lock API immediately (no Save needed).
+  const [lockLoadingPcId, setLockLoadingPcId] = useState<string | null>(null)
+  async function handleToggleSalesLock(zone: GaZoneDef) {
+    const pc = findMatchingPC(zone)
+    if (!pc) {
+      alert('Zona ini belum terhubung ke kategori harga mana pun.\nKlik "Sync dari Kategori" dulu untuk menghubungkan.')
+      return
+    }
+    if (lockLoadingPcId) return // prevent double-click
+
+    const willLock = !pc.salesLocked
+    let reason: string | undefined
+    if (willLock) {
+      const promptResult = window.prompt(
+        `Alasan mengunci penjualan "${pc.name}" (opsional, akan ditampilkan ke pembeli):`,
+        ''
+      )
+      if (promptResult === null) return // user clicked Cancel
+      reason = promptResult.trim() || undefined
+    }
+
+    setLockLoadingPcId(pc.id)
+    try {
+      const url = `/api/admin/events/${eventId}/price-categories/${pc.id}/lock`
+      const res = willLock
+        ? await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reason }),
+          })
+        : await fetch(url, { method: 'DELETE' })
+
+      const data = await res.json()
+      if (!res.ok) {
+        alert(data.error || 'Gagal mengubah status kunci penjualan.')
+        return
+      }
+
+      // Update local state
+      setPriceCategories(prev => prev.map(p =>
+        p.id === pc.id
+          ? { ...p, salesLocked: willLock, salesLockReason: willLock ? (reason || null) : null }
+          : p
+      ))
+    } catch (err) {
+      console.error('Error toggling sales lock:', err)
+      alert('Gagal terhubung ke server. Coba lagi.')
+    } finally {
+      setLockLoadingPcId(null)
+    }
   }
 
   // ─── Toggle applicable day for a zone's PriceCategory ──────────────
@@ -804,6 +859,38 @@ function GaZoneManagementPanel({
                     <span className="text-xs font-medium text-charcoal min-w-[80px] text-right">
                       Rp {zone.price.toLocaleString('id-ID')}
                     </span>
+                    {/* Kunci Penjualan toggle — only if zone is linked to a PriceCategory */}
+                    {(() => {
+                      const pc = findMatchingPC(zone)
+                      if (!pc) return null
+                      const isLocked = !!pc.salesLocked
+                      const isLoading = lockLoadingPcId === pc.id
+                      return (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleToggleSalesLock(zone)}
+                          disabled={isLoading}
+                          className={cn(
+                            "h-7 px-2 text-[11px] shrink-0",
+                            isLocked
+                              ? "text-red-600 hover:bg-red-50 border border-red-300 bg-red-50/50"
+                              : "text-muted-foreground hover:bg-amber-50 hover:text-amber-700 border border-border/40"
+                          )}
+                          title={isLocked ? `Tiket dikunci${pc.salesLockReason ? `: ${pc.salesLockReason}` : ''}` : 'Kunci penjualan paket ini'}
+                        >
+                          {isLoading ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : isLocked ? (
+                            <Lock className="w-3.5 h-3.5" />
+                          ) : (
+                            <LockOpen className="w-3.5 h-3.5" />
+                          )}
+                          <span className="ml-1">{isLocked ? 'Dikunci' : 'Kunci'}</span>
+                        </Button>
+                      )
+                    })()}
                     <Button
                       variant="ghost"
                       size="sm"
