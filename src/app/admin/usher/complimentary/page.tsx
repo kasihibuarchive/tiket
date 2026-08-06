@@ -105,6 +105,8 @@ export default function OTSTicketPage() {
   // Form
   const [selectedEventId, setSelectedEventId] = useState<string>('')
   const [guestName, setGuestName] = useState('')
+  const [guestEmail, setGuestEmail] = useState('')
+  const [guestPhone, setGuestPhone] = useState('')
 
   // Submit
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -392,6 +394,12 @@ export default function OTSTicketPage() {
       setSubmitResult({ success: false, message: 'Harap masukkan nama tamu.' })
       return
     }
+    // Email/Phone optional untuk OTS walk-in (backend support empty email)
+    // Tapi kalau email diisi, validasi format
+    if (guestEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) {
+      setSubmitResult({ success: false, message: 'Format email tidak valid.' })
+      return
+    }
 
     // Validate selection based on mode
     if (isFestivalMode) {
@@ -416,8 +424,8 @@ export default function OTSTicketPage() {
       const body: any = {
         eventId: selectedEventId,
         guestName,
-        guestEmail: '',
-        guestPhone: '',
+        guestEmail: guestEmail.trim(),
+        guestPhone: guestPhone.trim(),
         showDateId: isFestivalMode ? undefined : (selectedShowDateId || undefined),
       }
 
@@ -451,6 +459,8 @@ export default function OTSTicketPage() {
         setSubmitResult({ success: true, message: `Tiket OTS berhasil dibuat! ${qtyText} — TRX: ${data.transactionId}` })
         // Reset everything
         setGuestName('')
+        setGuestEmail('')
+        setGuestPhone('')
         setSelectedSeats([])
         setSelectedFestivalPkgId(null)
         setFestivalQty(1)
@@ -591,6 +601,29 @@ export default function OTSTicketPage() {
                 <div className="space-y-1.5 max-w-md">
                   <Label className="text-xs text-muted-foreground">Nama <span className="text-danger">*</span></Label>
                   <Input value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="Nama pembeli" className="bg-white" autoFocus />
+                </div>
+                <div className="space-y-1.5 max-w-md">
+                  <Label className="text-xs text-muted-foreground">Email <span className="text-muted-foreground/70">(opsional)</span></Label>
+                  <Input
+                    type="email"
+                    value={guestEmail}
+                    onChange={(e) => setGuestEmail(e.target.value)}
+                    placeholder="email@contoh.com (untuk kirim e-ticket)"
+                    className="bg-white"
+                  />
+                  <p className="text-[10px] text-muted-foreground/70">
+                    Kalau diisi, e-ticket + QR akan otomatis dikirim ke email ini. Kosongkan untuk tiket walk-in (OTS).
+                  </p>
+                </div>
+                <div className="space-y-1.5 max-w-md">
+                  <Label className="text-xs text-muted-foreground">No. WhatsApp <span className="text-muted-foreground/70">(opsional)</span></Label>
+                  <Input
+                    type="tel"
+                    value={guestPhone}
+                    onChange={(e) => setGuestPhone(e.target.value)}
+                    placeholder="08xxxxxxxxxx"
+                    className="bg-white"
+                  />
                 </div>
               </div>
 

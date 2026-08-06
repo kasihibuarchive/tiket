@@ -80,10 +80,23 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { eventId, seatCodes, guestName, guestEmail, guestPhone, showDateId, festivalPackage } = body
+    const { eventId, guestName, guestEmail, guestPhone, showDateId, festivalPackage } = body
+    const seatCodes: string[] = Array.isArray(body.seatCodes) ? body.seatCodes.slice() : []
+
+    // Festival packages carry their own quantity + priceCategoryId — backend will
+    // pick N AVAILABLE seats from the pool, so client may legitimately send seatCodes: [].
+    const hasFestivalPackage =
+      !!festivalPackage &&
+      typeof festivalPackage.priceCategoryId === 'string' &&
+      festivalPackage.priceCategoryId.length > 0 &&
+      (Number(festivalPackage.quantity) || 0) > 0
 
     // Validate required fields (guestEmail is optional for OTS tickets)
-    if (!eventId || !seatCodes || !Array.isArray(seatCodes) || seatCodes.length === 0 || !guestName) {
+    if (
+      !eventId ||
+      !guestName ||
+      (!hasFestivalPackage && seatCodes.length === 0)
+    ) {
       return NextResponse.json(
         { error: 'eventId, seatCodes (non-empty array), and guestName are required' },
         { status: 400 }
