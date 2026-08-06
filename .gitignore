@@ -100,3 +100,6 @@ bun.lock
 # Worklogs
 worklog.md
 worklog-fixes.md
+
+# Broken submodule reference — duplicate project, never deploy this
+tiket/
