@@ -18,6 +18,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ categories })
   } catch (error) {
     console.error('Error fetching price categories:', error)
-    return NextResponse.json({ error: 'Failed to fetch price categories' }, { status: 500 })
+    return NextResponse.json({ error: 'Failed to fetch price categories', detail: String(error) }, { status: 500 })
   }
 }
