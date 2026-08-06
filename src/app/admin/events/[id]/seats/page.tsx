@@ -342,6 +342,11 @@ function GaZoneManagementPanel({
   //
   // Yang bisa di-restore: SOLD, INVITATION (dari transaksi).
   // Yang GA bisa di-restore: Reservasi Undangan manual (tanpa transaksi).
+  //
+  // Opsi createMissing: kalau ada seatCode di transaksi yang ga ada di tabel
+  // Seat (biasanya karena nama zona berubah pas regenerate), auto-create
+  // kursi dengan seatCode lama + status SOLD/INVITATION biar data pembeli
+  // tetap ke-link di usher seat map.
   const [isRestoringSeats, setIsRestoringSeats] = useState(false)
   async function handleRestoreSeats() {
     if (!confirm(
@@ -356,7 +361,7 @@ function GaZoneManagementPanel({
 
     setIsRestoringSeats(true)
     try {
-      // ── Step 1: dry-run preview ────────────────────────────────
+      // ── Step 1: dry-run preview (without createMissing) ────────
       const dryRes = await fetch(`/api/admin/events/${eventId}/restore-seats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -370,35 +375,59 @@ function GaZoneManagementPanel({
 
       const s = dryData.summary
       const orphanPreview = (dryData.orphanSamples || []).slice(0, 5).join('\n  ')
+
+      // ── Step 2: if there are orphans, ask admin whether to auto-create ──
+      let useCreateMissing = false
+      if (s.orphanCodes > 0) {
+        const orphanMsg =
+          `⚠️ DITEMUKAN ${s.orphanCodes} ORPHAN\n\n` +
+          `Ada ${s.orphanCodes} seatCode di transaksi yang TIDAK ada di tabel Seat.\n` +
+          `Biasanya karena nama zona berubah pas regenerate.\n\n` +
+          `Sample orphan:\n  ${orphanPreview}\n\n` +
+          `Pilihan:\n` +
+          `  • OK → AUTO-CREATE kursi dengan seatCode lama + status SOLD/INVITATION\n` +
+          `        (RECOMMENDED — data pembeli tetap ke-link di usher map)\n` +
+          `  • Cancel → skip orphan (hanya restore kursi yang match)\n\n` +
+          `Lanjut dengan auto-create?`
+        useCreateMissing = confirm(orphanMsg)
+      }
+
+      // ── Step 3: confirm sebelum eksekusi ──────────────────────
       const confirmMsg =
-        `🔍 DRY RUN PREVIEW\n\n` +
+        `🔍 FINAL CONFIRMATION\n\n` +
         `Total transaksi PAID: ${s.totalTransactions}\n` +
         `Total seatCodes di transaksi: ${s.totalCodesInTransactions}\n` +
         `Kursi di DB: ${s.seatsInDb}\n\n` +
-        `Akan di-restore:\n` +
-        `  • ${s.willMarkSold} kursi → SOLD\n` +
-        `  • ${s.willMarkInvitation} kursi → INVITATION\n` +
-        `  • ${s.alreadyCorrect} kursi sudah benar (skip)\n` +
-        `  • ${s.orphanCodes} kode ga ketemu seat-nya (skip)\n` +
-        (orphanPreview ? `\nSample orphan:\n  ${orphanPreview}\n` : '') +
-        `\n\nLanjut eksekusi?`
+        `Akan dieksekusi:\n` +
+        `  • ${s.willMarkSold} kursi → SOLD (mark existing)\n` +
+        `  • ${s.willMarkInvitation} kursi → INVITATION (mark existing)\n` +
+        (useCreateMissing
+          ? `  • ${s.orphanCodes} kursi → AUTO-CREATE dengan seatCode lama\n`
+          : `  • ${s.orphanCodes} orphan → SKIP\n`) +
+        `  • ${s.alreadyCorrect} kursi sudah benar (skip)\n\n` +
+        `Lanjut eksekusi?`
       if (!confirm(confirmMsg)) return
 
-      // ── Step 2: real run ───────────────────────────────────────
+      // ── Step 4: real run ───────────────────────────────────────
       const res = await fetch(`/api/admin/events/${eventId}/restore-seats`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dryRun: false }),
+        body: JSON.stringify({ dryRun: false, createMissing: useCreateMissing }),
       })
       const data = await res.json()
       if (res.ok) {
+        const r = data.summary
         alert(
           `${data.message}\n\n` +
           `Detail:\n` +
-          `• SOLD: ${data.summary.soldUpdated} kursi\n` +
-          `• INVITATION: ${data.summary.invitationUpdated} kursi\n` +
-          `• Sudah benar (skip): ${data.summary.alreadyCorrect}\n` +
-          `• Orphan (ga ketemu): ${data.summary.orphanCodes}`
+          `• SOLD mark: ${r.soldUpdated} kursi\n` +
+          `• INVITATION mark: ${r.invitationUpdated} kursi\n` +
+          (useCreateMissing
+            ? `• SOLD create: ${r.soldCreated} kursi (seatCode lama)\n` +
+              `• INVITATION create: ${r.invitationCreated} kursi (seatCode lama)\n`
+            : '') +
+          `• Sudah benar (skip): ${r.alreadyCorrect}\n` +
+          `• Orphan tersisa: ${r.orphanCodes}`
         )
         onRefresh?.()
       } else {

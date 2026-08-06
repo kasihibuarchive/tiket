@@ -37,6 +37,7 @@ export async function POST(
     const { id } = await params
     const body = await request.json().catch(() => ({}))
     const dryRun = body.dryRun === true
+    const createMissing = body.createMissing === true
 
     const event = await withDbRetry(() =>
       db.event.findUnique({
@@ -102,16 +103,38 @@ export async function POST(
 
     // ─── 4. Build update plan ───────────────────────────────────────
     // Only update seats that currently exist AND are AVAILABLE.
-    // Skip if seat is already SOLD/INVITATION (no-op) or doesn't exist (orphan).
-    const toSold: string[] = []       // seat IDs
-    const toInvitation: string[] = [] // seat IDs
+    // For seat codes that don't exist (orphans — usually because zone names
+    // changed during regenerate), we have two options:
+    //   - skip them (default) — orphan codes reported back to admin
+    //   - create them (createMissing=true) — auto-create seat with the
+    //     old seatCode, marked SOLD/INVITATION. Preserves buyer linkage.
+    const toSold: string[] = []       // seat IDs to update
+    const toInvitation: string[] = [] // seat IDs to update
+    const toCreateSold: { seatCode: string; from: string }[] = []
+    const toCreateInvitation: { seatCode: string; from: string }[] = []
     const alreadyCorrect: string[] = []
     const orphans: string[] = []      // codes in transactions but no matching seat
+
+    // Re-fetch priceCategories to link new seats if we create them
+    const priceCategories = await withDbRetry(() =>
+      db.priceCategory.findMany({
+        where: { eventId: id },
+        select: { id: true, name: true },
+      })
+    )
+    const pcIdByName = new Map<string, string>()
+    for (const pc of priceCategories) pcIdByName.set(pc.name.toLowerCase(), pc.id)
 
     for (const item of plan) {
       const seat = seatByCode.get(item.seatCode)
       if (!seat) {
-        orphans.push(`${item.seatCode} (from ${item.from})`)
+        // Orphan: seat doesn't exist (likely zone renamed during regenerate)
+        if (createMissing) {
+          if (item.status === 'SOLD') toCreateSold.push({ seatCode: item.seatCode, from: item.from })
+          else toCreateInvitation.push({ seatCode: item.seatCode, from: item.from })
+        } else {
+          orphans.push(`${item.seatCode} (from ${item.from})`)
+        }
         continue
       }
       if (seat.status === item.status) {
@@ -134,6 +157,8 @@ export async function POST(
       seatsInDb: allSeats.length,
       willMarkSold: toSold.length,
       willMarkInvitation: toInvitation.length,
+      willCreateSold: toCreateSold.length,
+      willCreateInvitation: toCreateInvitation.length,
       alreadyCorrect: alreadyCorrect.length,
       orphanCodes: orphans.length,
       parseErrors: parseErrors.length,
@@ -143,16 +168,20 @@ export async function POST(
       return NextResponse.json({
         event: { id: event.id, title: event.title },
         dryRun: true,
+        createMissing,
         summary,
         orphanSamples: orphans.slice(0, 20),
+        createSamples: [...toCreateSold, ...toCreateInvitation].slice(0, 10).map(c => c.seatCode),
         parseErrorSamples: parseErrors.slice(0, 10),
-        message: `🔍 Dry run: akan mark ${toSold.length} kursi SOLD + ${toInvitation.length} kursi INVITATION.`,
+        message: `🔍 Dry run: akan mark ${toSold.length} SOLD + ${toInvitation.length} INVITATION${createMissing ? `, create ${toCreateSold.length + toCreateInvitation.length} kursi baru buat orphan` : `, skip ${orphans.length} orphan`}.`,
       })
     }
 
     // ─── 5. Execute updates in batches ──────────────────────────────
     let soldUpdated = 0
     let invitationUpdated = 0
+    let soldCreated = 0
+    let invitationCreated = 0
     const BATCH = 500
 
     for (let i = 0; i < toSold.length; i += BATCH) {
@@ -173,24 +202,91 @@ export async function POST(
       invitationUpdated += r.count
     }
 
+    // ─── 5b. Create missing seats for orphans (if createMissing=true) ──
+    // These are seats referenced in transactions but not present in the Seat
+    // table — typically because zone names changed during regenerate.
+    // We create them with the OLD seatCode so the usher seat map can still
+    // find buyer data when looking up that code.
+    if (createMissing) {
+      const toCreate = [...toCreateSold, ...toCreateInvitation]
+      if (toCreate.length > 0) {
+        // Dedupe by seatCode (a code might appear in multiple transactions)
+        const seenCodes = new Set<string>()
+        const uniqueCreate = toCreate.filter(c => {
+          if (seenCodes.has(c.seatCode)) return false
+          seenCodes.add(c.seatCode)
+          return true
+        })
+
+        // Build create records — infer zoneName & row/col from seatCode
+        // seatCode format: "ZONE-N" or "ZONE-N@dayId,dayId"
+        // We split off the @dayId suffix (festival format) for the actual seat.
+        const createData = uniqueCreate.map(c => {
+          // Strip @dayId suffix for the physical seat
+          const baseCode = c.seatCode.split('@')[0]
+          const dashIdx = baseCode.lastIndexOf('-')
+          const zoneName = dashIdx > 0 ? baseCode.substring(0, dashIdx) : baseCode
+          const colNum = dashIdx > 0 ? (parseInt(baseCode.substring(dashIdx + 1)) || 0) : 0
+          const matchedPcId = pcIdByName.get(zoneName.toLowerCase()) || null
+
+          // Find the status from toCreateSold/Invitation arrays
+          const isInvitation = toCreateInvitation.some(t => t.seatCode === c.seatCode)
+          return {
+            eventId: id,
+            eventShowDateId: null,
+            seatCode: c.seatCode,
+            status: (isInvitation ? 'INVITATION' : 'SOLD') as 'INVITATION' | 'SOLD',
+            row: zoneName,
+            col: colNum,
+            zoneName,
+            priceCategoryId: matchedPcId,
+          }
+        })
+
+        // Create in batches
+        for (let i = 0; i < createData.length; i += BATCH) {
+          const batch = createData.slice(i, i + BATCH)
+          try {
+            const r = await db.seat.createMany({
+              data: batch,
+              skipDuplicates: true,
+            })
+            soldCreated += batch.filter(b => b.status === 'SOLD').length
+            invitationCreated += batch.filter(b => b.status === 'INVITATION').length
+            void r
+          } catch (err) {
+            console.error('Error creating missing seats batch:', err)
+          }
+        }
+      }
+    }
+
     // ─── 6. Log activity ────────────────────────────────────────────
+    const logParts: string[] = []
+    if (soldUpdated > 0) logParts.push(`${soldUpdated} SOLD mark`)
+    if (invitationUpdated > 0) logParts.push(`${invitationUpdated} INVITATION mark`)
+    if (soldCreated > 0) logParts.push(`${soldCreated} SOLD create`)
+    if (invitationCreated > 0) logParts.push(`${invitationCreated} INVITATION create`)
     await logActivity(
       request,
       'RESTORE_SEATS',
-      `Restore status kursi untuk event "${event.title}": ${soldUpdated} SOLD, ${invitationUpdated} INVITATION dari ${paidTx.length} transaksi.`
+      `Restore status kursi untuk event "${event.title}": ${logParts.join(', ') || 'no-op'} dari ${paidTx.length} transaksi.`
     ).catch(() => {})
 
     return NextResponse.json({
       event: { id: event.id, title: event.title },
       dryRun: false,
+      createMissing,
       summary: {
         ...summary,
         soldUpdated,
         invitationUpdated,
+        soldCreated,
+        invitationCreated,
       },
       orphanSamples: orphans.slice(0, 20),
       parseErrorSamples: parseErrors.slice(0, 10),
-      message: `✅ ${soldUpdated + invitationUpdated} kursi di-restore (${soldUpdated} SOLD, ${invitationUpdated} INVITATION) dari ${paidTx.length} transaksi.`,
+      message: `✅ ${soldUpdated + invitationUpdated + soldCreated + invitationCreated} kursi di-restore (mark: ${soldUpdated} SOLD + ${invitationUpdated} INVITATION${createMissing ? `, create: ${soldCreated} SOLD + ${invitationCreated} INVITATION` : ''}) dari ${paidTx.length} transaksi.`,
     })
   } catch (error) {
     console.error('Error restoring seats:', error)
