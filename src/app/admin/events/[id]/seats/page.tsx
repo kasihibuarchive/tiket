@@ -698,6 +698,91 @@ function GaZoneManagementPanel({
         </CardContent>
       </Card>
 
+      {/* 1.5. Kunci Penjualan Paket — Preview all price categories with lock toggles.
+            Independent of seat generation. Admins can lock/unlock any package here
+            without needing to regenerate seats. This is the "preview" panel. */}
+      {priceCategories.length > 0 && (
+        <Card className="border-amber-300/40">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Lock className="w-4 h-4 text-amber-600" />
+                <h2 className="font-serif text-lg font-semibold text-charcoal">Kunci Penjualan Paket</h2>
+                <Badge variant="secondary" className="text-xs bg-amber-50 text-amber-700">
+                  {priceCategories.filter(pc => pc.salesLocked).length}/{priceCategories.length} dikunci
+                </Badge>
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground mb-3">
+              Soft-lock blokir pembelian tiket di checkout tanpa menghapus kursi yang sudah kegenerate. Aman toggle kapan saja — tidak perlu regenerate.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+              {priceCategories.map(pc => {
+                const isLocked = !!pc.salesLocked
+                const isLoading = lockLoadingPcId === pc.id
+                return (
+                  <div
+                    key={pc.id}
+                    className={cn(
+                      "rounded-lg border p-2.5 flex items-center gap-2",
+                      isLocked
+                        ? "border-red-300 bg-red-50/40"
+                        : "border-border/50 bg-white"
+                    )}
+                  >
+                    <div
+                      className="w-3 h-3 rounded-sm shrink-0"
+                      style={{ backgroundColor: pc.colorCode || '#ccc' }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-charcoal truncate" title={pc.name}>
+                        {pc.name}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        Rp {pc.price.toLocaleString('id-ID')}
+                        {isLocked && (
+                          <span className="ml-1 text-red-600">· {pc.salesLockReason || 'Dikunci'}</span>
+                        )}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={isLoading}
+                      onClick={() => {
+                        // Find matching zone or use a synthetic zone with priceCategoryName
+                        const matchingZone = gaZonesDef.find(z =>
+                          z.name.toLowerCase() === pc.name.toLowerCase() ||
+                          (z.priceCategoryName || '').toLowerCase() === pc.name.toLowerCase()
+                        )
+                        const zone = matchingZone || { name: pc.name, priceCategoryName: pc.name } as GaZoneDef
+                        handleToggleSalesLock(zone)
+                      }}
+                      className={cn(
+                        "h-7 text-[10px] px-2 shrink-0",
+                        isLocked
+                          ? "bg-red-50 border-red-300 text-red-700 hover:bg-red-100"
+                          : "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                      )}
+                    >
+                      {isLoading ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : isLocked ? (
+                        <Lock className="w-3 h-3 mr-0.5" />
+                      ) : (
+                        <LockOpen className="w-3 h-3 mr-0.5" />
+                      )}
+                      {isLocked ? 'Buka' : 'Kunci'}
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* 2. Manual Zone Definition */}
       <Card className="border-gold/20">
         <CardContent className="p-6">
@@ -859,12 +944,30 @@ function GaZoneManagementPanel({
                     <span className="text-xs font-medium text-charcoal min-w-[80px] text-right">
                       Rp {zone.price.toLocaleString('id-ID')}
                     </span>
-                    {/* Kunci Penjualan toggle — only if zone is linked to a PriceCategory */}
+                    {/* Kunci Penjualan toggle — ALWAYS visible.
+                        If no matching PriceCategory is found, button is shown in
+                        'unlinked' state and prompts admin to Sync dari Kategori first. */}
                     {(() => {
                       const pc = findMatchingPC(zone)
-                      if (!pc) return null
-                      const isLocked = !!pc.salesLocked
-                      const isLoading = lockLoadingPcId === pc.id
+                      const isLocked = !!(pc && pc.salesLocked)
+                      const isLoading = pc ? lockLoadingPcId === pc.id : false
+                      if (!pc) {
+                        return (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              alert('Zona ini belum terhubung ke kategori harga mana pun.\n\nKlik tombol "Sync dari Kategori" di atas dulu untuk menghubungkan, lalu tombol Kunci Penjualan akan aktif.')
+                            }}
+                            className="h-7 px-2 text-[11px] shrink-0 text-muted-foreground/50 hover:bg-gray-50 border border-dashed border-border/40"
+                            title="Zona belum terhubung ke kategori harga. Klik Sync dari Kategori dulu."
+                          >
+                            <LockOpen className="w-3.5 h-3.5" />
+                            <span className="ml-1">Belum Link</span>
+                          </Button>
+                        )
+                      }
                       return (
                         <Button
                           type="button"
