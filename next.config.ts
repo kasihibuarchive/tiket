@@ -1,5 +1,6 @@
 import type { NextConfig } from "next";
 
+// NOTE: bump 2026-08-07 — force Vercel cache invalidation for restore-seats route
 const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,

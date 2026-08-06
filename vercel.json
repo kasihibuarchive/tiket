@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": ["sin1"],
+  "github": {
+    "silent": false
+  },
   "functions": {
     "src/app/api/webhooks/tripay/route.ts": {
       "maxDuration": 30
@@ -10,6 +13,9 @@
     },
     "src/app/api/usher/resend-email/route.ts": {
       "maxDuration": 30
+    },
+    "src/app/api/admin/events/[id]/restore-seats/route.ts": {
+      "maxDuration": 60
     }
   }
 }
