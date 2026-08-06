@@ -16,6 +16,7 @@ const adminLinks = [
   { href: '/admin/dashboard', label: 'Dashboard', icon: LayoutGrid },
   { href: '/admin/events', label: 'Kelola Events', icon: Calendar },
   { href: '/admin/seat-maps', label: 'Seat Maps', icon: Map },
+  { href: '/admin/usher/events', label: 'Database Penonton', icon: Users },
   { href: '/admin/ushers', label: 'Manajemen Usher', icon: Users },
   { href: '/admin/tickets/complimentary', label: 'Tiket Komplimen', icon: Gift },
   { href: '/admin/usher/complimentary', label: 'OTS Ticket', icon: Zap },
@@ -124,10 +125,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           doRedirect('/admin/usher')
           return
         }
-        if (role === 'admin' && pathname.startsWith('/admin/usher')) {
-          doRedirect('/admin')
-          return
-        }
+        // NOTE: admin utama boleh akses /admin/usher/* (untuk lihat Database Penonton dll)
+        // Tidak ada redirect untuk admin role dari path usher.
         setIsAuthLoading(false)
         return
       }
@@ -145,10 +144,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           doRedirect('/admin/usher')
           return
         }
-        if (role === 'admin' && pathname.startsWith('/admin/usher')) {
-          doRedirect('/admin')
-          return
-        }
+        // NOTE: admin utama boleh akses /admin/usher/* (untuk lihat Database Penonton dll)
         setIsAuthLoading(false)
       } else {
         clearTimeout(safetyTimer)
