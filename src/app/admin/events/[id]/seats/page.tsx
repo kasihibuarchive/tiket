@@ -68,6 +68,7 @@ interface EventInfo {
   showDates?: ShowDateData[]
   layoutImage?: string | null
   gaZoneConfig?: string | null
+  eventMode?: string | null
 }
 
 interface GaZoneDef {
@@ -1743,11 +1744,26 @@ export default function SeatEditorPage() {
     return groups
   }, [allSeats, activeShowDate, showDates.length])
 
-  // Filter seats based on selected day — ONLY match explicit showDateId, no orphan fallback
+  // Filter seats based on selected day.
+  // - REGULAR events: match explicit eventShowDateId on the seat.
+  // - FESTIVAL events: seats have NO eventShowDateId — filter by whether the
+  //   seat's priceCategory.applicableDayIds includes the selected day's id
+  //   (or applicableDayIds is null = FULL pass, valid all days).
   const seats = useMemo(() => {
     if (!activeShowDate) return allSeats
-    return allSeats.filter(s => s.eventShowDateId === activeShowDate.id)
-  }, [allSeats, activeShowDate])
+    const isFestival = eventInfo?.eventMode === 'FESTIVAL'
+    if (!isFestival) {
+      return allSeats.filter(s => s.eventShowDateId === activeShowDate.id)
+    }
+    const pcMap = new Map(priceCategories.map(pc => [pc.id, pc]))
+    return allSeats.filter(s => {
+      if (!s.priceCategoryId) return false
+      const pc = pcMap.get(s.priceCategoryId)
+      if (!pc) return false
+      if (!pc.applicableDayIds) return true // FULL pass
+      return pc.applicableDayIds.includes(activeShowDate.id)
+    })
+  }, [allSeats, activeShowDate, eventInfo?.eventMode, priceCategories])
 
   useEffect(() => {
     async function fetchData() {

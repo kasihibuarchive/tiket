@@ -24,7 +24,11 @@ export async function GET(
       // Quick event existence + publish check
       const event = await db.event.findUnique({
         where: { id },
-        select: { id: true, isPublished: true },
+        select: {
+          id: true,
+          isPublished: true,
+          eventMode: true,
+        },
       })
       if (!event) return null
 
@@ -34,9 +38,59 @@ export async function GET(
         return { unpublished: true }
       }
 
+      // ── FESTIVAL MODE: seats have NO eventShowDateId (festival pass is shared
+      // across days). The applicable days live on PriceCategory.applicableDayIds.
+      // So when admin/usher picks "Day N", we must:
+      //   1. Get the chosen EventShowDate's id
+      //   2. Find PriceCategories whose applicableDayIds includes that id
+      //      (or is null = FULL pass, applies to all days)
+      //   3. Return seats whose priceCategoryId is in that set
+      // For REGULAR events, keep the existing behavior: filter seats by eventShowDateId.
+      const isFestival = event.eventMode === 'FESTIVAL'
+
       // Build where clause
       const seatWhere: Record<string, unknown> = { eventId: id }
-      if (showDateId) seatWhere.eventShowDateId = showDateId
+      let festivalApplicablePriceCategoryIds: string[] | null = null
+
+      if (showDateId) {
+        if (isFestival) {
+          // Look up all price categories and filter by applicableDayIds
+          const allPcs = await db.priceCategory.findMany({
+            where: { eventId: id },
+            select: { id: true, applicableDayIds: true },
+          })
+          festivalApplicablePriceCategoryIds = allPcs
+            .filter((pc) => {
+              // null applicableDayIds = FULL pass = applies to all days
+              if (!pc.applicableDayIds) return true
+              try {
+                const ids = JSON.parse(pc.applicableDayIds) as string[]
+                return Array.isArray(ids) && ids.includes(showDateId)
+              } catch {
+                return false
+              }
+            })
+            .map((pc) => pc.id)
+
+          if (festivalApplicablePriceCategoryIds.length === 0) {
+            // No package applies to this day → return empty seats
+            return { seats: [], priceCategories: [] }
+          }
+
+          seatWhere.priceCategoryId = { in: festivalApplicablePriceCategoryIds }
+        } else {
+          // REGULAR: filter seats by eventShowDateId (existing behavior)
+          seatWhere.eventShowDateId = showDateId
+        }
+      }
+
+      // For festival mode, only return price categories that apply to the selected day
+      // (frontend computes stats / availability per package — irrelevant packages
+      // would inflate totals). For non-festival or no-showDateId selected, return all.
+      const pcWhere: Record<string, unknown> = { eventId: id }
+      if (festivalApplicablePriceCategoryIds) {
+        pcWhere.id = { in: festivalApplicablePriceCategoryIds }
+      }
 
       // Run in parallel — 2 queries instead of sequential
       const [seats, priceCategories] = await Promise.all([
@@ -56,7 +110,7 @@ export async function GET(
           orderBy: [{ row: 'asc' }, { col: 'asc' }],
         }),
         db.priceCategory.findMany({
-          where: { eventId: id },
+          where: pcWhere,
           select: {
             id: true, name: true, price: true, colorCode: true,
             applicableDayIds: true, packageType: true,
