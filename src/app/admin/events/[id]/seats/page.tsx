@@ -1162,42 +1162,108 @@ function GaZoneManagementPanel({
                     {stats.total > 0 ? Math.round((stats.available / stats.total) * 100) : 0}% tersisa
                   </p>
 
-                  {/* Lock / Unlock Zone */}
-                  <div className="mt-3 pt-3 border-t border-border/30">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      {isZoneLocked ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleZoneUnlock(zoneName)}
-                          disabled={isZoneLocking[zoneName]}
-                          className="h-7 text-[10px] px-2 bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
-                        >
-                          {isZoneLocking[zoneName] ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
+                  {/* Sales Lock (PriceCategory.salesLocked) — soft lock at checkout level.
+                      Doesn't touch seats, no regeneration needed. This is the primary
+                      lock mechanism for Festival Mode packages. */}
+                  {(() => {
+                    const pc = priceCategories.find(p =>
+                      p.name.toLowerCase() === zoneName.toLowerCase() ||
+                      p.name.toLowerCase() === (gaZonesDef.find(z => z.name === zoneName)?.priceCategoryName || '').toLowerCase()
+                    )
+                    if (!pc) return null
+                    const isSalesLocked = !!pc.salesLocked
+                    const isSalesLockLoading = lockLoadingPcId === pc.id
+                    return (
+                      <div className="mt-3 pt-3 border-t border-border/30">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-[10px] font-medium text-muted-foreground flex items-center gap-1">
+                              <Lock className="w-3 h-3" />
+                              Kunci Penjualan Paket
+                            </span>
+                            <p className="text-[9px] text-muted-foreground/70 mt-0.5 leading-snug">
+                              {isSalesLocked
+                                ? `Dikunci di level checkout${pc.salesLockReason ? `: ${pc.salesLockReason}` : ''}`
+                                : 'Soft-lock: blokir pembelian tanpa hapus kursi'}
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={isSalesLockLoading}
+                            onClick={() => handleToggleSalesLock({ name: zoneName, priceCategoryName: pc.name } as GaZoneDef)}
+                            className={cn(
+                              "h-7 text-[10px] px-2 shrink-0",
+                              isSalesLocked
+                                ? "bg-red-50 border-red-300 text-red-700 hover:bg-red-100"
+                                : "bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100"
+                            )}
+                          >
+                            {isSalesLockLoading ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : isSalesLocked ? (
+                              <Lock className="w-3 h-3 mr-0.5" />
+                            ) : (
+                              <LockOpen className="w-3 h-3 mr-0.5" />
+                            )}
+                            {isSalesLocked ? 'Buka' : 'Kunci'}
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Hard Lock (Seat.status = UNAVAILABLE) — bulk-close all available seats.
+                      Destructive: requires regeneration to restore. Hidden when sales-lock
+                      is active since sales-lock already blocks purchases. */}
+                  {(() => {
+                    const pc = priceCategories.find(p =>
+                      p.name.toLowerCase() === zoneName.toLowerCase() ||
+                      p.name.toLowerCase() === (gaZonesDef.find(z => z.name === zoneName)?.priceCategoryName || '').toLowerCase()
+                    )
+                    if (pc?.salesLocked) return null // sales-lock active, hide hard lock
+                    return (
+                      <div className="mt-2 pt-2 border-t border-border/20">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {isZoneLocked ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleZoneUnlock(zoneName)}
+                              disabled={isZoneLocking[zoneName]}
+                              className="h-7 text-[10px] px-2 bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800"
+                            >
+                              {isZoneLocking[zoneName] ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <LockOpen className="w-3 h-3 mr-0.5" />
+                              )}
+                              Buka Zona (Hard)
+                            </Button>
                           ) : (
-                            <LockOpen className="w-3 h-3 mr-0.5" />
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleZoneLock(zoneName)}
+                              disabled={isZoneLocking[zoneName] || stats.available === 0}
+                              className="h-7 text-[10px] px-2 bg-gray-50 border-gray-300 text-gray-600 hover:bg-gray-100 hover:text-gray-700"
+                            >
+                              {isZoneLocking[zoneName] ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <Lock className="w-3 h-3 mr-0.5" />
+                              )}
+                              Tutup Zona (Hard)
+                            </Button>
                           )}
-                          Buka Penjualan
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleZoneLock(zoneName)}
-                          disabled={isZoneLocking[zoneName] || stats.available === 0}
-                          className="h-7 text-[10px] px-2 bg-red-50 border-red-200 text-red-600 hover:bg-red-100 hover:text-red-700"
-                        >
-                          {isZoneLocking[zoneName] ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Lock className="w-3 h-3 mr-0.5" />
-                          )}
-                          Kunci Penjualan
-                        </Button>
-                      )}
-                    </div>
-                  </div>
+                        </div>
+                        <p className="text-[9px] text-muted-foreground/60 mt-1">
+                          Hard lock: set kursi jadi UNAVAILABLE. Perlu regenerate untuk restore.
+                        </p>
+                      </div>
+                    )
+                  })()}
 
                   {/* Reservasi Undangan (hidden when zone is locked) */}
                   {!isZoneLocked && (
