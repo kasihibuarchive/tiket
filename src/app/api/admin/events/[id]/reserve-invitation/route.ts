@@ -112,7 +112,16 @@ export async function POST(
 
         const priceCatId = existingSeats.find(s => s.priceCategoryId)?.priceCategoryId || null
 
-        const newSeats = []
+        const newSeats: Array<{
+          eventId: string
+          eventShowDateId: string
+          seatCode: string
+          status: 'INVITATION'
+          row: string
+          col: number
+          priceCategoryId: string | null
+          zoneName: string
+        }> = []
         for (let i = 1; i <= toCreate; i++) {
           newSeats.push({
             eventId: id,
@@ -193,7 +202,7 @@ export async function DELETE(
     const linkedTransactions = await db.transaction.findMany({
       where: {
         eventId: id,
-        seatCodes: { in: seatCodes.map(code => ({ contains: code })) },
+        OR: seatCodes.map(code => ({ seatCodes: { contains: code } })),
         paymentStatus: { in: ['PAID', 'PENDING'] },
       },
       select: { seatCodes: true },

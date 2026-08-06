@@ -53,7 +53,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const doRedirect = useCallback((path: string) => {
     if (!isRedirecting.current) {
       isRedirecting.current = true
-      router.replace(path).finally(() => { isRedirecting.current = false })
+      // router.replace is synchronous in App Router; reset flag on next microtask
+      router.replace(path)
+      Promise.resolve().then(() => { isRedirecting.current = false }).catch(() => {})
     }
   }, [router])
 

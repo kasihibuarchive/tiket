@@ -436,11 +436,16 @@ export default function EventDetailPage() {
     )
   }
 
+  if (!event) {
+    // Defensive guard — shouldn't happen, but TS narrowing needs this
+    return null
+  }
+
   const dateStr = formatEventDate(event.showDate)
   const timeStr = formatEventTime(event.showDate)
-  const activeDateStr = activeShowDate ? formatEventDate(activeShowDate.date) : dateStr
-  const activeTimeStr = activeShowDate ? formatEventTime(activeShowDate.date) : timeStr
-  const activeGateTimeStr = activeShowDate?.openGate ? formatEventTime(activeShowDate.openGate) : null
+  const activeDateStr = activeShowDate ? formatEventDate(activeShowDate.date as string) : dateStr
+  const activeTimeStr = activeShowDate ? formatEventTime(activeShowDate.date as string) : timeStr
+  const activeGateTimeStr = activeShowDate?.openGate ? formatEventTime(activeShowDate.openGate as string) : null
 
   const availablePercent = seatSummary.total > 0
     ? Math.round((seatSummary.available / seatSummary.total) * 100)

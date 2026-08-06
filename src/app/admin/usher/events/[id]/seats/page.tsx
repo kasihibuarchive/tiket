@@ -158,7 +158,7 @@ export default function UsherSeatMapPage() {
 
   return (
     <UsherErrorBoundary onError={handleRenderError}>
-      <ContentComponent key={retryKey} />
+      {ContentComponent ? <ContentComponent key={retryKey} /> : null}
     </UsherErrorBoundary>
   )
 }

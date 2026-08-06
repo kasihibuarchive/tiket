@@ -70,7 +70,9 @@ export async function GET(
     console.log(`[status-check] ${transactionId}: Tripay="${tripayStatus}" DB="${transaction.paymentStatus}"`)
 
     // ── PAYMENT SUCCESS ──
-    if (tripayStatus === 'PAID' && transaction.paymentStatus !== 'PAID') {
+    // Note: paymentStatus !== 'PAID' is guaranteed by the early-return at line 31,
+    // so we only need to check Tripay's status here.
+    if (tripayStatus === 'PAID') {
       const seatCodes: string[] = JSON.parse(transaction.seatCodes)
 
       await db.transaction.update({

@@ -355,6 +355,11 @@ export default function VerifyPage() {
     )
   }
 
+  if (!transaction) {
+    // Defensive guard — shouldn't happen, but TS narrowing needs this
+    return null
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-warm-white">
       <Navbar />

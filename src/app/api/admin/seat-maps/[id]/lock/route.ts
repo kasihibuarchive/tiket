@@ -51,8 +51,8 @@ export async function POST(
     if (existingLock) {
       return NextResponse.json(
         {
-          error: `Seat Map sedang diedit oleh ${existingLock.lockedBy || existingLock.lockedByAdminId}`,
-          lockedBy: existingLock.lockedBy || existingLock.lockedByAdminId,
+          error: `Seat Map sedang diedit oleh ${existingLock.lockedByAdmin || existingLock.lockedByAdminId}`,
+          lockedBy: existingLock.lockedByAdmin || existingLock.lockedByAdminId,
         },
         { status: 409 }
       )

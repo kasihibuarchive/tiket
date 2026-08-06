@@ -149,6 +149,11 @@ interface NumberedLayout {
   seatColumns?: SeatColumn[]
   canvasWidth?: number
   canvasHeight?: number
+  // Stage properties (persisted with layout so positions survive reload)
+  stageType?: string
+  stagePosition?: { x: number; y: number; width: number; height: number }
+  thrustWidth?: number
+  thrustDepth?: number
 }
 
 interface GALayout {
@@ -894,7 +899,9 @@ export function CanvasEditor({
       // CRITICAL: Include objects and stagePosition in auto-save.
       // Without these, auto-save overwrites the DB with layoutData that
       // lacks object/stage position data, causing positions to reset on reload.
-      const autoSaveData = deepClone(layoutData)
+      // Cast to NumberedLayout shape — stage fields are only meaningful for numbered
+      // layouts but persisting them on GA layouts is harmless (saved as JSON).
+      const autoSaveData = deepClone(layoutData) as NumberedLayout
       autoSaveData.objects = deepClone(objects)
       autoSaveData.stageType = stageType
       autoSaveData.stagePosition = stagePosition

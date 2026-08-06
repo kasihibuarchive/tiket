@@ -46,8 +46,8 @@ export async function GET() {
         }),
       ])
 
-      const seatMapMap = new Map(seatMaps.map((sm) => [sm.id, sm]))
-      const reviewCountMap = new Map(reviewCounts.map(r => [r.eventId, { total: r._count.id, average: r._avg.rating }]))
+      const seatMapMap = new Map(seatMaps.map((sm): [string, typeof sm] => [sm.id, sm]))
+      const reviewCountMap = new Map(reviewCounts.map((r): [string, { total: number; average: number | null }] => [r.eventId, { total: r._count.id, average: r._avg.rating }]))
 
       return events.map((event) => {
         const eventSeats = allSeats.filter((s) => s.eventId === event.id)

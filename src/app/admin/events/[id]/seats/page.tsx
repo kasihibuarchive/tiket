@@ -38,6 +38,7 @@ interface SeatData {
   priceCategoryId: string | null
   priceCategory: { id: string; name: string; price: number; colorCode: string } | null
   eventShowDateId?: string | null
+  zoneName?: string | null
 }
 
 interface PriceCategoryData {
@@ -1454,7 +1455,8 @@ export default function SeatEditorPage() {
   // ─── Stage & Objects coordinate mapping (canvas → admin grid) ──
   const stageLayout = useMemo(() => {
     if (!parsedLayout) return null
-    const { gridSize, displayRows, stagePosition, canvasSeatBounds: csb, cols } = parsedLayout
+    const { gridSize, displayRows, stagePosition, canvasSeatBounds: csb } = parsedLayout
+    const cols = gridSize.cols
     const CELL_TOTAL = SEAT_W + SEAT_GAP
     const guestGridW = cols * CELL_TOTAL
     const guestGridH = displayRows.length * CELL_TOTAL
@@ -1462,7 +1464,7 @@ export default function SeatEditorPage() {
     const hasCustomStagePos = stagePosition && typeof stagePosition.x === 'number'
     const stageType = parsedLayout.stageType || 'PROSCENIUM'
     const isInsetStage = stageType === 'BLACK_BOX' || stageType === 'ARENA'
-    const stageSize = isInsetStage ? 'md' : 'lg'
+    const stageSize: 'md' | 'lg' = isInsetStage ? 'md' : 'lg'
 
     // Helper: transform canvas (cx, cy, cw, ch) → guest (gx, gy, gw, gh)
     function toGuest(cx: number, cy: number, cw: number, ch: number) {

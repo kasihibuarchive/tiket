@@ -81,7 +81,7 @@ async function seed() {
     const seatData: {
       eventId: string
       seatCode: string
-      status: string
+      status: 'AVAILABLE'
       row: string
       col: number
       priceCategoryId: string | null
@@ -93,7 +93,7 @@ async function seed() {
         seatData.push({
           eventId: event.id,
           seatCode: `${layout.row}-${i}`,
-          status: 'AVAILABLE',
+          status: 'AVAILABLE' as const,
           row: layout.row,
           col: i,
           priceCategoryId,
