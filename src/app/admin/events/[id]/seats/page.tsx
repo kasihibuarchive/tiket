@@ -334,6 +334,84 @@ function GaZoneManagementPanel({
     }
   }
 
+  // ─── Restore SOLD/INVITATION seat statuses from transaction history ──
+  // Use case: admin klik "Generate Seats" → semua kursi ke-reset ke AVAILABLE.
+  // Endpoint ini baca Transaction.seatCodes (JSON) untuk semua transaksi PAID,
+  // lalu re-mark kursi yang match jadi SOLD (transaksi reguler) atau
+  // INVITATION (transaksi COMP-xxxx = complimentary).
+  //
+  // Yang bisa di-restore: SOLD, INVITATION (dari transaksi).
+  // Yang GA bisa di-restore: Reservasi Undangan manual (tanpa transaksi).
+  const [isRestoringSeats, setIsRestoringSeats] = useState(false)
+  async function handleRestoreSeats() {
+    if (!confirm(
+      'Restore Status Kursi?\n\n' +
+      'Fungsi: baca semua transaksi PAID untuk event ini, lalu mark kursi yang match jadi SOLD / INVITATION.\n\n' +
+      'Gunakan kalau habis "Generate Seats" lalu status kursi ke-reset semua jadi AVAILABLE.\n\n' +
+      'Catatan:\n' +
+      '• Hanya update kursi yang saat ini AVAILABLE (ga akan overwrite kursi LOCKED_TEMPORARY/UNAVAILABLE)\n' +
+      '• Reservasi Undangan manual (tanpa transaksi) TIDAK bisa di-restore — harus input ulang manual\n' +
+      '• Akan jalan dry-run dulu buat preview sebelum eksekusi'
+    )) return
+
+    setIsRestoringSeats(true)
+    try {
+      // ── Step 1: dry-run preview ────────────────────────────────
+      const dryRes = await fetch(`/api/admin/events/${eventId}/restore-seats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true }),
+      })
+      const dryData = await dryRes.json()
+      if (!dryRes.ok) {
+        alert(dryData.error || 'Gagal cek restore')
+        return
+      }
+
+      const s = dryData.summary
+      const orphanPreview = (dryData.orphanSamples || []).slice(0, 5).join('\n  ')
+      const confirmMsg =
+        `🔍 DRY RUN PREVIEW\n\n` +
+        `Total transaksi PAID: ${s.totalTransactions}\n` +
+        `Total seatCodes di transaksi: ${s.totalCodesInTransactions}\n` +
+        `Kursi di DB: ${s.seatsInDb}\n\n` +
+        `Akan di-restore:\n` +
+        `  • ${s.willMarkSold} kursi → SOLD\n` +
+        `  • ${s.willMarkInvitation} kursi → INVITATION\n` +
+        `  • ${s.alreadyCorrect} kursi sudah benar (skip)\n` +
+        `  • ${s.orphanCodes} kode ga ketemu seat-nya (skip)\n` +
+        (orphanPreview ? `\nSample orphan:\n  ${orphanPreview}\n` : '') +
+        `\n\nLanjut eksekusi?`
+      if (!confirm(confirmMsg)) return
+
+      // ── Step 2: real run ───────────────────────────────────────
+      const res = await fetch(`/api/admin/events/${eventId}/restore-seats`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: false }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        alert(
+          `${data.message}\n\n` +
+          `Detail:\n` +
+          `• SOLD: ${data.summary.soldUpdated} kursi\n` +
+          `• INVITATION: ${data.summary.invitationUpdated} kursi\n` +
+          `• Sudah benar (skip): ${data.summary.alreadyCorrect}\n` +
+          `• Orphan (ga ketemu): ${data.summary.orphanCodes}`
+        )
+        onRefresh?.()
+      } else {
+        alert(data.error || 'Gagal restore kursi')
+      }
+    } catch (err) {
+      console.error('Error restoring seats:', err)
+      alert('Gagal terhubung ke server. Coba lagi.')
+    } finally {
+      setIsRestoringSeats(false)
+    }
+  }
+
   // ─── Toggle applicable day for a zone's PriceCategory ──────────────
   // dayId === null  → set to FULL pass (applicableDayIds = null, valid all days)
   // dayId === string → toggle that day in/out of applicableDayIds
@@ -1193,12 +1271,33 @@ function GaZoneManagementPanel({
       {hasExistingSeats && existingZoneSummary && (
         <Card className="border-gold/20">
           <CardContent className="p-6">
-            <div className="flex items-center gap-2 mb-4">
+            <div className="flex items-center gap-2 mb-4 flex-wrap">
               <Users className="w-4 h-4 text-gold" />
               <h2 className="font-serif text-lg font-semibold text-charcoal">Status Kursi Saat Ini</h2>
               <Badge variant="secondary" className="text-xs bg-emerald-50 text-emerald-700">
                 {existingSeatsCount?.toLocaleString('id-ID')} kursi
               </Badge>
+              <div className="ml-auto flex items-center gap-2">
+                {/* Restore Status Kursi — recover SOLD/INVITATION from transaction history.
+                    Use case: admin klik "Generate Seats" lalu kursi ke-reset semua ke AVAILABLE.
+                    Endpoint baca Transaction.seatCodes (JSON) untuk transaksi PAID, lalu
+                    re-mark kursi yang match jadi SOLD / INVITATION. */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isRestoringSeats}
+                  onClick={handleRestoreSeats}
+                  className="border-blue-400 text-blue-700 hover:bg-blue-50 text-xs"
+                  title="Pulihkan status SOLD/INVITATION dari riwayat transaksi — gunakan kalau habis Generate Seats lalu status kursi ke-reset"
+                >
+                  {isRestoringSeats ? (
+                    <Loader2 className="w-3 h-3 mr-1.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3 h-3 mr-1.5" />
+                  )}
+                  Restore Status Kursi
+                </Button>
+              </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {Object.entries(existingZoneSummary).map(([zoneName, stats]) => {
