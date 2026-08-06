@@ -23,27 +23,32 @@ export async function GET() {
 
       const eventIds = events.map((e) => e.id)
 
-      // Run all queries in parallel for performance
+      // Run queries in parallel — each wrapped in try/catch so a single
+      // table schema mismatch (e.g. Review table) doesn't kill the whole
+      // endpoint. Degraded data is better than 500.
+      const safeQuery = async <T>(label: string, p: Promise<T>, fallback: T): Promise<T> => {
+        try { return await p } catch (err) {
+          console.error(`[admin/events] Query "${label}" failed:`, err)
+          return fallback
+        }
+      }
+
       const [allPriceCategories, allSeats, allShowDates, seatMaps, reviewCounts] = await Promise.all([
-        db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
-        db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } }),
-        db.eventShowDate.findMany({
-          where: { eventId: { in: eventIds } },
-          orderBy: { date: 'asc' },
-        }),
-        (() => {
+        safeQuery('priceCategories', db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }), []),
+        safeQuery('seats', db.seat.findMany({ where: { eventId: { in: eventIds } }, select: { eventId: true, status: true } }), []),
+        safeQuery('showDates', db.eventShowDate.findMany({ where: { eventId: { in: eventIds } }, orderBy: { date: 'asc' } }), []),
+        safeQuery('seatMaps', (() => {
           const seatMapIds = events.map((e) => e.seatMapId).filter((id): id is string => !!id)
           return seatMapIds.length > 0
             ? db.seatMap.findMany({ where: { id: { in: seatMapIds } }, select: { id: true, name: true, seatType: true } })
             : Promise.resolve([])
-        })(),
-        // Review counts per event
-        db.review.groupBy({
+        })(), []),
+        safeQuery('reviews', db.review.groupBy({
           by: ['eventId'],
           where: { eventId: { in: eventIds } },
           _count: { id: true },
           _avg: { rating: true },
-        }),
+        }), []),
       ])
 
       const seatMapMap = new Map(seatMaps.map((sm): [string, typeof sm] => [sm.id, sm]))
@@ -86,7 +91,7 @@ export async function GET() {
   } catch (error) {
     console.error('Error fetching admin events:', error)
     return NextResponse.json(
-      { error: 'Failed to fetch events' },
+      { error: 'Failed to fetch events', detail: String(error) },
       { status: 500 }
     )
   }

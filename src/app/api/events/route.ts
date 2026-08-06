@@ -21,25 +21,29 @@ export async function GET(request: NextRequest) {
 
       const eventIds = events.map((e) => e.id)
 
-      // Run all 4 queries in parallel (added review stats)
+      // Run all 4 queries in parallel — each wrapped in try/catch so a
+      // single failing query doesn't kill the whole endpoint.
+      const safeQuery = async <T>(label: string, p: Promise<T>, fallback: T): Promise<T> => {
+        try { return await p } catch (err) {
+          console.error(`[events] Query "${label}" failed:`, err)
+          return fallback
+        }
+      }
+
       const [allPriceCategories, allSeats, allShowDates, reviewStats] = await Promise.all([
-        db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }),
-        db.seat.groupBy({
+        safeQuery('priceCategories', db.priceCategory.findMany({ where: { eventId: { in: eventIds } } }), []),
+        safeQuery('seats', db.seat.groupBy({
           by: ['eventId', 'status'],
           where: { eventId: { in: eventIds } },
           _count: { status: true },
-        }),
-        db.eventShowDate.findMany({
-          where: { eventId: { in: eventIds } },
-          orderBy: { date: 'asc' },
-        }),
-        // Review stats for completed events
-        db.review.groupBy({
+        }), []),
+        safeQuery('showDates', db.eventShowDate.findMany({ where: { eventId: { in: eventIds } }, orderBy: { date: 'asc' } }), []),
+        safeQuery('reviews', db.review.groupBy({
           by: ['eventId'],
           where: { eventId: { in: eventIds } },
           _avg: { rating: true },
           _count: { id: true },
-        }),
+        }), []),
       ])
 
       // Build a lookup map for review stats
